@@ -2,15 +2,21 @@
   "/api": {
     "target": "http://localhost:9070",
     "secure": false,
-    "changeOrigin": true
+    "changeOrigin": true,
+    "timeout": 60000,
+    "proxyTimeout": 60000
   },
   "/v1": {
     "target": "http://localhost:9070",
     "secure": false,
-    "changeOrigin": true
+    "changeOrigin": true,
+    "timeout": 60000,
+    "proxyTimeout": 60000
   },
   "/healthz": {
     "target": "http://localhost:9070",
-    "secure": false
+    "secure": false,
+    "timeout": 60000,
+    "proxyTimeout": 60000
   }
 }

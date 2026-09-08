@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -216,6 +217,28 @@ func compact(s string) string {
 	return s
 }
 
+// isProbeRetryable 判断探测失败是否属于可重试的瞬时连接错误
+//（unexpected EOF、连接重置、超时等），避免对 4xx/业务错误做无意义重试。
+func isProbeRetryable(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	for _, kw := range []string{"eof", "connection reset", "broken pipe", "connection refused"} {
+		if strings.Contains(msg, kw) {
+			return true
+		}
+	}
+	return false
+}
+
 // handleProbeModels 用给定的 base_url + API Key 探测上游 /v1/models，返回模型 id 列表（去重排序）。
 // 用于管理台「按 Key 查询模型」：Key 支持 env: 引用，脱敏回显值（含省略号）不参与探测。
 func (s *Server) handleProbeModels(w http.ResponseWriter, r *http.Request) {
@@ -238,19 +261,30 @@ func (s *Server) handleProbeModels(w http.ResponseWriter, r *http.Request) {
 	}
 	key := store.Provider{APIKey: req.APIKey}.ResolvedAPIKey()
 
-	ctx, cancel := context.WithTimeout(r.Context(), time.Duration(s.store.Settings().DefaultTimeoutMS)*time.Millisecond)
-	defer cancel()
-	upReq, err := http.NewRequestWithContext(ctx, http.MethodGet, req.BaseURL+"/models", nil)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "invalid base_url: "+err.Error())
-		return
+	// 探测是交互操作，固定 12s 单次超时（不随 default_timeout_ms 漂移）；
+	// 连接类瞬断（unexpected EOF / reset / 超时）自动重试 1 次。
+	probeOnce := func() (*http.Response, error) {
+		ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+		defer cancel()
+		upReq, err := http.NewRequestWithContext(ctx, http.MethodGet, req.BaseURL+"/models", nil)
+		if err != nil {
+			return nil, err
+		}
+		if key != "" {
+			upReq.Header.Set("Authorization", "Bearer "+key)
+		}
+		return http.DefaultClient.Do(upReq)
 	}
-	if key != "" {
-		upReq.Header.Set("Authorization", "Bearer "+key)
+	resp, err := probeOnce()
+	if err != nil && isProbeRetryable(err) {
+		resp, err = probeOnce()
 	}
-	resp, err := http.DefaultClient.Do(upReq)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, "upstream_unavailable", "无法连接上游: "+err.Error())
+		note := ""
+		if strings.Contains(err.Error(), "EOF") || strings.Contains(err.Error(), "reset") {
+			note = "（上游连接被中断，已自动重试 1 次仍失败；请检查网络或本地代理 127.0.0.1:7897 是否稳定）"
+		}
+		writeError(w, http.StatusBadGateway, "upstream_unavailable", "无法连接上游: "+err.Error()+note)
 		return
 	}
 	defer resp.Body.Close()

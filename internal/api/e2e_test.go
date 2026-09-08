@@ -25,7 +25,7 @@ import (
 
 // mockUpstream 是一个假的上游 LLM 服务。
 type mockUpstream struct {
-	mode   string // "ok" | "500" | "stream"
+	mode   string // "ok" | "500" | "400" | "401" | "flaky" | "stream"
 	model  string
 	apiKey string
 	hits   int
@@ -38,6 +38,17 @@ func (m *mockUpstream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	m.bodies = append(m.bodies, string(body))
 	m.apiKey = r.Header.Get("Authorization")
 
+	// flaky：/v1/models 第一次调用直接断开连接（模拟 unexpected EOF），
+	// 第二次起正常返回——用于验证探测的瞬断自动重试。
+	if m.mode == "flaky" && r.URL.Path == "/v1/models" && m.hits == 1 {
+		if hj, ok := w.(http.Hijacker); ok {
+			if conn, _, err := hj.Hijack(); err == nil {
+				_ = conn.Close()
+				return
+			}
+		}
+		panic("hijack unavailable")
+	}
 	if m.mode == "500" {
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = w.Write([]byte(`{"error":"boom"}`))
@@ -905,5 +916,26 @@ func TestProbeProviderModels(t *testing.T) {
 	msg6 := errorMessage(t, resp6.Body)
 	if !strings.Contains(msg6, "拒绝了该 API Key") {
 		t.Fatalf("401 with key msg = %q, want 提示检查 Key", msg6)
+	}
+
+	// flaky：第一次连接被中断（EOF）→ 自动重试后成功
+	flaky := httptest.NewServer(&mockUpstream{mode: "flaky"})
+	defer flaky.Close()
+	resp7 := e.do(t, http.MethodPost, "/api/admin/providers/probe",
+		fmt.Sprintf(`{"base_url":%q}`, flaky.URL+"/v1"), e.adminHeaders())
+	defer resp7.Body.Close()
+	if resp7.StatusCode != http.StatusOK {
+		t.Fatalf("flaky: status = %d, want 200 after retry", resp7.StatusCode)
+	}
+	var flakyPayload struct {
+		Models []struct {
+			ID string `json:"id"`
+		} `json:"models"`
+	}
+	if err := json.NewDecoder(resp7.Body).Decode(&flakyPayload); err != nil {
+		t.Fatalf("flaky decode: %v", err)
+	}
+	if len(flakyPayload.Models) != 2 {
+		t.Fatalf("flaky models = %v, want 2 after retry", flakyPayload.Models)
 	}
 }
