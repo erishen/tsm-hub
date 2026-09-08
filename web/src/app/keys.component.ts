@@ -29,7 +29,7 @@ import { ApiKey, Quota } from './models';
         Prefix: <span class="mono">{{ justCreated.prefix }}</span>
       </div>
       <div style="margin-top:12px">
-        <button (click)="copy(justCreated.key)">复制</button>
+        <button class="primary" (click)="copy(justCreated.key)">{{ copied() ? '已复制 ✓' : '复制' }}</button>
         <button (click)="justCreated = null">我已保存</button>
       </div>
     </div>
@@ -118,6 +118,7 @@ export class KeysComponent implements OnInit {
   readonly error = signal('');
   readonly creating = signal(false);
   readonly saving = signal(false);
+  readonly copied = signal(false);
   justCreated: { id: string; key: string; prefix: string } | null = null;
 
   readonly compact = compact;
@@ -200,7 +201,31 @@ export class KeysComponent implements OnInit {
   }
 
   copy(text: string): void {
-    navigator.clipboard?.writeText(text);
+    const done = (ok: boolean) => {
+      this.copied.set(ok);
+      setTimeout(() => this.copied.set(false), 2000);
+    };
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).then(() => done(true), () => this.fallbackCopy(text, done));
+    } else {
+      this.fallbackCopy(text, done);
+    }
+  }
+
+  private fallbackCopy(text: string, done: (ok: boolean) => void): void {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      done(true);
+    } catch {
+      done(false);
+    }
   }
 
   quotaText(q?: Quota): string {
