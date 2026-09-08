@@ -221,6 +221,7 @@ func compact(s string) string {
 
 // handleProviderBalances 并行查询所有 Provider 已存 Key 的账户余额/额度，
 // 供独立额度页面使用；无 Key 或查询失败不阻塞其余项。
+// mock-local（一键 Mock 联调）无真实额度概念，直接排除。
 func (s *Server) handleProviderBalances(w http.ResponseWriter, r *http.Request) {
 	provs := s.store.ListProviders()
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
@@ -232,13 +233,22 @@ func (s *Server) handleProviderBalances(w http.ResponseWriter, r *http.Request) 
 		Balance map[string]any `json:"balance,omitempty"`
 		Error   string         `json:"error,omitempty"`
 	}
-	out := make([]item, len(provs))
+	out := make([]item, 0, len(provs))
+	for _, p := range provs {
+		if p.ID == "mock-local" {
+			continue
+		}
+		out = append(out, item{ID: p.ID, Name: p.Name})
+	}
 	var wg sync.WaitGroup
-	for i, p := range provs {
+	for i := range out {
+		p, ok := s.store.GetProvider(out[i].ID)
+		if !ok {
+			continue
+		}
 		wg.Add(1)
 		go func(i int, p store.Provider) {
 			defer wg.Done()
-			out[i] = item{ID: p.ID, Name: p.Name}
 			key := p.ResolvedAPIKey()
 			if key == "" {
 				out[i].Error = "no_key"

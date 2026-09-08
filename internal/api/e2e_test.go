@@ -317,6 +317,12 @@ func TestProviderBalances(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("upsert p2: %v", err)
 	}
+	// mock-local（一键 Mock 联调）不应出现在额度列表
+	if err := e.store.UpsertProvider(store.Provider{
+		ID: "mock-local", Name: "Mock 本地联调", BaseURL: e.okURL + "/v1", Models: []string{"mock-model"},
+	}); err != nil {
+		t.Fatalf("upsert mock-local: %v", err)
+	}
 
 	resp := e.do(t, http.MethodGet, "/api/admin/providers/balances", "", e.adminHeaders())
 	defer resp.Body.Close()
@@ -349,6 +355,9 @@ func TestProviderBalances(t *testing.T) {
 		Error string `json:"error"`
 	}
 	for i := range payload.Balances {
+		if payload.Balances[i].ID == "mock-local" {
+			t.Fatalf("mock-local should be excluded from balances")
+		}
 		switch payload.Balances[i].ID {
 		case "bal-p1":
 			p1 = &payload.Balances[i]
