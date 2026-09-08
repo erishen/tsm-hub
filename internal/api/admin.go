@@ -272,7 +272,14 @@ func (s *Server) handleProbeModels(w http.ResponseWriter, r *http.Request) {
 	}
 	var payload struct {
 		Data []struct {
-			ID string `json:"id"`
+			ID             string `json:"id"`
+			ContextLength  int64  `json:"context_length"`
+			IsFree         *bool  `json:"is_free"`
+			Free           *bool  `json:"free"`
+			Pricing        *struct {
+				Prompt     string `json:"prompt"`
+				Completion string `json:"completion"`
+			} `json:"pricing"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(body, &payload); err != nil {
@@ -280,16 +287,34 @@ func (s *Server) handleProbeModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	seen := map[string]bool{}
-	var models []string
+	out := make([]map[string]any, 0, len(payload.Data))
 	for _, m := range payload.Data {
 		id := strings.TrimSpace(m.ID)
-		if id != "" && !seen[id] {
-			seen[id] = true
-			models = append(models, id)
+		if id == "" || seen[id] {
+			continue
 		}
+		seen[id] = true
+		info := map[string]any{"id": id}
+		if m.ContextLength > 0 {
+			info["context_length"] = m.ContextLength
+		}
+		// 免费判定：显式 is_free/free 字段，或 pricing 全 0。
+		free := false
+		switch {
+		case m.IsFree != nil:
+			free = *m.IsFree
+		case m.Free != nil:
+			free = *m.Free
+		case m.Pricing != nil:
+			free = m.Pricing.Prompt == "0" && m.Pricing.Completion == "0"
+		}
+		if free {
+			info["free"] = true
+		}
+		out = append(out, info)
 	}
-	sort.Strings(models)
-	writeJSON(w, http.StatusOK, map[string]any{"models": models})
+	sort.Slice(out, func(i, j int) bool { return out[i]["id"].(string) < out[j]["id"].(string) })
+	writeJSON(w, http.StatusOK, map[string]any{"models": out})
 }
 
 func (s *Server) handleUpsertProvider(w http.ResponseWriter, r *http.Request) {

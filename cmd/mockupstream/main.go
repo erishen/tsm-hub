@@ -27,8 +27,8 @@ func main() {
 		writeJSON(w, map[string]any{
 			"object": "list",
 			"data": []any{
-				map[string]any{"id": "mock-model", "object": "model", "owned_by": "mock"},
-				map[string]any{"id": "mock-extra", "object": "model", "owned_by": "mock"},
+				map[string]any{"id": "mock-model", "object": "model", "owned_by": "mock", "context_length": 131072},
+				map[string]any{"id": "mock-extra", "object": "model", "owned_by": "mock", "context_length": 262144, "is_free": true},
 			},
 		})
 	})

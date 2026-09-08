@@ -55,8 +55,8 @@ func (m *mockUpstream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == "/v1/models" {
 		writeMockJSON(w, map[string]any{"object": "list", "data": []any{
-			map[string]any{"id": "mock-model", "object": "model", "owned_by": "mock"},
-			map[string]any{"id": "mock-extra", "object": "model", "owned_by": "mock"},
+			map[string]any{"id": "mock-model", "object": "model", "owned_by": "mock", "context_length": 131072},
+			map[string]any{"id": "mock-extra", "object": "model", "owned_by": "mock", "context_length": 262144, "is_free": true},
 		}})
 		return
 	}
@@ -831,13 +831,23 @@ func TestProbeProviderModels(t *testing.T) {
 		t.Fatalf("status = %d", resp.StatusCode)
 	}
 	var payload struct {
-		Models []string `json:"models"`
+		Models []struct {
+			ID            string `json:"id"`
+			ContextLength int64  `json:"context_length"`
+			Free          bool   `json:"free"`
+		} `json:"models"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if len(payload.Models) != 2 || payload.Models[0] != "mock-extra" || payload.Models[1] != "mock-model" {
+	if len(payload.Models) != 2 || payload.Models[0].ID != "mock-extra" || payload.Models[1].ID != "mock-model" {
 		t.Fatalf("models = %v, want sorted [mock-extra mock-model]", payload.Models)
+	}
+	if payload.Models[0].ContextLength != 262144 || !payload.Models[0].Free {
+		t.Fatalf("mock-extra meta = %+v, want ctx 262144 free", payload.Models[0])
+	}
+	if payload.Models[1].ContextLength != 131072 || payload.Models[1].Free {
+		t.Fatalf("mock-model meta = %+v, want ctx 131072 not free", payload.Models[1])
 	}
 	if !strings.HasPrefix(e.upOK.apiKey, "Bearer sk-probe") {
 		t.Fatalf("upstream auth = %q, want Bearer sk-probe", e.upOK.apiKey)

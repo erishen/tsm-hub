@@ -126,6 +126,7 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .badge.ok { color: var(--success); border-color: #bbf7d0; background: #f0fdf4; }
 .badge.bad { color: var(--danger); border-color: #fecaca; background: #fef2f2; }
 .badge.warn { color: var(--warn); border-color: #fde68a; background: #fffbeb; }
+.badge.free { color: var(--success); border-color: #bbf7d0; background: #f0fdf4; }
 
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
 .muted { color: var(--muted); }

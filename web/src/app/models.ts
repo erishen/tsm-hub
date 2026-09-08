@@ -106,3 +106,10 @@ export interface ProviderHealth {
   requests: number;
   errors: number;
 }
+
+/** 探测返回的模型元信息：上下文窗口（token 总量）与免费标记。 */
+export interface ProbeModel {
+  id: string;
+  context_length?: number;
+  free?: boolean;
+}

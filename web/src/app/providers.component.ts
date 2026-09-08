@@ -2,7 +2,7 @@ import { Component, OnInit, signal, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from './api.service';
-import { Provider } from './models';
+import { Provider, ProbeModel } from './models';
 
 @Component({
   selector: 'app-providers',
@@ -103,8 +103,10 @@ import { Provider } from './models';
                        style="display:inline-flex;align-items:center;gap:4px;flex-shrink:0;white-space:nowrap;
                               padding:3px 10px;border:1px solid var(--border-color);
                               border-radius:999px;background:rgba(0,0,0,0.025);font-size:12px;cursor:pointer">
-                  <input type="checkbox" [checked]="modelSet.has(m)" (change)="toggleModel(m, $event)" />
-                  <span class="mono">{{ m }}</span>
+                  <input type="checkbox" [checked]="modelSet.has(m.id)" (change)="toggleModel(m.id, $event)" />
+                  <span class="mono">{{ m.id }}</span>
+                  <span class="muted small" *ngIf="m.context_length">{{ fmtCtx(m.context_length) }}</span>
+                  <span class="badge free" *ngIf="m.free">FREE</span>
                 </label>
               </div>
             </div>
@@ -148,7 +150,7 @@ export class ProvidersComponent implements OnInit {
   readonly editing = signal(false);
   readonly saving = signal(false);
   readonly probing = signal(false);
-  readonly probeModels = signal<string[]>([]);
+  readonly probeModels = signal<ProbeModel[]>([]);
   readonly probeError = signal('');
 
   form: Provider = this.blank();
@@ -221,11 +223,19 @@ export class ProvidersComponent implements OnInit {
     this.modelSet = new Set(this.modelsText.split(',').map((s) => s.trim()).filter(Boolean));
   }
 
-  toggleModel(m: string, ev: Event): void {
+  toggleModel(id: string, ev: Event): void {
     this.syncModelSet();
     const cb = ev.target as HTMLInputElement;
-    if (cb.checked) this.modelSet.add(m); else this.modelSet.delete(m);
+    if (cb.checked) this.modelSet.add(id); else this.modelSet.delete(id);
     this.modelsText = [...this.modelSet].join(',');
+  }
+
+  /** 上下文窗口格式化：262144 → 256K，1048576 → 1M。 */
+  fmtCtx(n: number): string {
+    if (!n) return '';
+    if (n >= 1048576) return (n / 1048576).toFixed(n % 1048576 ? 1 : 0) + 'M';
+    if (n >= 1024) return (n / 1024).toFixed(n % 1024 ? 0 : 0) + 'K';
+    return String(n);
   }
 
   cancel(): void {
@@ -236,10 +246,8 @@ export class ProvidersComponent implements OnInit {
     this.saving.set(true);
     const models = this.modelsText.split(',').map((s) => s.trim()).filter(Boolean);
     const payload = { ...this.form, models };
-    // 编辑时若 Key 未改动（脱敏展示），不要覆盖服务端真实值。
-    if (payload.api_key.includes('…')) {
-      delete (payload as Partial<Provider>).api_key;
-    }
+    // 编辑时若 Key 未改动（脱敏展示），原样提交，由后端识别省略号保留真实值；
+    // 不能 delete 该字段——后端按字段缺失解码为空串，会把真实 Key 覆盖掉。
     this.api.saveProvider(payload).subscribe({
       next: () => {
         this.saving.set(false);

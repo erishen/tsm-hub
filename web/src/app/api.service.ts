@@ -3,7 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { Observable, of, forkJoin, throwError } from 'rxjs';
 import { catchError, map, mergeMap } from 'rxjs/operators';
 import {
-  Agg, ApiKey, Overview, Provider, ProviderHealth, Quota, Route, UsageResponse,
+  Agg, ApiKey, Overview, ProbeModel, Provider, ProviderHealth, Quota, Route, UsageResponse,
 } from './models';
 
 const SESSION_KEY = 'llm-router.session';
@@ -70,9 +70,9 @@ export class ApiService {
       .pipe(catchError(this.handleError));
   }
 
-  /** 用 base_url + API Key 探测上游 /v1/models，返回实际支持的模型列表。 */
-  probeModels(body: { base_url: string; api_key?: string }): Observable<{ models: string[] }> {
-    return this.http.post<{ models: string[] }>('/api/admin/providers/probe', body, { headers: this.headers() })
+  /** 用 base_url + API Key 探测上游 /v1/models，返回实际支持的模型列表（含上下文窗口与免费标记）。 */
+  probeModels(body: { base_url: string; api_key?: string }): Observable<{ models: ProbeModel[] }> {
+    return this.http.post<{ models: ProbeModel[] }>('/api/admin/providers/probe', body, { headers: this.headers() })
       .pipe(catchError(this.handleError));
   }
 
@@ -133,7 +133,7 @@ export class ApiService {
         return this.probeModels({ base_url: 'http://localhost:8799/v1' }).pipe(
           catchError(() => of({ models: [] })),
           mergeMap((pr): Observable<{ models: string[]; keys: ApiKey[] }> => {
-            const models = pr.models && pr.models.length ? pr.models : ['mock-model', 'mock-extra'];
+            const models = pr.models && pr.models.length ? pr.models.map((m) => m.id) : ['mock-model', 'mock-extra'];
             const prov$: Observable<unknown> = existing
               ? this.saveProvider({ ...existing, models })
               : this.saveProvider({
