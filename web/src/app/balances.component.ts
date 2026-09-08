@@ -13,12 +13,15 @@ import { Balance, ProviderBalance } from './models';
         <h1>额度</h1>
         <div class="sub">用各 Provider 已保存的 Key 查询账户余额 / token 可使用总量（自动探测，无需每次输入 Key）</div>
       </div>
-      <button class="primary" (click)="load()" [disabled]="loading()">
+      <button class="primary" (click)="load(true)" [disabled]="loading()">
         {{ loading() ? '查询中…' : '刷新' }}
       </button>
     </div>
 
-    <div class="muted" style="margin-bottom:8px" *ngIf="refreshedAt()">更新于 {{ refreshedAt() }}</div>
+    <div class="muted" style="margin-bottom:8px">
+      <ng-container *ngIf="refreshedAt()">更新于 {{ refreshedAt() }}</ng-container>
+      <ng-container *ngIf="cached()">（5 分钟内缓存，点「刷新」强制更新）</ng-container>
+    </div>
     <div class="banner error" *ngIf="error()">{{ error() }}</div>
 
     <table *ngIf="balances().length; else none">
@@ -61,20 +64,22 @@ export class BalancesComponent implements OnInit {
   readonly loading = signal(false);
   readonly error = signal('');
   readonly refreshedAt = signal('');
+  readonly cached = signal(false);
 
   constructor(private api: ApiService) {}
 
   ngOnInit(): void {
-    this.load();
+    this.load(false);
   }
 
-  load(): void {
+  load(force: boolean): void {
     this.loading.set(true);
     this.error.set('');
-    this.api.providerBalances().subscribe({
+    this.api.providerBalances(force).subscribe({
       next: (r) => {
-        this.balances.set(r.balances ?? []);
-        this.refreshedAt.set(new Date().toLocaleTimeString());
+        this.balances.set(r.balances);
+        this.refreshedAt.set(new Date(r.at).toLocaleTimeString());
+        this.cached.set(!force);
         this.loading.set(false);
       },
       error: (e: Error) => {

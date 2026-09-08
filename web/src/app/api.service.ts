@@ -1,7 +1,7 @@
 import { Injectable, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable, of, forkJoin, throwError } from 'rxjs';
-import { catchError, map, mergeMap } from 'rxjs/operators';
+import { catchError, map, mergeMap, tap } from 'rxjs/operators';
 import {
   Agg, ApiKey, Balance, Overview, ProbeModel, Provider, ProviderBalance, ProviderHealth, Quota, Route, UsageResponse,
 } from './models';
@@ -70,10 +70,25 @@ export class ApiService {
       .pipe(catchError(this.handleError));
   }
 
-  /** 批量查询所有 Provider 已存 Key 的账户余额/额度（供额度页使用，无 Key 项标记 no_key）。 */
-  providerBalances(): Observable<{ balances: ProviderBalance[] }> {
+  /** 批量余额缓存：5 分钟内命中直接返回，避免每次进入额度页都查询上游。 */
+  private balancesCache: { data: ProviderBalance[]; at: number } | null = null;
+  private static readonly BALANCES_TTL = 5 * 60 * 1000;
+
+  /** 批量查询所有 Provider 已存 Key 的账户余额/额度（供额度页使用，无 Key 项标记 no_key）。
+   *  force=true 强制绕过缓存（刷新按钮）；返回 at=数据获取时间戳。 */
+  providerBalances(force = false): Observable<{ balances: ProviderBalance[]; at: number }> {
+    const c = this.balancesCache;
+    if (!force && c && Date.now() - c.at < ApiService.BALANCES_TTL) {
+      return of({ balances: c.data, at: c.at });
+    }
     return this.http.get<{ balances: ProviderBalance[] }>('/api/admin/providers/balances', { headers: this.headers() })
-      .pipe(catchError(this.handleError));
+      .pipe(
+        catchError(this.handleError),
+        tap((r) => {
+          this.balancesCache = { data: r.balances ?? [], at: Date.now() };
+        }),
+        map((r) => ({ balances: r.balances ?? [], at: Date.now() })),
+      );
   }
 
   /** 用 base_url + API Key 探测上游 /v1/models，返回模型列表（含上下文窗口、免费标记）与账户余额。 */
