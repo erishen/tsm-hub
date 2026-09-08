@@ -256,6 +256,16 @@ func (s *Server) handleProbeModels(w http.ResponseWriter, r *http.Request) {
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode == http.StatusUnauthorized {
+			if key == "" {
+				writeError(w, http.StatusBadRequest, "probe_failed",
+					"上游要求鉴权但本次探测未携带 API Key（编辑已有 Provider 时 Key 为脱敏值，需重新输入完整 Key 或 env: 引用）；上游返回: "+compact(string(body)))
+			} else {
+				writeError(w, http.StatusBadRequest, "probe_failed",
+					"上游拒绝了该 API Key（401），请检查 Key 是否完整有效；上游返回: "+compact(string(body)))
+			}
+			return
+		}
 		writeError(w, http.StatusBadRequest, "probe_failed",
 			fmt.Sprintf("上游返回 %d: %s", resp.StatusCode, compact(string(body))))
 		return

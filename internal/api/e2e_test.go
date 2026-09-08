@@ -48,6 +48,11 @@ func (m *mockUpstream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"error":{"message":"client bad request"}}`))
 		return
 	}
+	if m.mode == "401" {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":{"message":"Incorrect API key provided","type":"incorrect_api_key_error"}}`))
+		return
+	}
 	if r.URL.Path == "/v1/models" {
 		writeMockJSON(w, map[string]any{"object": "list", "data": []any{
 			map[string]any{"id": "mock-model", "object": "model", "owned_by": "mock"},
@@ -800,6 +805,20 @@ func TestConfigPersisted(t *testing.T) {
 	}
 }
 
+// errorMessage 从 writeError 的响应体中提取 message 字段。
+func errorMessage(t *testing.T, r io.Reader) string {
+	t.Helper()
+	var payload struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(r).Decode(&payload); err != nil {
+		t.Fatalf("decode error payload: %v", err)
+	}
+	return payload.Error.Message
+}
+
 func TestProbeProviderModels(t *testing.T) {
 	e := newEnv(t, "ok")
 	defer e.server.Close()
@@ -850,5 +869,31 @@ func TestProbeProviderModels(t *testing.T) {
 	}
 	if !strings.HasPrefix(e.upOK.apiKey, "Bearer sk-env-val") {
 		t.Fatalf("env upstream auth = %q", e.upOK.apiKey)
+	}
+
+	// 上游 401 + 未携带 Key → 提示需重新输入 Key（而非让用户误以为 Key 无效）
+	unauth := httptest.NewServer(&mockUpstream{mode: "401"})
+	defer unauth.Close()
+	resp5 := e.do(t, http.MethodPost, "/api/admin/providers/probe",
+		fmt.Sprintf(`{"base_url":%q}`, unauth.URL+"/v1"), e.adminHeaders())
+	defer resp5.Body.Close()
+	if resp5.StatusCode != http.StatusBadRequest {
+		t.Fatalf("401 no key: status = %d", resp5.StatusCode)
+	}
+	msg5 := errorMessage(t, resp5.Body)
+	if !strings.Contains(msg5, "未携带 API Key") {
+		t.Fatalf("401 no key msg = %q, want 提示未携带", msg5)
+	}
+
+	// 上游 401 + 携带 Key → 提示检查 Key
+	resp6 := e.do(t, http.MethodPost, "/api/admin/providers/probe",
+		fmt.Sprintf(`{"base_url":%q,"api_key":"sk-wrong"}`, unauth.URL+"/v1"), e.adminHeaders())
+	defer resp6.Body.Close()
+	if resp6.StatusCode != http.StatusBadRequest {
+		t.Fatalf("401 with key: status = %d", resp6.StatusCode)
+	}
+	msg6 := errorMessage(t, resp6.Body)
+	if !strings.Contains(msg6, "拒绝了该 API Key") {
+		t.Fatalf("401 with key msg = %q, want 提示检查 Key", msg6)
 	}
 }

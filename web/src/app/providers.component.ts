@@ -90,6 +90,9 @@ import { Provider } from './models';
                     {{ probing() ? '查询中…' : '按 Key 查询' }}
                   </button>
                 </div>
+                <div class="muted small" *ngIf="form.api_key.includes('…')" style="margin-top:4px">
+                  当前 Key 为脱敏回显值，探测前需重新输入完整 Key（或填 env: 引用）
+                </div>
               </div>
             </div>
             <div class="banner warn" *ngIf="probeError()" style="margin-top:8px">{{ probeError() }}</div>
