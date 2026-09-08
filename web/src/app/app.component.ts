@@ -36,6 +36,7 @@ import { ApiService } from './api.service';
           <a routerLink="/providers" routerLinkActive="active">Providers</a>
           <a routerLink="/routes" routerLinkActive="active">路由表</a>
           <a routerLink="/keys" routerLinkActive="active">Token Keys</a>
+          <a routerLink="/balances" routerLinkActive="active">额度</a>
           <a routerLink="/usage" routerLinkActive="active">用量</a>
           <a routerLink="/playground" routerLinkActive="active">测试</a>
         </nav>

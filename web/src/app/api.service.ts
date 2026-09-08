@@ -3,7 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { Observable, of, forkJoin, throwError } from 'rxjs';
 import { catchError, map, mergeMap } from 'rxjs/operators';
 import {
-  Agg, ApiKey, Balance, Overview, ProbeModel, Provider, ProviderHealth, Quota, Route, UsageResponse,
+  Agg, ApiKey, Balance, Overview, ProbeModel, Provider, ProviderBalance, ProviderHealth, Quota, Route, UsageResponse,
 } from './models';
 
 const SESSION_KEY = 'llm-router.session';
@@ -67,6 +67,12 @@ export class ApiService {
 
   deleteProvider(id: string): Observable<unknown> {
     return this.http.delete(`/api/admin/providers/${encodeURIComponent(id)}`, { headers: this.headers() })
+      .pipe(catchError(this.handleError));
+  }
+
+  /** 批量查询所有 Provider 已存 Key 的账户余额/额度（供额度页使用，无 Key 项标记 no_key）。 */
+  providerBalances(): Observable<{ balances: ProviderBalance[] }> {
+    return this.http.get<{ balances: ProviderBalance[] }>('/api/admin/providers/balances', { headers: this.headers() })
       .pipe(catchError(this.handleError));
   }
 

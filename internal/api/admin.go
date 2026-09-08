@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/erishen/llm-router/internal/auth"
@@ -24,6 +25,7 @@ func (s *Server) adminMux() http.Handler {
 	m := http.NewServeMux()
 	m.HandleFunc("GET /api/admin/overview", s.admin(s.handleOverview))
 	m.HandleFunc("GET /api/admin/providers", s.admin(s.handleListProviders))
+	m.HandleFunc("GET /api/admin/providers/balances", s.admin(s.handleProviderBalances))
 	m.HandleFunc("POST /api/admin/providers", s.admin(s.handleUpsertProvider))
 	m.HandleFunc("POST /api/admin/providers/probe", s.admin(s.handleProbeModels))
 	m.HandleFunc("DELETE /api/admin/providers/{id}", s.admin(s.handleDeleteProvider))
@@ -215,6 +217,43 @@ func compact(s string) string {
 		return s[:300] + "…"
 	}
 	return s
+}
+
+// handleProviderBalances 并行查询所有 Provider 已存 Key 的账户余额/额度，
+// 供独立额度页面使用；无 Key 或查询失败不阻塞其余项。
+func (s *Server) handleProviderBalances(w http.ResponseWriter, r *http.Request) {
+	provs := s.store.ListProviders()
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+
+	type item struct {
+		ID      string         `json:"id"`
+		Name    string         `json:"name"`
+		Balance map[string]any `json:"balance,omitempty"`
+		Error   string         `json:"error,omitempty"`
+	}
+	out := make([]item, len(provs))
+	var wg sync.WaitGroup
+	for i, p := range provs {
+		wg.Add(1)
+		go func(i int, p store.Provider) {
+			defer wg.Done()
+			out[i] = item{ID: p.ID, Name: p.Name}
+			key := p.ResolvedAPIKey()
+			if key == "" {
+				out[i].Error = "no_key"
+				return
+			}
+			bal := s.probeBalance(ctx, strings.TrimRight(p.BaseURL, "/"), key)
+			if bal == nil {
+				out[i].Error = "unavailable"
+				return
+			}
+			out[i].Balance = bal
+		}(i, p)
+	}
+	wg.Wait()
+	writeJSON(w, http.StatusOK, map[string]any{"balances": out})
 }
 
 // isProbeRetryable 判断探测失败是否属于可重试的瞬时连接错误
@@ -443,11 +482,12 @@ func parseDeepSeekBalance(body []byte) map[string]any {
 }
 
 // parseOpenAISubscription: {"hard_limit_usd":120,"system_hard_limit_usd":120}
+// 部分聚合平台（如 agnes）返回 1e8 量级占位值，视为未提供真实额度。
 func parseOpenAISubscription(body []byte) map[string]any {
 	var raw struct {
 		HardLimitUSD float64 `json:"hard_limit_usd"`
 	}
-	if err := json.Unmarshal(body, &raw); err != nil || raw.HardLimitUSD == 0 {
+	if err := json.Unmarshal(body, &raw); err != nil || raw.HardLimitUSD <= 0 || raw.HardLimitUSD >= 1e7 {
 		return nil
 	}
 	return map[string]any{"kind": "openai", "hard_limit_usd": raw.HardLimitUSD}

@@ -8,12 +8,14 @@ import { RoutesComponent } from './app/routes.component';
 import { KeysComponent } from './app/keys.component';
 import { UsageComponent } from './app/usage.component';
 import { PlaygroundComponent } from './app/playground.component';
+import { BalancesComponent } from './app/balances.component';
 
 const routes: Routes = [
   { path: '', component: DashboardComponent },
   { path: 'providers', component: ProvidersComponent },
   { path: 'routes', component: RoutesComponent },
   { path: 'keys', component: KeysComponent },
+  { path: 'balances', component: BalancesComponent },
   { path: 'usage', component: UsageComponent },
   { path: 'playground', component: PlaygroundComponent },
   { path: '**', redirectTo: '' },

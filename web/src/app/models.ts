@@ -127,3 +127,11 @@ export interface Balance {
   hard_limit_usd?: number;
   total_usage_usd?: number;
 }
+
+/** 额度页：单个 Provider 的余额查询结果（error: no_key | unavailable）。 */
+export interface ProviderBalance {
+  id: string;
+  name: string;
+  balance?: Balance;
+  error?: string;
+}

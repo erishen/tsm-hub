@@ -300,6 +300,73 @@ func TestHealthzReflectsProviderHealth(t *testing.T) {
 	}
 }
 
+// TestProviderBalances 验证批量余额查询：带 Key 的 Provider 返回余额，
+// 无 Key 的返回 no_key，失败项不阻塞其余项。
+func TestProviderBalances(t *testing.T) {
+	e := newEnv(t, "ok")
+	defer e.server.Close()
+
+	if err := e.store.UpsertProvider(store.Provider{
+		ID: "bal-p1", Name: "Bal Provider", BaseURL: e.okURL + "/v1",
+		APIKey: "sk-balance", Models: []string{"mock-model"},
+	}); err != nil {
+		t.Fatalf("upsert p1: %v", err)
+	}
+	if err := e.store.UpsertProvider(store.Provider{
+		ID: "bal-p2", Name: "No Key", BaseURL: e.okURL + "/v1", Models: []string{"mock-model"},
+	}); err != nil {
+		t.Fatalf("upsert p2: %v", err)
+	}
+
+	resp := e.do(t, http.MethodGet, "/api/admin/providers/balances", "", e.adminHeaders())
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	var payload struct {
+		Balances []struct {
+			ID      string `json:"id"`
+			Balance *struct {
+				Kind      string  `json:"kind"`
+				Available float64 `json:"available"`
+				Voucher   float64 `json:"voucher"`
+				Cash      float64 `json:"cash"`
+			} `json:"balance"`
+			Error string `json:"error"`
+		} `json:"balances"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	var p1, p2 *struct {
+		ID      string `json:"id"`
+		Balance *struct {
+			Kind      string  `json:"kind"`
+			Available float64 `json:"available"`
+			Voucher   float64 `json:"voucher"`
+			Cash      float64 `json:"cash"`
+		} `json:"balance"`
+		Error string `json:"error"`
+	}
+	for i := range payload.Balances {
+		switch payload.Balances[i].ID {
+		case "bal-p1":
+			p1 = &payload.Balances[i]
+		case "bal-p2":
+			p2 = &payload.Balances[i]
+		}
+	}
+	if p1 == nil || p1.Balance == nil || p1.Balance.Kind != "moonshot" || p1.Balance.Available != 14.99736 {
+		t.Fatalf("p1 balance = %+v, want moonshot 14.99736", p1)
+	}
+	if p1.Balance.Voucher != 14.99736 || p1.Balance.Cash != 0 {
+		t.Fatalf("p1 free = %+v, want voucher only", p1.Balance)
+	}
+	if p2 == nil || p2.Error != "no_key" {
+		t.Fatalf("p2 = %+v, want no_key", p2)
+	}
+}
+
 // TestProviderEnvAPIKeyUsedUpstream 验证 api_key 支持 env:VAR 引用：
 // 上游收到的是环境变量解析后的真实 Key，管理台回显保留 env 引用本身（不脱敏、不泄露）。
 func TestProviderEnvAPIKeyUsedUpstream(t *testing.T) {
