@@ -66,7 +66,8 @@ func (m *mockUpstream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == "/v1/models" {
 		writeMockJSON(w, map[string]any{"object": "list", "data": []any{
-			map[string]any{"id": "mock-model", "object": "model", "owned_by": "mock", "context_length": 131072},
+			map[string]any{"id": "mock-model", "object": "model", "owned_by": "mock", "context_length": 131072,
+				"pricing": map[string]any{"prompt": "0.45", "completion": "0.90"}},
 			map[string]any{"id": "mock-extra", "object": "model", "owned_by": "mock", "context_length": 262144, "is_free": true},
 		}})
 		return
@@ -979,6 +980,10 @@ func TestProbeProviderModels(t *testing.T) {
 			ID            string `json:"id"`
 			ContextLength int64  `json:"context_length"`
 			Free          bool   `json:"free"`
+			Pricing       *struct {
+				Prompt     string `json:"prompt"`
+				Completion string `json:"completion"`
+			} `json:"pricing"`
 		} `json:"models"`
 		Balance *struct {
 			Kind      string  `json:"kind"`
@@ -998,6 +1003,9 @@ func TestProbeProviderModels(t *testing.T) {
 	}
 	if payload.Models[1].ContextLength != 131072 || payload.Models[1].Free {
 		t.Fatalf("mock-model meta = %+v, want ctx 131072 not free", payload.Models[1])
+	}
+	if payload.Models[1].Pricing == nil || payload.Models[1].Pricing.Prompt != "0.45" || payload.Models[1].Pricing.Completion != "0.90" {
+		t.Fatalf("mock-model pricing = %+v, want 0.45/0.90", payload.Models[1].Pricing)
 	}
 	if !strings.HasPrefix(e.upOK.apiKey, "Bearer sk-probe") {
 		t.Fatalf("upstream auth = %q, want Bearer sk-probe", e.upOK.apiKey)

@@ -382,6 +382,13 @@ func (s *Server) handleProbeModels(w http.ResponseWriter, r *http.Request) {
 		if m.ContextLength > 0 {
 			info["context_length"] = m.ContextLength
 		}
+		// 单价（$/1M tokens）：OpenRouter 类平台在 models 响应带 pricing 字段
+		if m.Pricing != nil {
+			info["pricing"] = map[string]string{
+				"prompt":     m.Pricing.Prompt,
+				"completion": m.Pricing.Completion,
+			}
+		}
 		// 免费判定：显式 is_free/free 字段，或 pricing 全 0。
 		free := false
 		switch {

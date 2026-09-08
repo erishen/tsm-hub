@@ -112,6 +112,8 @@ export interface ProbeModel {
   id: string;
   context_length?: number;
   free?: boolean;
+  /** 单价（$/1M tokens），OpenRouter 类平台在 models 响应提供。 */
+  pricing?: { prompt: string; completion: string };
 }
 
 /** 探测返回的账户余额/额度（token 可使用总量），格式因上游而异。 */

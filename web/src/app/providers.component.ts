@@ -111,6 +111,7 @@ import { Balance, Provider, ProbeModel } from './models';
                   <input type="checkbox" [checked]="modelSet.has(m.id)" (change)="toggleModel(m.id, $event)" />
                   <span class="mono">{{ m.id }}</span>
                   <span class="muted small" *ngIf="m.context_length">{{ fmtCtx(m.context_length) }}</span>
+                  <span class="muted small" *ngIf="m.pricing" title="输入 / 输出（$/1M tokens）">$ {{ m.pricing.prompt }}/{{ m.pricing.completion }}M</span>
                   <span class="badge free" *ngIf="m.free">FREE</span>
                 </label>
               </div>
