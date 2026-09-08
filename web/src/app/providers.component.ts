@@ -2,7 +2,7 @@ import { Component, OnInit, signal, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from './api.service';
-import { Provider, ProbeModel } from './models';
+import { Balance, Provider, ProbeModel } from './models';
 
 @Component({
   selector: 'app-providers',
@@ -96,6 +96,11 @@ import { Provider, ProbeModel } from './models';
               </div>
             </div>
             <div class="banner warn" *ngIf="probeError()" style="margin-top:8px">{{ probeError() }}</div>
+            <div class="banner" *ngIf="balance()" style="margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              <span>额度：<strong>{{ balanceText(balance()!) }}</strong></span>
+              <span class="badge free" *ngIf="balance()!.kind === 'moonshot' && balance()!.voucher && !balance()!.cash">全赠送额度</span>
+              <span class="badge ok" *ngIf="balance()!.kind === 'deepseek' && balance()!.granted">含赠送</span>
+            </div>
             <div *ngIf="probeModels().length" style="margin-top:10px">
               <div class="muted small" style="margin-bottom:6px">上游实际提供的模型（多选，勾选自动写入上方输入框）</div>
               <div style="display:flex;flex-wrap:wrap;gap:6px;max-height:150px;overflow-y:auto">
@@ -152,6 +157,7 @@ export class ProvidersComponent implements OnInit {
   readonly probing = signal(false);
   readonly probeModels = signal<ProbeModel[]>([]);
   readonly probeError = signal('');
+  readonly balance = signal<Balance | null>(null);
 
   form: Provider = this.blank();
   modelsText = '';
@@ -188,6 +194,7 @@ export class ProvidersComponent implements OnInit {
     this.modelSet = new Set();
     this.probeModels.set([]);
     this.probeError.set('');
+    this.balance.set(null);
     this.editing.set(true);
   }
 
@@ -197,6 +204,7 @@ export class ProvidersComponent implements OnInit {
     this.modelSet = new Set(p.models || []);
     this.probeModels.set([]);
     this.probeError.set('');
+    this.balance.set(null);
     this.editing.set(true);
   }
 
@@ -210,6 +218,7 @@ export class ProvidersComponent implements OnInit {
       next: (r) => {
         this.probing.set(false);
         this.probeModels.set(r.models ?? []);
+        this.balance.set(r.balance ?? null);
         this.syncModelSet();
       },
       error: (e: Error) => {
@@ -236,6 +245,24 @@ export class ProvidersComponent implements OnInit {
     if (n >= 1048576) return (n / 1048576).toFixed(n % 1048576 ? 1 : 0) + 'M';
     if (n >= 1024) return (n / 1024).toFixed(n % 1024 ? 0 : 0) + 'K';
     return String(n);
+  }
+
+  /** 账户额度（token 可使用总量）文案，按上游格式渲染。 */
+  balanceText(b: Balance): string {
+    switch (b.kind) {
+      case 'moonshot':
+        return `可用 ¥${b.available?.toFixed(2)} · 券 ¥${b.voucher?.toFixed(2)} · 现金 ¥${b.cash?.toFixed(2)}`;
+      case 'deepseek': {
+        const cur = b.currency || '';
+        return `总余额 ${b.total?.toFixed(2)}${cur} · 赠送 ${b.granted?.toFixed(2)}${cur} · 充值 ${b.topped_up?.toFixed(2)}${cur}`;
+      }
+      case 'openai':
+        return b.hard_limit_usd
+          ? `订阅上限 $${b.hard_limit_usd}`
+          : `已用 $${b.total_usage_usd?.toFixed(2)}`;
+      default:
+        return '';
+    }
   }
 
   cancel(): void {

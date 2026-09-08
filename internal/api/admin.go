@@ -348,7 +348,120 @@ func (s *Server) handleProbeModels(w http.ResponseWriter, r *http.Request) {
 		out = append(out, info)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i]["id"].(string) < out[j]["id"].(string) })
-	writeJSON(w, http.StatusOK, map[string]any{"models": out})
+	result := map[string]any{"models": out}
+	if bal := s.probeBalance(r.Context(), req.BaseURL, key); bal != nil {
+		result["balance"] = bal
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// probeBalance 尝试用同一 Key 查询上游账户余额/额度（token 可使用总量），
+// 依次探测 Moonshot / DeepSeek / OpenAI 三种格式，命中即返回；失败静默。
+func (s *Server) probeBalance(ctx context.Context, baseURL, key string) map[string]any {
+	if key == "" {
+		return nil
+	}
+	type probe struct {
+		path  string
+		parse func([]byte) map[string]any
+	}
+	probes := []probe{
+		{"/users/me/balance", parseMoonshotBalance},
+		{"/user/balance", parseDeepSeekBalance},
+		{"/dashboard/billing/subscription", parseOpenAISubscription},
+		{"/dashboard/billing/usage", parseOpenAIUsage},
+	}
+	for _, p := range probes {
+		ctx2, cancel := context.WithTimeout(ctx, 3*time.Second)
+		upReq, err := http.NewRequestWithContext(ctx2, http.MethodGet, baseURL+p.path, nil)
+		if err != nil {
+			cancel()
+			continue
+		}
+		upReq.Header.Set("Authorization", "Bearer "+key)
+		resp, err := http.DefaultClient.Do(upReq)
+		cancel()
+		if err != nil || resp.StatusCode != http.StatusOK {
+			if resp != nil {
+				resp.Body.Close()
+			}
+			continue
+		}
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		resp.Body.Close()
+		if m := p.parse(body); m != nil {
+			return m
+		}
+	}
+	return nil
+}
+
+// parseMoonshotBalance: {"data":{"available_balance":14.99,"voucher_balance":14.99,"cash_balance":0}}
+func parseMoonshotBalance(body []byte) map[string]any {
+	var raw struct {
+		Data struct {
+			Available float64 `json:"available_balance"`
+			Voucher   float64 `json:"voucher_balance"`
+			Cash      float64 `json:"cash_balance"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil || raw.Data.Available == 0 && raw.Data.Voucher == 0 && raw.Data.Cash == 0 {
+		return nil
+	}
+	return map[string]any{
+		"kind":     "moonshot",
+		"available": raw.Data.Available,
+		"voucher":   raw.Data.Voucher,
+		"cash":      raw.Data.Cash,
+	}
+}
+
+// parseDeepSeekBalance: {"balance_infos":[{"currency":"CNY","total_balance":"114.5","granted_balance":"14.5","topped_up_balance":"100"}]}
+func parseDeepSeekBalance(body []byte) map[string]any {
+	var raw struct {
+		BalanceInfos []struct {
+			Currency       string  `json:"currency"`
+			TotalBalance   float64 `json:"total_balance"`
+			GrantedBalance float64 `json:"granted_balance"`
+			ToppedUp       float64 `json:"topped_up_balance"`
+		} `json:"balance_infos"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil || len(raw.BalanceInfos) == 0 {
+		return nil
+	}
+	b := raw.BalanceInfos[0]
+	if b.TotalBalance == 0 && b.GrantedBalance == 0 && b.ToppedUp == 0 {
+		return nil
+	}
+	return map[string]any{
+		"kind":      "deepseek",
+		"currency":  b.Currency,
+		"total":     b.TotalBalance,
+		"granted":   b.GrantedBalance,
+		"topped_up": b.ToppedUp,
+	}
+}
+
+// parseOpenAISubscription: {"hard_limit_usd":120,"system_hard_limit_usd":120}
+func parseOpenAISubscription(body []byte) map[string]any {
+	var raw struct {
+		HardLimitUSD float64 `json:"hard_limit_usd"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil || raw.HardLimitUSD == 0 {
+		return nil
+	}
+	return map[string]any{"kind": "openai", "hard_limit_usd": raw.HardLimitUSD}
+}
+
+// parseOpenAIUsage: {"total_usage":123.45}（单位 0.01 USD）
+func parseOpenAIUsage(body []byte) map[string]any {
+	var raw struct {
+		TotalUsage float64 `json:"total_usage"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil || raw.TotalUsage == 0 {
+		return nil
+	}
+	return map[string]any{"kind": "openai", "total_usage_usd": raw.TotalUsage / 100}
 }
 
 func (s *Server) handleUpsertProvider(w http.ResponseWriter, r *http.Request) {

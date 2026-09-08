@@ -113,3 +113,17 @@ export interface ProbeModel {
   context_length?: number;
   free?: boolean;
 }
+
+/** 探测返回的账户余额/额度（token 可使用总量），格式因上游而异。 */
+export interface Balance {
+  kind: 'moonshot' | 'deepseek' | 'openai';
+  available?: number;
+  voucher?: number;
+  cash?: number;
+  currency?: string;
+  total?: number;
+  granted?: number;
+  topped_up?: number;
+  hard_limit_usd?: number;
+  total_usage_usd?: number;
+}

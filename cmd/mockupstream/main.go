@@ -32,6 +32,19 @@ func main() {
 			},
 		})
 	})
+	mux.HandleFunc("/v1/users/me/balance", func(w http.ResponseWriter, r *http.Request) {
+		// Moonshot 风格余额：模拟"全赠送额度"（券余额>0、现金=0 → 免费额度）
+		writeJSON(w, map[string]any{
+			"code": 0,
+			"data": map[string]any{
+				"available_balance": 14.99736,
+				"voucher_balance":   14.99736,
+				"cash_balance":      0,
+			},
+			"scode":  "0x0",
+			"status": true,
+		})
+	})
 	mux.HandleFunc("/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
 		var req map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&req)

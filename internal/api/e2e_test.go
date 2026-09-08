@@ -71,6 +71,18 @@ func (m *mockUpstream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}})
 		return
 	}
+	if r.URL.Path == "/v1/users/me/balance" {
+		writeMockJSON(w, map[string]any{
+			"code": 0,
+			"data": map[string]any{
+				"available_balance": 14.99736,
+				"voucher_balance":   14.99736,
+				"cash_balance":      0,
+			},
+			"status": true,
+		})
+		return
+	}
 	var req map[string]any
 	_ = json.Unmarshal(body, &req)
 	m.model, _ = req["model"].(string)
@@ -847,6 +859,12 @@ func TestProbeProviderModels(t *testing.T) {
 			ContextLength int64  `json:"context_length"`
 			Free          bool   `json:"free"`
 		} `json:"models"`
+		Balance *struct {
+			Kind      string  `json:"kind"`
+			Available float64 `json:"available"`
+			Voucher   float64 `json:"voucher"`
+			Cash      float64 `json:"cash"`
+		} `json:"balance"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		t.Fatalf("decode: %v", err)
@@ -862,6 +880,13 @@ func TestProbeProviderModels(t *testing.T) {
 	}
 	if !strings.HasPrefix(e.upOK.apiKey, "Bearer sk-probe") {
 		t.Fatalf("upstream auth = %q, want Bearer sk-probe", e.upOK.apiKey)
+	}
+	// 余额/额度：探测带 key 时返回 Moonshot 风格余额（全赠送额度）
+	if payload.Balance == nil || payload.Balance.Kind != "moonshot" {
+		t.Fatalf("balance = %+v, want moonshot", payload.Balance)
+	}
+	if payload.Balance.Available != 14.99736 || payload.Balance.Voucher != 14.99736 || payload.Balance.Cash != 0 {
+		t.Fatalf("balance values = %+v, want available 14.99736 voucher 14.99736 cash 0", payload.Balance)
 	}
 
 	// 上游 500 → 400 + 可读错误
