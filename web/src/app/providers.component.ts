@@ -98,10 +98,10 @@ import { Provider } from './models';
             <div class="banner warn" *ngIf="probeError()" style="margin-top:8px">{{ probeError() }}</div>
             <div *ngIf="probeModels().length" style="margin-top:10px">
               <div class="muted small" style="margin-bottom:6px">上游实际提供的模型（多选，勾选自动写入上方输入框）</div>
-              <div style="display:flex;flex-wrap:wrap;gap:6px">
+              <div style="display:flex;flex-wrap:wrap;gap:6px;max-height:150px;overflow-y:auto">
                 <label *ngFor="let m of probeModels()"
-                       style="display:inline-flex;align-items:center;gap:4px;
-                              padding:4px 10px;border:1px solid var(--border-color);
+                       style="display:inline-flex;align-items:center;gap:4px;flex-shrink:0;white-space:nowrap;
+                              padding:3px 10px;border:1px solid var(--border-color);
                               border-radius:999px;background:rgba(0,0,0,0.025);font-size:12px;cursor:pointer">
                   <input type="checkbox" [checked]="modelSet.has(m)" (change)="toggleModel(m, $event)" />
                   <span class="mono">{{ m }}</span>
