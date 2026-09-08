@@ -1,4 +1,4 @@
-import { Component, OnInit, signal } from '@angular/core';
+import { Component, OnDestroy, OnInit, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from './api.service';
@@ -67,7 +67,10 @@ const DRAFT_KEY = 'llm-router.playground.draft';
         <div class="form-row">
           <div>
             <label>模型</label>
-            <input [(ngModel)]="model" list="pg-models" placeholder="gpt-4o 或路由别名" />
+            <div style="display:flex;gap:8px">
+              <input [(ngModel)]="model" list="pg-models" placeholder="gpt-4o 或路由别名" style="flex:1" />
+              <button type="button" class="small" (click)="loadModels()" title="重新拉取 Providers 与路由的模型列表">刷新</button>
+            </div>
             <datalist id="pg-models">
               <option *ngFor="let m of models()" [value]="m"></option>
             </datalist>
@@ -198,12 +201,20 @@ export class PlaygroundComponent implements OnInit {
   readonly draftSaved = signal(false);
 
   private lastUsage: any = null;
+  private focusHandler: () => void = () => {};
 
   constructor(public api: ApiService) {}
 
   ngOnInit(): void {
     this.restoreDraft();
     this.loadModels();
+    // 多标签场景：切回本页面时自动刷新模型列表（避免看到旧数据）
+    this.focusHandler = () => this.loadModels();
+    window.addEventListener('focus', this.focusHandler);
+  }
+
+  ngOnDestroy(): void {
+    window.removeEventListener('focus', this.focusHandler);
   }
 
   loadModels(): void {
