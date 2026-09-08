@@ -80,7 +80,7 @@ import { ApiKey, Quota } from './models';
           <tr>
             <th>名称 / Prefix</th><th>状态</th><th>模型</th>
             <th class="num">用量 Tokens</th><th class="num">成本</th>
-            <th class="num">RPM</th><th>配额</th><th>操作</th>
+            <th class="num">RPM</th><th>剩余 / 配额</th><th>操作</th>
           </tr>
         </thead>
         <tbody>
@@ -101,7 +101,7 @@ import { ApiKey, Quota } from './models';
             <td class="num">{{ compact(k.usage?.total_tokens ?? 0) }}</td>
             <td class="num">{{ usd(k.usage?.cost_usd ?? 0) }}</td>
             <td class="num">{{ k.rpm_current }}/{{ k.quota.rpm || '∞' }}</td>
-            <td class="muted" style="font-size:12px">{{ quotaText(k.quota) }}</td>
+            <td class="muted" style="font-size:12px">{{ quotaRemain(k) }}</td>
             <td>
               <button class="small" (click)="toggle(k)">{{ k.enabled ? '停用' : '启用' }}</button>
               <button class="small danger" (click)="remove(k)">删除</button>
@@ -236,5 +236,33 @@ export class KeysComponent implements OnInit {
     if (q.daily_tokens) parts.push(`${compact(q.daily_tokens)}/天`);
     if (q.rpm) parts.push(`${q.rpm}/min`);
     return parts.length ? parts.join(' · ') : '不限';
+  }
+
+  /** 剩余 / 配额：以 usage 聚合减去配额上限展示，未设配额显示不限。 */
+  quotaRemain(k: ApiKey): string {
+    const q = k.quota;
+    const u = k.usage;
+    if (!q || (!q.max_tokens && !q.max_cost_usd && !q.daily_tokens && !q.rpm)) return '不限';
+    const parts: string[] = [];
+    if (q.max_tokens) {
+      const used = u?.total_tokens ?? 0;
+      const left = Math.max(0, q.max_tokens - used);
+      parts.push(`tokens ${compact(left)}/${compact(q.max_tokens)}`);
+    }
+    if (q.max_cost_usd) {
+      const used = u?.cost_usd ?? 0;
+      const left = Math.max(0, q.max_cost_usd - used);
+      parts.push(`$ ${left.toFixed(2)}/${q.max_cost_usd.toFixed(2)}`);
+    }
+    if (q.daily_tokens) {
+      const used = u?.total_tokens ?? 0;
+      const left = Math.max(0, q.daily_tokens - used);
+      parts.push(`/天 ${compact(left)}/${compact(q.daily_tokens)}`);
+    }
+    if (q.rpm) {
+      const left = Math.max(0, q.rpm - (k.rpm_current ?? 0));
+      parts.push(`rpm ${left}/${q.rpm}`);
+    }
+    return parts.join(' · ');
   }
 }
