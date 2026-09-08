@@ -1,6 +1,6 @@
 import { Injectable, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, of, throwError } from 'rxjs';
+import { Observable, of, forkJoin, throwError } from 'rxjs';
 import { catchError, map, mergeMap } from 'rxjs/operators';
 import {
   Agg, ApiKey, Overview, Provider, ProviderHealth, Quota, Route, UsageResponse,
@@ -114,14 +114,15 @@ export class ApiService {
   }
 
   /**
-   * 一键联调：确保存在指向本机 mockupstream（:8799）的 provider，并创建一个调试用 Key。
-   * 返回明文 Key（仅此一次）。调用方需先在本机启动 mockupstream（make mock && ./bin/mockupstream -addr :8799）。
+   * 一键联调：确保存在指向本机 mockupstream（:8799）的 provider，并提供一个调试用 Key。
+   * 幂等：已存在的 mock-debug Key 一律先删除再新建，保证同时只有一个，且每次都能拿到明文。
+   * 调用方需先在本机启动 mockupstream（make mock && ./bin/mockupstream -addr :8799）。
    */
   ensureMockLocal(): Observable<string> {
     return this.listProviders().pipe(
-      mergeMap((r) => {
+      mergeMap((r): Observable<{ keys: ApiKey[] }> => {
         const exists = (r.providers || []).some((p) => p.id === 'mock-local');
-        const prov$ = exists
+        const prov$: Observable<unknown> = exists
           ? of(null)
           : this.saveProvider({
               id: 'mock-local',
@@ -133,9 +134,16 @@ export class ApiService {
               timeout_ms: 10000,
               enabled: true,
             });
-        return prov$.pipe(mergeMap(() => this.createKey({ name: 'mock-debug', models: ['*'] })));
+        return prov$.pipe(mergeMap(() => this.listKeys()));
       }),
-      map((r: { key: string }) => r.key),
+      mergeMap((kr): Observable<{ id: string; key: string; prefix: string; warning: string }> => {
+        const olds = (kr.keys || []).filter((k) => k.name === 'mock-debug');
+        const del$: Observable<unknown> = olds.length
+          ? forkJoin(olds.map((k) => this.deleteKey(k.id)))
+          : of(null);
+        return del$.pipe(mergeMap(() => this.createKey({ name: 'mock-debug', models: ['*'] })));
+      }),
+      map((r) => r.key),
       catchError(this.handleError),
     );
   }
