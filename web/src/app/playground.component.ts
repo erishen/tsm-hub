@@ -68,12 +68,13 @@ const DRAFT_KEY = 'llm-router.playground.draft';
           <div>
             <label>模型</label>
             <div style="display:flex;gap:8px">
-              <input [(ngModel)]="model" list="pg-models" placeholder="gpt-4o 或路由别名" style="flex:1" />
+              <select [(ngModel)]="model" style="flex:1">
+                <option value="" disabled *ngIf="!model">选择模型…</option>
+                <option *ngFor="let m of selectModels()" [ngValue]="m">{{ m }}</option>
+              </select>
               <button type="button" class="small" (click)="loadModels()" title="重新拉取 Providers 与路由的模型列表">刷新</button>
             </div>
-            <datalist id="pg-models">
-              <option *ngFor="let m of models()" [value]="m"></option>
-            </datalist>
+            <div class="muted small" style="margin-top:4px">候选 = Providers 已配置的具体模型 + 路由别名</div>
           </div>
           <div>
             <label>响应模式</label>
@@ -235,6 +236,12 @@ export class PlaygroundComponent implements OnInit {
       next: (r) => (r.routes || []).forEach((rt: Route) => all.add(rt.model)),
       complete: done, error: done,
     });
+  }
+
+  /** 下拉候选：已配置模型 + 当前值（当前值若不在候选中则保留显示，避免选择框空白）。 */
+  selectModels(): string[] {
+    const ms = this.models();
+    return this.model && !ms.includes(this.model) ? [this.model, ...ms] : ms;
   }
 
   private saveDraft(): void {
