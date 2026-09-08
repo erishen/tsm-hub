@@ -1,4 +1,4 @@
-import { Component, OnInit, signal } from '@angular/core';
+import { Component, OnInit, signal, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from './api.service';
@@ -19,37 +19,55 @@ import { Provider, Route, RouteTarget } from './models';
 
     <div class="banner error" *ngIf="error()">{{ error() }}</div>
 
-    <div class="card" *ngIf="editing()">
-      <h2>{{ editingModel ? '编辑 ' + editingModel : '新增路由' }}</h2>
-      <div class="form-row">
-        <div><label>对外模型名</label><input [(ngModel)]="form.model" placeholder="smart" /></div>
-        <div>
-          <label>策略</label>
-          <select [(ngModel)]="form.strategy">
-            <option value="failover">failover（优先降级）</option>
-            <option value="weighted">weighted（加权分流）</option>
-          </select>
+    <!-- 编辑弹窗 -->
+    <div class="modal-backdrop" *ngIf="editing()" (click)="cancel()">
+      <div class="modal" (click)="$event.stopPropagation()">
+        <div class="modal-head">
+          <div class="modal-icon">{{ editingModel ? '✎' : '+' }}</div>
+          <div class="modal-titles">
+            <h2>{{ editingModel ? '编辑 ' + editingModel : '新增路由' }}</h2>
+            <div class="sub">{{ editingModel ? '调整映射策略与上游候选' : '把对外模型名映射到上游候选' }}</div>
+          </div>
+          <button class="icon" (click)="cancel()" aria-label="关闭">×</button>
         </div>
-      </div>
+        <div class="modal-body">
+          <div class="form-section">
+            <h3>映射</h3>
+            <div class="form-row">
+              <div><label>对外模型名</label><input [(ngModel)]="form.model" placeholder="smart" /></div>
+              <div>
+                <label>策略</label>
+                <select [(ngModel)]="form.strategy">
+                  <option value="failover">failover（优先降级）</option>
+                  <option value="weighted">weighted（加权分流）</option>
+                </select>
+              </div>
+            </div>
+          </div>
 
-      <h3>候选</h3>
-      <div class="inline-form" *ngFor="let t of form.targets; let i = index">
-        <div style="flex:2 1 200px">
-          <label>Provider</label>
-          <select [(ngModel)]="t.provider_id">
-            <option *ngFor="let p of providers()" [ngValue]="p.id">{{ p.id }} — {{ p.name }}</option>
-          </select>
+          <div class="form-section">
+            <h3>候选</h3>
+            <div class="inline-form" *ngFor="let t of form.targets; let i = index">
+              <div style="flex:2 1 200px">
+                <label>Provider</label>
+                <select [(ngModel)]="t.provider_id">
+                  <option *ngFor="let p of providers()" [ngValue]="p.id">{{ p.id }} — {{ p.name }}</option>
+                </select>
+              </div>
+              <div><label>上游模型（留空沿用）</label><input [(ngModel)]="t.model" placeholder="gpt-4o" /></div>
+              <div style="flex:0 0 90px"><label>权重</label><input type="number" [(ngModel)]="t.weight" /></div>
+              <div style="flex:0 0 90px"><label>优先级</label><input type="number" [(ngModel)]="t.priority" /></div>
+              <button class="danger" (click)="removeTarget(i)">移除</button>
+            </div>
+            <button class="ghost" style="margin-top:8px" (click)="addTarget()">+ 候选</button>
+          </div>
         </div>
-        <div><label>上游模型（留空沿用）</label><input [(ngModel)]="t.model" placeholder="gpt-4o" /></div>
-        <div style="flex:0 0 90px"><label>权重</label><input type="number" [(ngModel)]="t.weight" /></div>
-        <div style="flex:0 0 90px"><label>优先级</label><input type="number" [(ngModel)]="t.priority" /></div>
-        <button class="danger" (click)="removeTarget(i)">移除</button>
-      </div>
-
-      <div style="display:flex; gap:8px; margin-top:12px">
-        <button (click)="addTarget()">+ 候选</button>
-        <button class="primary" (click)="save()" [disabled]="saving()">保存</button>
-        <button (click)="cancel()">取消</button>
+        <div class="modal-foot">
+          <button (click)="cancel()" [disabled]="saving()">取消</button>
+          <button class="primary" (click)="save()" [disabled]="saving()">
+            {{ saving() ? '保存中…' : '保存' }}
+          </button>
+        </div>
       </div>
     </div>
 
@@ -125,6 +143,11 @@ export class RoutesComponent implements OnInit {
     this.form = JSON.parse(JSON.stringify(r));
     this.editingModel = r.model;
     this.editing.set(true);
+  }
+
+  @HostListener('document:keydown.escape')
+  onEsc(): void {
+    if (this.editing() && !this.saving()) this.cancel();
   }
 
   cancel(): void {

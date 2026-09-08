@@ -1,4 +1,4 @@
-import { Component, OnInit, signal } from '@angular/core';
+import { Component, OnInit, signal, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ApiService, compact, usd } from './api.service';
@@ -14,7 +14,7 @@ import { ApiKey, Quota } from './models';
         <h1>Token Keys</h1>
         <div class="sub">对外签发 sk-tr- 开头的自制 Key，服务端只保存哈希</div>
       </div>
-      <button class="primary" (click)="creating.set(!creating())">+ 签发</button>
+      <button class="primary" (click)="startNew()">+ 签发</button>
     </div>
 
     <div class="banner error" *ngIf="error()">{{ error() }}</div>
@@ -34,23 +34,42 @@ import { ApiKey, Quota } from './models';
       </div>
     </div>
 
-    <div class="card" *ngIf="creating()">
-      <h2>签发新 Key</h2>
-      <div class="form-row">
-        <div><label>名称</label><input [(ngModel)]="form.name" placeholder="生产环境 A" /></div>
-        <div><label>允许模型（逗号分隔，留空=全部）</label><input [(ngModel)]="modelsText" placeholder="smart,fast" /></div>
-      </div>
-      <h3>配额（0 = 不限）</h3>
-      <div class="form-row">
-        <div><label>总 Token 上限</label><input type="number" [(ngModel)]="form.quota.max_tokens" /></div>
-        <div><label>总成本上限 USD</label><input type="number" [(ngModel)]="form.quota.max_cost_usd" /></div>
-        <div><label>每日 Token 上限</label><input type="number" [(ngModel)]="form.quota.daily_tokens" /></div>
-        <div><label>每分钟请求数</label><input type="number" [(ngModel)]="form.quota.rpm" /></div>
-        <div><label>有效期（天，0=永久）</label><input type="number" [(ngModel)]="expireDays" /></div>
-      </div>
-      <div style="display:flex; gap:8px">
-        <button class="primary" (click)="create()" [disabled]="saving()">签发</button>
-        <button (click)="creating.set(false)">取消</button>
+    <!-- 签发弹窗 -->
+    <div class="modal-backdrop" *ngIf="creating()" (click)="cancel()">
+      <div class="modal" (click)="$event.stopPropagation()">
+        <div class="modal-head">
+          <div class="modal-icon">+</div>
+          <div class="modal-titles">
+            <h2>签发新 Key</h2>
+            <div class="sub">生成 sk-tr- 开头的自制 Key，服务端只保存哈希</div>
+          </div>
+          <button class="icon" (click)="cancel()" aria-label="关闭">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-section">
+            <h3>基本信息</h3>
+            <div class="form-row">
+              <div><label>名称</label><input [(ngModel)]="form.name" placeholder="生产环境 A" /></div>
+              <div><label>允许模型（逗号分隔，留空=全部）</label><input [(ngModel)]="modelsText" placeholder="smart,fast" /></div>
+            </div>
+          </div>
+          <div class="form-section">
+            <h3>配额（0 = 不限）</h3>
+            <div class="form-row">
+              <div><label>总 Token 上限</label><input type="number" [(ngModel)]="form.quota.max_tokens" /></div>
+              <div><label>总成本上限 USD</label><input type="number" [(ngModel)]="form.quota.max_cost_usd" /></div>
+              <div><label>每日 Token 上限</label><input type="number" [(ngModel)]="form.quota.daily_tokens" /></div>
+              <div><label>每分钟请求数</label><input type="number" [(ngModel)]="form.quota.rpm" /></div>
+              <div><label>有效期（天，0=永久）</label><input type="number" [(ngModel)]="expireDays" /></div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button (click)="cancel()" [disabled]="saving()">取消</button>
+          <button class="primary" (click)="create()" [disabled]="saving()">
+            {{ saving() ? '签发中…' : '签发' }}
+          </button>
+        </div>
       </div>
     </div>
 
@@ -123,6 +142,22 @@ export class KeysComponent implements OnInit {
       next: (r) => this.keys.set(r.keys ?? []),
       error: (e: Error) => this.error.set(e.message),
     });
+  }
+
+  @HostListener('document:keydown.escape')
+  onEsc(): void {
+    if (this.creating() && !this.saving()) this.cancel();
+  }
+
+  startNew(): void {
+    this.form = { name: '', quota: this.blankQuota() };
+    this.modelsText = '';
+    this.expireDays = 0;
+    this.creating.set(true);
+  }
+
+  cancel(): void {
+    this.creating.set(false);
   }
 
   create(): void {
