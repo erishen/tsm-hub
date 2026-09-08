@@ -286,6 +286,7 @@ export class PlaygroundComponent implements OnInit {
         if (!this.model) this.model = 'mock-model';
         this.stream = true;
         this.user = this.user || '你好';
+        this.loadModels(); // 刷新模型下拉，让 mock 模型可选
         this.saveDraft();
         this.mockBusy.set(false);
         this.mockMsg.set('已配置指向 localhost:8799 的 provider 与调试 Key，并已填入 Token Key。请先运行 make mock-run 启动 mock 上游，然后点「发送」。');

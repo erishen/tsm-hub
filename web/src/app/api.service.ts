@@ -122,25 +122,34 @@ export class ApiService {
   /**
    * 一键联调：确保存在指向本机 mockupstream（:8799）的 provider，并提供一个调试用 Key。
    * 幂等：已存在的 mock-debug Key 一律先删除再新建，保证同时只有一个，且每次都能拿到明文。
+   * 每次调用都会探测本机 mock 的真实模型列表并写回 provider，保证测试页下拉能选到 mock 模型。
    * 调用方需先在本机启动 mockupstream（make mock && ./bin/mockupstream -addr :8799）。
    */
   ensureMockLocal(): Observable<string> {
     return this.listProviders().pipe(
-      mergeMap((r): Observable<{ keys: ApiKey[] }> => {
-        const exists = (r.providers || []).some((p) => p.id === 'mock-local');
-        const prov$: Observable<unknown> = exists
-          ? of(null)
-          : this.saveProvider({
-              id: 'mock-local',
-              name: 'Mock 本地联调',
-              base_url: 'http://localhost:8799/v1',
-              models: ['*'],
-              weight: 1,
-              priority: 1,
-              timeout_ms: 10000,
-              enabled: true,
-            });
-        return prov$.pipe(mergeMap(() => this.listKeys()));
+      mergeMap((r): Observable<{ models: string[]; keys: ApiKey[] }> => {
+        const existing = (r.providers || []).find((p) => p.id === 'mock-local');
+        // 探测本机 mock 模型；mock 未启动时回退到已知模型名，避免联调不可用。
+        return this.probeModels({ base_url: 'http://localhost:8799/v1' }).pipe(
+          catchError(() => of({ models: [] })),
+          mergeMap((pr): Observable<{ models: string[]; keys: ApiKey[] }> => {
+            const models = pr.models && pr.models.length ? pr.models : ['mock-model', 'mock-extra'];
+            const prov$: Observable<unknown> = existing
+              ? this.saveProvider({ ...existing, models })
+              : this.saveProvider({
+                  id: 'mock-local',
+                  name: 'Mock 本地联调',
+                  base_url: 'http://localhost:8799/v1',
+                  models,
+                  weight: 1,
+                  priority: 1,
+                  timeout_ms: 10000,
+                  enabled: true,
+                });
+            return prov$.pipe(mergeMap((): Observable<{ models: string[]; keys: ApiKey[] }> =>
+              this.listKeys().pipe(map((kr) => ({ models, keys: kr.keys || [] })))));
+          }),
+        );
       }),
       mergeMap((kr): Observable<{ id: string; key: string; prefix: string; warning: string }> => {
         const olds = (kr.keys || []).filter((k) => k.name === 'mock-debug');
