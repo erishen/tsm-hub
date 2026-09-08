@@ -1,12 +1,15 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -21,6 +24,7 @@ func (s *Server) adminMux() http.Handler {
 	m.HandleFunc("GET /api/admin/overview", s.admin(s.handleOverview))
 	m.HandleFunc("GET /api/admin/providers", s.admin(s.handleListProviders))
 	m.HandleFunc("POST /api/admin/providers", s.admin(s.handleUpsertProvider))
+	m.HandleFunc("POST /api/admin/providers/probe", s.admin(s.handleProbeModels))
 	m.HandleFunc("DELETE /api/admin/providers/{id}", s.admin(s.handleDeleteProvider))
 	m.HandleFunc("GET /api/admin/routes", s.admin(s.handleListRoutes))
 	m.HandleFunc("POST /api/admin/routes", s.admin(s.handleUpsertRoute))
@@ -201,6 +205,81 @@ func displaySecret(k string) string {
 		return k
 	}
 	return maskSecret(k)
+}
+
+// compact 压缩一段文本用于错误消息：去换行、截断。
+func compact(s string) string {
+	s = strings.TrimSpace(strings.ReplaceAll(s, "\n", " "))
+	if len(s) > 300 {
+		return s[:300] + "…"
+	}
+	return s
+}
+
+// handleProbeModels 用给定的 base_url + API Key 探测上游 /v1/models，返回模型 id 列表（去重排序）。
+// 用于管理台「按 Key 查询模型」：Key 支持 env: 引用，脱敏回显值（含省略号）不参与探测。
+func (s *Server) handleProbeModels(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		BaseURL string `json:"base_url"`
+		APIKey  string `json:"api_key"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid json: "+err.Error())
+		return
+	}
+	req.BaseURL = strings.TrimRight(strings.TrimSpace(req.BaseURL), "/")
+	if req.BaseURL == "" || (!strings.HasPrefix(req.BaseURL, "http://") && !strings.HasPrefix(req.BaseURL, "https://")) {
+		writeError(w, http.StatusBadRequest, "bad_request", "base_url 必须是合法的 http(s) 地址")
+		return
+	}
+	if strings.Contains(req.APIKey, store.MaskedSecretMarker) {
+		writeError(w, http.StatusBadRequest, "bad_request", "API Key 是脱敏回显值，无法用于探测；请重新输入真实 Key（或填 env: 引用）")
+		return
+	}
+	key := store.Provider{APIKey: req.APIKey}.ResolvedAPIKey()
+
+	ctx, cancel := context.WithTimeout(r.Context(), time.Duration(s.store.Settings().DefaultTimeoutMS)*time.Millisecond)
+	defer cancel()
+	upReq, err := http.NewRequestWithContext(ctx, http.MethodGet, req.BaseURL+"/models", nil)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid base_url: "+err.Error())
+		return
+	}
+	if key != "" {
+		upReq.Header.Set("Authorization", "Bearer "+key)
+	}
+	resp, err := http.DefaultClient.Do(upReq)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "upstream_unavailable", "无法连接上游: "+err.Error())
+		return
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode != http.StatusOK {
+		writeError(w, http.StatusBadRequest, "probe_failed",
+			fmt.Sprintf("上游返回 %d: %s", resp.StatusCode, compact(string(body))))
+		return
+	}
+	var payload struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		writeError(w, http.StatusBadGateway, "upstream_read_error", "上游响应不是有效的模型列表: "+err.Error())
+		return
+	}
+	seen := map[string]bool{}
+	var models []string
+	for _, m := range payload.Data {
+		id := strings.TrimSpace(m.ID)
+		if id != "" && !seen[id] {
+			seen[id] = true
+			models = append(models, id)
+		}
+	}
+	sort.Strings(models)
+	writeJSON(w, http.StatusOK, map[string]any{"models": models})
 }
 
 func (s *Server) handleUpsertProvider(w http.ResponseWriter, r *http.Request) {

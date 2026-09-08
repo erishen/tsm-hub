@@ -84,7 +84,25 @@ import { Provider } from './models';
             <div class="form-row">
               <div>
                 <label>模型（逗号分隔，* 表示全部）</label>
-                <input [(ngModel)]="modelsText" placeholder="gpt-4o,gpt-4o-mini" />
+                <div style="display:flex;gap:8px">
+                  <input [(ngModel)]="modelsText" placeholder="gpt-4o,gpt-4o-mini" style="flex:1" />
+                  <button type="button" (click)="probe()" [disabled]="probing() || !form.base_url">
+                    {{ probing() ? '查询中…' : '按 Key 查询' }}
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div class="banner warn" *ngIf="probeError()" style="margin-top:8px">{{ probeError() }}</div>
+            <div *ngIf="probeModels().length" style="margin-top:10px">
+              <div class="muted small" style="margin-bottom:6px">上游实际提供的模型（多选，勾选自动写入上方输入框）</div>
+              <div style="display:flex;flex-wrap:wrap;gap:6px">
+                <label *ngFor="let m of probeModels()"
+                       style="display:inline-flex;align-items:center;gap:4px;
+                              padding:4px 10px;border:1px solid var(--border-color);
+                              border-radius:999px;background:rgba(0,0,0,0.025);font-size:12px;cursor:pointer">
+                  <input type="checkbox" [checked]="modelSet.has(m)" (change)="toggleModel(m, $event)" />
+                  <span class="mono">{{ m }}</span>
+                </label>
               </div>
             </div>
             <div class="form-row">
@@ -126,9 +144,13 @@ export class ProvidersComponent implements OnInit {
   readonly error = signal('');
   readonly editing = signal(false);
   readonly saving = signal(false);
+  readonly probing = signal(false);
+  readonly probeModels = signal<string[]>([]);
+  readonly probeError = signal('');
 
   form: Provider = this.blank();
   modelsText = '';
+  modelSet = new Set<string>();
 
   constructor(private api: ApiService) {}
 
@@ -158,13 +180,49 @@ export class ProvidersComponent implements OnInit {
   startNew(): void {
     this.form = this.blank();
     this.modelsText = '';
+    this.modelSet = new Set();
+    this.probeModels.set([]);
+    this.probeError.set('');
     this.editing.set(true);
   }
 
   edit(p: Provider): void {
     this.form = { ...p };
     this.modelsText = (p.models || []).join(',');
+    this.modelSet = new Set(p.models || []);
+    this.probeModels.set([]);
+    this.probeError.set('');
     this.editing.set(true);
+  }
+
+  /** 按 Base URL + API Key 探测上游模型，并同步勾选状态。 */
+  probe(): void {
+    this.probeError.set('');
+    // 编辑场景下 Key 是脱敏回显值（含省略号），无法用于探测；留空则不带鉴权。
+    const key = this.form.api_key.includes('…') ? '' : this.form.api_key;
+    this.probing.set(true);
+    this.api.probeModels({ base_url: this.form.base_url, api_key: key || undefined }).subscribe({
+      next: (r) => {
+        this.probing.set(false);
+        this.probeModels.set(r.models ?? []);
+        this.syncModelSet();
+      },
+      error: (e: Error) => {
+        this.probing.set(false);
+        this.probeError.set(e.message);
+      },
+    });
+  }
+
+  private syncModelSet(): void {
+    this.modelSet = new Set(this.modelsText.split(',').map((s) => s.trim()).filter(Boolean));
+  }
+
+  toggleModel(m: string, ev: Event): void {
+    this.syncModelSet();
+    const cb = ev.target as HTMLInputElement;
+    if (cb.checked) this.modelSet.add(m); else this.modelSet.delete(m);
+    this.modelsText = [...this.modelSet].join(',');
   }
 
   cancel(): void {

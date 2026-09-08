@@ -19,9 +19,17 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
+		if *mode == "500" {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"error":"boom"}`))
+			return
+		}
 		writeJSON(w, map[string]any{
 			"object": "list",
-			"data":   []any{map[string]any{"id": "mock-model", "object": "model", "owned_by": "mock"}},
+			"data": []any{
+				map[string]any{"id": "mock-model", "object": "model", "owned_by": "mock"},
+				map[string]any{"id": "mock-extra", "object": "model", "owned_by": "mock"},
+			},
 		})
 	})
 	mux.HandleFunc("/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {

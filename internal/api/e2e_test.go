@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"math"
@@ -37,10 +38,6 @@ func (m *mockUpstream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	m.bodies = append(m.bodies, string(body))
 	m.apiKey = r.Header.Get("Authorization")
 
-	if r.URL.Path == "/v1/models" {
-		writeMockJSON(w, map[string]any{"object": "list", "data": []any{}})
-		return
-	}
 	if m.mode == "500" {
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = w.Write([]byte(`{"error":"boom"}`))
@@ -49,6 +46,13 @@ func (m *mockUpstream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if m.mode == "400" {
 		w.WriteHeader(http.StatusBadRequest)
 		_, _ = w.Write([]byte(`{"error":{"message":"client bad request"}}`))
+		return
+	}
+	if r.URL.Path == "/v1/models" {
+		writeMockJSON(w, map[string]any{"object": "list", "data": []any{
+			map[string]any{"id": "mock-model", "object": "model", "owned_by": "mock"},
+			map[string]any{"id": "mock-extra", "object": "model", "owned_by": "mock"},
+		}})
 		return
 	}
 	var req map[string]any
@@ -793,5 +797,58 @@ func TestConfigPersisted(t *testing.T) {
 	}
 	if _, ok := cfg["providers"]; !ok {
 		t.Fatal("providers missing in persisted config")
+	}
+}
+
+func TestProbeProviderModels(t *testing.T) {
+	e := newEnv(t, "ok")
+	defer e.server.Close()
+
+	// 成功：探测 ok 上游（/v1/models 返回 mock-model/mock-extra，按字典序排序）
+	resp := e.do(t, http.MethodPost, "/api/admin/providers/probe",
+		fmt.Sprintf(`{"base_url":%q,"api_key":"sk-probe"}`, e.okURL+"/v1"), e.adminHeaders())
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	var payload struct {
+		Models []string `json:"models"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(payload.Models) != 2 || payload.Models[0] != "mock-extra" || payload.Models[1] != "mock-model" {
+		t.Fatalf("models = %v, want sorted [mock-extra mock-model]", payload.Models)
+	}
+	if !strings.HasPrefix(e.upOK.apiKey, "Bearer sk-probe") {
+		t.Fatalf("upstream auth = %q, want Bearer sk-probe", e.upOK.apiKey)
+	}
+
+	// 上游 500 → 400 + 可读错误
+	resp2 := e.do(t, http.MethodPost, "/api/admin/providers/probe",
+		fmt.Sprintf(`{"base_url":%q}`, e.badURL+"/v1"), e.adminHeaders())
+	defer resp2.Body.Close()
+	if resp2.StatusCode != http.StatusBadRequest {
+		t.Fatalf("bad upstream: status = %d", resp2.StatusCode)
+	}
+
+	// 脱敏 Key 拒绝探测
+	resp3 := e.do(t, http.MethodPost, "/api/admin/providers/probe",
+		`{"base_url":"http://x","api_key":"sk-…abc"}`, e.adminHeaders())
+	defer resp3.Body.Close()
+	if resp3.StatusCode != http.StatusBadRequest {
+		t.Fatalf("masked key: status = %d", resp3.StatusCode)
+	}
+
+	// env: 引用解析后带上
+	t.Setenv("PROBE_ENV_KEY", "sk-env-val")
+	resp4 := e.do(t, http.MethodPost, "/api/admin/providers/probe",
+		fmt.Sprintf(`{"base_url":%q,"api_key":"env:PROBE_ENV_KEY"}`, e.okURL+"/v1"), e.adminHeaders())
+	defer resp4.Body.Close()
+	if resp4.StatusCode != http.StatusOK {
+		t.Fatalf("env key: status = %d", resp4.StatusCode)
+	}
+	if !strings.HasPrefix(e.upOK.apiKey, "Bearer sk-env-val") {
+		t.Fatalf("env upstream auth = %q", e.upOK.apiKey)
 	}
 }

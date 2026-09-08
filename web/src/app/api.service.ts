@@ -70,6 +70,12 @@ export class ApiService {
       .pipe(catchError(this.handleError));
   }
 
+  /** 用 base_url + API Key 探测上游 /v1/models，返回实际支持的模型列表。 */
+  probeModels(body: { base_url: string; api_key?: string }): Observable<{ models: string[] }> {
+    return this.http.post<{ models: string[] }>('/api/admin/providers/probe', body, { headers: this.headers() })
+      .pipe(catchError(this.handleError));
+  }
+
   listRoutes(): Observable<{ routes: Route[] }> {
     return this.http.get<{ routes: Route[] }>('/api/admin/routes', { headers: this.headers() })
       .pipe(catchError(this.handleError));
