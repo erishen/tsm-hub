@@ -1,0 +1,252 @@
+# llm-router
+
+> 自制 Token Key + 智能路由的 LLM 网关：对外只暴露自己签发的 `sk-tr-…` Key，
+> 内部把 OpenAI 兼容请求智能路由到配置好的多家上游模型。
+
+- **后端**：Go 1.22，**零第三方依赖**（只用标准库），单二进制
+- **前端**：Angular 19（standalone + signals），构建产物 `embed` 进 Go 二进制
+- **存储**：JSON 配置文件（原子写）+ JSONL 用量流水，无需数据库
+- **协议**：OpenAI 兼容（`/v1/chat/completions`、`/v1/models`…），含 SSE 流式透传
+
+---
+
+## 它解决什么
+
+| 问题 | 做法 |
+|------|------|
+| 上游 API Key 散落在各处客户端，泄露就要全量轮换 | 对外只发自制 Key，上游 Key 只存在服务端；吊销一个自制 Key 不影响其他 |
+| 想换模型 / 换厂商，要改所有客户端代码 | 客户端只认 `smart` / `cheap` 这类别名，映射关系在服务端路由表里 |
+| 某家上游挂了，整条链路就断 | 按优先级 failover + 健康检查自动摘除，冷却后半开探测 |
+| 不知道谁用掉了多少 token、多少钱 | 每个 Key 独立记账，支持 RPM / 总 token / 总金额 / 每日额度 |
+
+---
+
+## 快速开始
+
+```bash
+cd work/golang/llm-router
+
+# 1) 编译（含 mock 上游，用于本地联调）
+make build mock
+
+# 2) 跑一轮端到端冒烟（自动起 mock 上游 + 网关 + 断言）
+make smoke
+
+# 3) 真正使用：复制配置模板，填入你的上游 Key
+mkdir -p data && cp config.example.json data/config.json
+$EDITOR data/config.json          # 必改：settings.admin_token、各 provider 的 api_key
+
+# 4) 启动
+./bin/llm-router -data ./data -addr :9070
+```
+
+打开 <http://localhost:9070> 进入管理台，用 `admin_token` 登录。
+
+像用 OpenAI 一样调用（只换 Key、换 base_url、换 model 别名）：
+
+```bash
+curl http://localhost:9070/v1/chat/completions \
+  -H "Authorization: Bearer sk-tr-xxxxxxxx..." \
+  -H "Content-Type: application/json" \
+  -d '{"model":"smart","messages":[{"role":"user","content":"讲个笑话"}]}'
+```
+
+Python SDK：
+
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:9070/v1", api_key="sk-tr-...")
+print(client.chat.completions.create(model="smart", messages=[{"role": "user", "content": "hi"}]))
+```
+
+---
+
+## 请求链路
+
+```
+客户端 (sk-tr-…)
+   │
+   ▼
+┌──────────────────────── llm-router ────────────────────────┐
+│ 1. 鉴权    sha256(Key) → 查内存索引 → 校验 enabled/过期      │
+│ 2. 限流    RPM 滑动窗口 + token/金额/每日额度                │
+│ 3. 路由    别名 → 候选列表：priority 排序 + weight 加权      │
+│            过滤掉冷却中的 provider，保留一个半开探测位         │
+│ 4. 转发    换 Authorization、改写 model、注入 stream_options │
+│ 5. 回传    非流式整包回传；流式按 SSE 帧逐帧转发             │
+│            响应头带 X-LLM-Router-Provider: <provider_id>    │
+│ 6. 记账    usage → 内存聚合 + data/usage/YYYY-MM-DD.jsonl   │
+└────────────────────────────────────────────────────────────┘
+   │                    │                    │
+   ▼                    ▼                    ▼
+OpenAI            DeepSeek / 通义         本地 Ollama
+（失败自动换下一个候选；连续失败 → 摘除 + 冷却 → 半开探测）
+```
+
+---
+
+## 目录结构
+
+```
+llm-router/
+├── cmd/
+│   ├── server/          # 网关主程序
+│   └── mockupstream/    # 本地联调用的假上游（不接真实模型）
+├── internal/
+│   ├── config/          # 启动参数（flag + 环境变量）
+│   ├── store/           # 配置模型与原子落盘、内存索引
+│   ├── auth/            # 自制 Key 签发/校验、管理会话
+│   ├── router/          # 路由选择 + 健康状态机
+│   ├── proxy/           # OpenAI 兼容转发、SSE 透传、usage 采集
+│   ├── quota/           # 限流、用量聚合、JSONL 落盘
+│   ├── api/             # HTTP 路由（/v1/*、/api/admin/*）
+│   └── web/             # embed 前端产物
+├── web/                 # Angular 管理台源码
+├── scripts/smoke.sh     # 端到端冒烟
+├── config.example.json  # 配置模板
+└── data/                # 运行期数据（config.json + usage/*.jsonl）
+```
+
+---
+
+## 配置
+
+`data/config.json` 首次启动自动生成，结构见 `config.example.json`：
+
+| 字段 | 说明 |
+|------|------|
+| `settings.listen` | 监听地址，可用 `-addr` 覆盖 |
+| `settings.admin_token` | 管理台口令，可用 `-admin-token` / `$LLM_ROUTER_ADMIN_TOKEN` 覆盖 |
+| `settings.fail_threshold` / `cooldown_sec` | 连续失败 N 次摘除，冷却 M 秒后半开探测 |
+| `settings.pricing` | 每 1K token 单价（美元），用于估算成本；按「实际上游模型名 → 别名 → default」顺序取价 |
+| `providers[]` | 上游：`base_url`（可带或不带 `/v1`）、`api_key`、`models`、`weight`、`priority` |
+| `routes[]` | 对外模型名 → 候选列表；`strategy`: `failover`（按 priority 降级）/ `weighted`（按权重分流）|
+| `keys[]` | 自制 Key，**只存 sha256 哈希** |
+
+**上游 Key 不写进配置文件**：`api_key` 支持 `env:OPENAI_API_KEY` 这种引用形式，
+启动前把真实 Key 放到环境变量里即可（管理台回显会保留引用本身，不含密钥）。
+
+路由表未命中时的兜底：直接找所有声明支持该模型的 enabled provider，按权重分流。
+
+---
+
+## 管理 API
+
+全部需要 `X-Admin-Token: <admin_token>`（或先 `POST /api/admin/login` 换 `X-Session-Token`）。
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/admin/login` | 用 admin token 换会话 token（同 IP 错 5 次锁 10 分钟）|
+| GET | `/api/admin/overview` | 概览：provider/路由/Key 数量、今日与累计用量 |
+| GET/POST | `/api/admin/providers` | Provider 列表 / 新增或更新 |
+| DELETE | `/api/admin/providers/{id}` | 删除（同时清理路由表里的相关候选）|
+| GET/POST | `/api/admin/routes` | 路由表列表 / 新增或更新 |
+| DELETE | `/api/admin/routes/{model}` | 删除路由 |
+| GET/POST | `/api/admin/keys` | Key 列表 / 签发（**响应里一次性返回明文**）|
+| POST | `/api/admin/keys/{id}/toggle` | 启停 |
+| DELETE | `/api/admin/keys/{id}` | 删除 |
+| GET | `/api/admin/usage?days=7&limit=50` | 按天 / 模型 / Key 聚合 + 最近流水 |
+| GET | `/api/admin/health` | Provider 实时健康（延迟 EWMA、失败数、冷却到期时间）|
+| GET/POST | `/api/admin/settings` | 查看 / 修改全局设置（超时、阈值、价格表）|
+
+另有探测端点（都不需要鉴权）：
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/healthz` | 存活探针：`status`/`uptime_s`/`requests` + `degraded`/`providers[]` 上游健康 |
+| GET | `/metrics` | Prometheus 文本格式：HTTP 状态计数、配额拒绝计数、上游健康/请求/错误/延迟 EWMA |
+
+CLI 签发 Key 的等价操作：
+
+```bash
+curl -X POST http://localhost:9070/api/admin/keys \
+  -H "X-Admin-Token: $ADMIN_TOKEN" -H "Content-Type: application/json" \
+  -d '{"name":"prod","models":["smart"],"quota":{"rpm":60,"max_cost_usd":20}}'
+# → {"ok":true,"id":"…","key":"sk-tr-…","warning":"请立即保存…"}
+```
+
+---
+
+## 开发
+
+```bash
+make build         # 编译服务端
+make mock          # 编译 mock 上游
+make test          # 单测 + 端到端（内置 mock，不需要外网）
+make vet fmt       # 静态检查与格式化
+make smoke         # 端到端冒烟脚本
+make web-install   # 安装前端依赖（pnpm 优先，没装则用 npm）
+make web-dev       # Angular dev server :4200（/api 代理到 :9070）
+make web-build     # 构建前端到 internal/web/dist/browser（供 embed）
+make web-check     # 不依赖 node_modules 的 TS 语法自检
+```
+
+### 本地联调（前后端一起起）
+
+```bash
+make dev           # 先杀掉 :9070/:4200 上的残留进程，再重新编译并后台起后端 + Angular dev server
+make dev-logs      # tail -f .dev/*.log
+make dev-status    # 看这两个端口现在是谁在监听
+make dev-stop      # 只停不停编译，端口和 .dev/*.pid 都会被清掉
+```
+
+`make dev` 会：清端口 → `go build` → 起后端（`-data ./data`，日志 `.dev/router.log`）→ 起 `pnpm start`
+（日志 `.dev/web.log`）→ 轮询 `/healthz` 与 `:4200` 直到就绪再打印 URL；前端依赖没装会自动先装一次。
+端口可用 `make dev ROUTER_PORT=9080 WEB_PORT=4300` 改。
+
+> ⚠️ `dev-stop` 是**按端口** `kill -9` 的：如果 :9070/:4200 上跑的是别的服务，也会被一起杀掉，
+> 执行前可用 `make dev-status` 确认。
+
+> macOS 15 上 Go 二进制需要 `CGO_ENABLED=1 -ldflags=-linkmode=external`，
+> 否则 dyld 会报 `missing LC_UUID`。Makefile 已统一处理。
+
+---
+
+## 容器部署
+
+```bash
+make web-install && make web-build   # 先构建管理台（产物会被打进镜像）
+docker compose up -d --build          # 或 docker build -t llm-router . && docker run ...
+```
+
+镜像里只编译 Go（不需要在镜像内联网装 Node），前端产物从宿主机 `internal/web/dist/browser`
+拷进去；跳过前端构建也能跑，只是管理台是占位页。数据通过 `./data` 卷持久化。
+
+## 测试
+
+```bash
+make test    # 全部包
+make cover   # 覆盖率
+```
+
+| 包 | 覆盖内容 |
+|----|----------|
+| `internal/api` | 端到端：鉴权、failover、SSE、限流、Key 生命周期、/v1/models、配置落盘、provider 响应头、4xx 不熔断、上游计价、登录限流、413、panic 兜底、healthz 健康、env Key、/metrics（18 例）|
+| `internal/proxy` | 请求体改写、`stream_options` 注入、SSE usage 解析、URL 拼接（转发主链路由 `internal/api` 的端到端用例覆盖）|
+| `internal/router` | 优先级排序、权重偏好、延迟降权、健康摘除与半开放行 |
+| `internal/store` | 原子写、更新回滚、删除 provider 时清理路由、Key CRUD |
+| `internal/quota` | 聚合与回放、RPM 窗口、四类额度拒绝、TopKeys、最近流水 |
+| `internal/auth` | Key 格式、Bearer 解析、常量时间比较、会话过期 |
+
+`make smoke` 另有一套脚本级端到端（真实起进程 + curl 断言）。
+
+## 注意事项
+
+- **自制 Key 明文只出现一次**：签发接口返回后服务端只留哈希，丢了只能重新签发。
+- **上游 Key 建议用 `env:VAR` 引用**，避免密钥落盘；直接用明文也支持（部署简单）。
+- 启动时会自检：管理口令仍是默认占位符、或还没配任何 provider，都会打 WARN 日志。
+- **额度告警**：Key 用量达到任一上限的 80% 时打一条 warn 日志（同类型只提示一次，
+  回落线下后重置），适合接日志监控做成本管控。
+- **`data/` 目录含上游 API Key 与用量流水**，已写入 `.gitignore`，不要提交到公开仓库。
+- **成本是估算值**：按 `settings.pricing` 的价格表计算，流式场景依赖上游返回 usage
+  （已自动注入 `stream_options.include_usage`）；上游不返回时 token 记为 0。
+- 上游 5xx 会自动换下一个候选；**已经向客户端写出过字节的流式响应不会重试**
+  （否则会造成内容重复），只会记录错误。
+- **4xx 不计入 provider 失败**：只有网络错误 / 5xx / 流式首帧前断流才触发熔断，
+  避免「上下文超长 / 内容审核拒绝」这类客户端问题把健康上游摘除。
+- 管理台编辑 provider 时回显的 `api_key` 是脱敏值，后端检测到省略号会保留原 Key，
+  不会用脱敏串覆盖真实 Key（前端后端双重保护）。
+- 每个响应都带 `X-Request-ID`，日志同 ID 可关联；panic 会自动兜底回 500 并带上该 ID。
+- 请求体超过 `settings.max_body_bytes` 直接返回 413（不截断后报误导性错误）。
+- `/healthz` 额外带 `degraded` 与 `providers[]` 字段，可区分「网关挂」与「某上游被摘除」。

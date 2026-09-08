@@ -1,0 +1,164 @@
+// Command llm-router 启动一个 LLM Token Router 服务：
+// 对外签发自制 Token Key（sk-tr-…），把 OpenAI 兼容请求智能路由到配置好的上游模型。
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/erishen/llm-router/internal/api"
+	"github.com/erishen/llm-router/internal/config"
+	"github.com/erishen/llm-router/internal/proxy"
+	"github.com/erishen/llm-router/internal/quota"
+	"github.com/erishen/llm-router/internal/router"
+	"github.com/erishen/llm-router/internal/store"
+)
+
+// version 由 Makefile 通过 -ldflags 注入。
+var version = "dev"
+
+func main() {
+	cfg, err := config.Parse(os.Args[1:])
+	if err != nil {
+		if errors.Is(err, config.ErrFlagParse) {
+			os.Exit(2)
+		}
+		fmt.Fprintln(os.Stderr, "config error:", err)
+		os.Exit(1)
+	}
+	if cfg.Version {
+		fmt.Printf("llm-router %s\n", version)
+		return
+	}
+	if err := run(cfg); err != nil {
+		fmt.Fprintln(os.Stderr, "fatal:", err)
+		os.Exit(1)
+	}
+}
+
+func run(cfg config.Config) error {
+	logger := newLogger(cfg.LogLevel)
+	slog.SetDefault(logger)
+
+	st, err := store.New(cfg.ConfigFile())
+	if err != nil {
+		return err
+	}
+	settings := st.Settings()
+
+	// 命令行 / 环境变量覆盖配置文件。
+	if cfg.AdminToken != "" {
+		_ = st.Update(func(c *store.Config) error {
+			c.Settings.AdminToken = cfg.AdminToken
+			return nil
+		})
+		settings = st.Settings()
+	}
+	listen := settings.Listen
+	if cfg.Listen != "" {
+		listen = cfg.Listen
+	}
+
+	// 启动自检：把最容易踩的两个配置问题直接喊出来。
+	if settings.AdminToken == "" || settings.AdminToken == store.DefaultAdminToken {
+		logger.Warn("admin token is still the default placeholder; " +
+			"change settings.admin_token in config.json or pass -admin-token")
+	}
+	if len(st.ListProviders()) == 0 {
+		logger.Warn("no upstream provider configured yet; " +
+			"add one in the admin console or via POST /api/admin/providers")
+	}
+
+	rec, err := quota.NewRecorder(cfg.UsageDir())
+	if err != nil {
+		return err
+	}
+	defer rec.Close()
+
+	limiter := quota.NewLimiter(rec)
+	tracker := router.NewTracker(settings.FailThreshold, settings.CooldownSec)
+	rt := router.New(st, tracker)
+	px := proxy.New(st, rt, tracker, rec)
+
+	srv := api.New(api.Options{
+		Store:   st,
+		Rec:     rec,
+		Limiter: limiter,
+		Router:  rt,
+		Health:  tracker,
+		Proxy:   px,
+		Logger:  logger,
+	})
+
+	httpSrv := &http.Server{
+		Addr:              listen,
+		Handler:           srv.Handler(),
+		ReadHeaderTimeout: 15 * time.Second,
+		// 流式响应可能持续很久，不设 WriteTimeout。
+		IdleTimeout: 120 * time.Second,
+	}
+
+	// 优雅退出。
+	errCh := make(chan error, 1)
+	go func() {
+		logger.Info("llm-router listening",
+			"addr", listen, "version", version,
+			"config", cfg.ConfigFile(), "data", cfg.DataDir)
+		logger.Info("admin console", "url", consoleURL(listen), "admin_token_set", settings.AdminToken != "")
+		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errCh <- err
+		}
+	}()
+
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+	select {
+	case err := <-errCh:
+		return err
+	case sig := <-stop:
+		logger.Info("shutting down", "signal", sig.String())
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := httpSrv.Shutdown(ctx); err != nil {
+		return err
+	}
+	return rec.Close()
+}
+
+// consoleURL 把监听地址变成可点的 URL：":9070" → localhost:9070，"0.0.0.0:9070" → localhost:9070。
+func consoleURL(listen string) string {
+	addr := strings.TrimSpace(listen)
+	if strings.HasPrefix(addr, ":") {
+		return "http://localhost" + addr
+	}
+	addr = strings.Replace(addr, "0.0.0.0", "localhost", 1)
+	if strings.HasPrefix(addr, "http://") || strings.HasPrefix(addr, "https://") {
+		return addr
+	}
+	return "http://" + addr
+}
+
+func newLogger(level string) *slog.Logger {
+	var lv slog.Level
+	switch level {
+	case "debug":
+		lv = slog.LevelDebug
+	case "warn":
+		lv = slog.LevelWarn
+	case "error":
+		lv = slog.LevelError
+	default:
+		lv = slog.LevelInfo
+	}
+	return slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: lv}))
+}

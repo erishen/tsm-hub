@@ -1,0 +1,16 @@
+{
+  "/api": {
+    "target": "http://localhost:9070",
+    "secure": false,
+    "changeOrigin": true
+  },
+  "/v1": {
+    "target": "http://localhost:9070",
+    "secure": false,
+    "changeOrigin": true
+  },
+  "/healthz": {
+    "target": "http://localhost:9070",
+    "secure": false
+  }
+}

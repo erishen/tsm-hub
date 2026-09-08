@@ -1,0 +1,164 @@
+import { Component, OnInit, signal } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
+import { ApiService } from './api.service';
+import { Provider, Route, RouteTarget } from './models';
+
+@Component({
+  selector: 'app-routes',
+  standalone: true,
+  imports: [CommonModule, FormsModule],
+  template: `
+    <div class="page-head">
+      <div>
+        <h1>路由表</h1>
+        <div class="sub">把对外模型名映射到上游候选：failover 按优先级降级，weighted 按权重分流</div>
+      </div>
+      <button class="primary" (click)="startNew()">+ 新增</button>
+    </div>
+
+    <div class="banner error" *ngIf="error()">{{ error() }}</div>
+
+    <div class="card" *ngIf="editing()">
+      <h2>{{ editingModel ? '编辑 ' + editingModel : '新增路由' }}</h2>
+      <div class="form-row">
+        <div><label>对外模型名</label><input [(ngModel)]="form.model" placeholder="smart" /></div>
+        <div>
+          <label>策略</label>
+          <select [(ngModel)]="form.strategy">
+            <option value="failover">failover（优先降级）</option>
+            <option value="weighted">weighted（加权分流）</option>
+          </select>
+        </div>
+      </div>
+
+      <h3>候选</h3>
+      <div class="inline-form" *ngFor="let t of form.targets; let i = index">
+        <div style="flex:2 1 200px">
+          <label>Provider</label>
+          <select [(ngModel)]="t.provider_id">
+            <option *ngFor="let p of providers()" [ngValue]="p.id">{{ p.id }} — {{ p.name }}</option>
+          </select>
+        </div>
+        <div><label>上游模型（留空沿用）</label><input [(ngModel)]="t.model" placeholder="gpt-4o" /></div>
+        <div style="flex:0 0 90px"><label>权重</label><input type="number" [(ngModel)]="t.weight" /></div>
+        <div style="flex:0 0 90px"><label>优先级</label><input type="number" [(ngModel)]="t.priority" /></div>
+        <button class="danger" (click)="removeTarget(i)">移除</button>
+      </div>
+
+      <div style="display:flex; gap:8px; margin-top:12px">
+        <button (click)="addTarget()">+ 候选</button>
+        <button class="primary" (click)="save()" [disabled]="saving()">保存</button>
+        <button (click)="cancel()">取消</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>已配置（{{ routes().length }}）</h2>
+      <table *ngIf="routes().length; else none">
+        <thead>
+          <tr><th>对外模型</th><th>策略</th><th>候选（按尝试顺序）</th><th>操作</th></tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let r of routes()">
+            <td class="mono">{{ r.model }}</td>
+            <td><span class="badge">{{ r.strategy }}</span></td>
+            <td>
+              <div *ngFor="let t of r.targets" class="mono">
+                {{ t.provider_id }}
+                <span class="muted">→ {{ t.model || '同请求模型' }}</span>
+                <span class="badge">w{{ t.weight }}</span>
+                <span class="badge">p{{ t.priority }}</span>
+              </div>
+            </td>
+            <td>
+              <button class="small" (click)="edit(r)">编辑</button>
+              <button class="small danger" (click)="remove(r)">删除</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <ng-template #none>
+        <div class="empty">还没有路由规则。未命中路由表时，会自动回退到「声明支持该模型的 provider」。</div>
+      </ng-template>
+    </div>
+  `,
+})
+export class RoutesComponent implements OnInit {
+  readonly routes = signal<Route[]>([]);
+  readonly providers = signal<Provider[]>([]);
+  readonly error = signal('');
+  readonly editing = signal(false);
+  readonly saving = signal(false);
+  editingModel = '';
+
+  form: Route = { model: '', strategy: 'failover', targets: [] };
+
+  constructor(private api: ApiService) {}
+
+  ngOnInit(): void {
+    this.load();
+    this.api.listProviders().subscribe({
+      next: (r) => this.providers.set(r.providers ?? []),
+      error: () => {},
+    });
+  }
+
+  load(): void {
+    this.api.listRoutes().subscribe({
+      next: (r) => this.routes.set(r.routes ?? []),
+      error: (e: Error) => this.error.set(e.message),
+    });
+  }
+
+  startNew(): void {
+    this.form = { model: '', strategy: 'failover', targets: [this.blankTarget()] };
+    this.editingModel = '';
+    this.editing.set(true);
+  }
+
+  blankTarget(): RouteTarget {
+    return { provider_id: '', model: '', weight: 100, priority: 10 };
+  }
+
+  edit(r: Route): void {
+    this.form = JSON.parse(JSON.stringify(r));
+    this.editingModel = r.model;
+    this.editing.set(true);
+  }
+
+  cancel(): void {
+    this.editing.set(false);
+  }
+
+  addTarget(): void {
+    this.form.targets.push(this.blankTarget());
+  }
+
+  removeTarget(i: number): void {
+    this.form.targets.splice(i, 1);
+  }
+
+  save(): void {
+    this.saving.set(true);
+    this.api.saveRoute(this.form).subscribe({
+      next: () => {
+        this.saving.set(false);
+        this.editing.set(false);
+        this.load();
+      },
+      error: (e: Error) => {
+        this.saving.set(false);
+        this.error.set(e.message);
+      },
+    });
+  }
+
+  remove(r: Route): void {
+    if (!confirm(`删除路由 ${r.model}？`)) return;
+    this.api.deleteRoute(r.model).subscribe({
+      next: () => this.load(),
+      error: (e: Error) => this.error.set(e.message),
+    });
+  }
+}

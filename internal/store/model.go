@@ -1,0 +1,132 @@
+// Package store 定义 llm-router 的持久化数据模型。
+//
+// 所有配置落在单个 JSON 文件（data/config.json），启动时全量载入内存，
+// 变更走「临时文件 + rename」原子落盘，避免写一半断电导致配置损坏。
+package store
+
+import (
+	"os"
+	"strings"
+	"time"
+)
+
+// CurrentVersion 是配置文件的 schema 版本，用于未来升级迁移。
+const CurrentVersion = 1
+
+// DefaultAdminToken 是初始化配置时写入的占位管理口令，上线前必须改掉。
+const DefaultAdminToken = "change-me-admin"
+
+// EnvKeyPrefix 表示 api_key 引用环境变量，如 "env:OPENAI_API_KEY"。
+// 真实密钥通过环境变量注入，不必写进 config.json；配置落盘与回显保留该引用本身。
+const EnvKeyPrefix = "env:"
+
+// Price 描述某模型的计费单价（美元 / 1K tokens）。
+type Price struct {
+	InputPer1K  float64 `json:"input_per_1k"`
+	OutputPer1K float64 `json:"output_per_1k"`
+}
+
+// Settings 是全局运行设置。
+type Settings struct {
+	Listen           string           `json:"listen"`
+	AdminToken       string           `json:"admin_token"`
+	DefaultTimeoutMS int              `json:"default_timeout_ms"`
+	MaxBodyBytes     int64            `json:"max_body_bytes"`
+	Pricing          map[string]Price `json:"pricing"`
+	// FailThreshold 连续失败多少次后把 provider 标记为不健康。
+	FailThreshold int `json:"fail_threshold"`
+	// CooldownSec 不健康 provider 的冷却期，冷却结束后进入半开探测。
+	CooldownSec int `json:"cooldown_sec"`
+}
+
+// Provider 是一个上游 LLM 服务（OpenAI / DeepSeek / 通义 / 本地 Ollama ...）。
+type Provider struct {
+	ID        string            `json:"id"`
+	Name      string            `json:"name"`
+	BaseURL   string            `json:"base_url"`
+	APIKey    string            `json:"api_key"`
+	Models    []string          `json:"models"`
+	Headers   map[string]string `json:"headers,omitempty"`
+	Enabled   bool              `json:"enabled"`
+	Weight    int               `json:"weight"`
+	Priority  int               `json:"priority"`
+	TimeoutMS int               `json:"timeout_ms"`
+	CreatedAt time.Time         `json:"created_at"`
+	UpdatedAt time.Time         `json:"updated_at"`
+}
+
+// ResolvedAPIKey 返回实际用于上游鉴权的 Key：
+// 配置为 env:NAME 时读取环境变量；变量缺失/为空时返回原串（由上游 401 暴露配置问题），
+// 非 env 引用则原样返回。该方法不修改落盘配置，env 引用始终保留。
+func (p Provider) ResolvedAPIKey() string {
+	if name, ok := strings.CutPrefix(p.APIKey, EnvKeyPrefix); ok {
+		if v, ok := os.LookupEnv(strings.TrimSpace(name)); ok && v != "" {
+			return v
+		}
+	}
+	return p.APIKey
+}
+
+// RouteTarget 是路由表里的一个候选上游。
+type RouteTarget struct {
+	ProviderID string `json:"provider_id"`
+	// Model 是转发给上游时使用的模型名，留空表示沿用请求里的模型名。
+	Model    string `json:"model,omitempty"`
+	Weight   int    `json:"weight"`
+	Priority int    `json:"priority"`
+}
+
+// Route 把一个「对外模型名 / 别名」映射到若干上游候选。
+type Route struct {
+	Model string `json:"model"`
+	// Strategy 取值：weighted（同优先级内加权随机）、failover（按优先级顺序降级）。
+	Strategy string        `json:"strategy"`
+	Targets  []RouteTarget `json:"targets"`
+}
+
+// Quota 是绑定在自制 Key 上的配额。0 表示不限制。
+type Quota struct {
+	MaxTokens   int64   `json:"max_tokens"`
+	MaxCostUSD  float64 `json:"max_cost_usd"`
+	DailyTokens int64   `json:"daily_tokens"`
+	RPM         int     `json:"rpm"`
+}
+
+// APIKey 是对外签发的自制 Token Key。明文只在创建时返回一次，库里只存哈希。
+type APIKey struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	Prefix    string    `json:"prefix"`
+	Hash      string    `json:"hash"`
+	Enabled   bool      `json:"enabled"`
+	Models    []string  `json:"models,omitempty"`
+	Quota     Quota     `json:"quota"`
+	CreatedAt time.Time `json:"created_at"`
+	ExpiresAt time.Time `json:"expires_at,omitempty"`
+}
+
+// Config 是 data/config.json 的整体结构。
+type Config struct {
+	Version   int        `json:"version"`
+	Settings  Settings   `json:"settings"`
+	Providers []Provider `json:"providers"`
+	Routes    []Route    `json:"routes"`
+	Keys      []APIKey   `json:"keys"`
+}
+
+// UsageRecord 是一条请求用量流水，按天追加写入 JSONL。
+type UsageRecord struct {
+	TS              time.Time `json:"ts"`
+	KeyID           string    `json:"key_id"`
+	Model           string    `json:"model"`
+	ProviderID      string    `json:"provider_id"`
+	UpstreamModel   string    `json:"upstream_model"`
+	PromptTokens    int       `json:"prompt_tokens"`
+	CompletionToken int       `json:"completion_tokens"`
+	TotalTokens     int       `json:"total_tokens"`
+	CostUSD         float64   `json:"cost_usd"`
+	LatencyMS       int64     `json:"latency_ms"`
+	Stream          bool      `json:"stream"`
+	Status          int       `json:"status"`
+	Error           string    `json:"error,omitempty"`
+}

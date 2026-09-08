@@ -1,0 +1,2 @@
+# 占位文件：保证 //go:embed all:dist 在尚未构建前端时也能解析到目录。
+# 真实前端构建（make web-build）会同步 index.html 等到此目录，覆盖本文件之外的产物。

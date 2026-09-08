@@ -1,0 +1,14 @@
+bin/
+coverage.out
+data/
+*.log
+.dev/
+
+# 前端
+web/node_modules/
+web/.angular/
+web/dist/
+web/out-tsc/
+# embed 源（internal/web/dist/browser）：构建产物忽略，保留 .gitkeep 以便 go build 的 embed 路径始终存在
+internal/web/dist/browser/*
+!internal/web/dist/browser/.gitkeep

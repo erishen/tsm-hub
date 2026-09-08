@@ -1,0 +1,469 @@
+// Package proxy 实现 OpenAI 兼容的转发层：
+//
+//   - 请求侧：校验自制 Key 后，把 Authorization 换成上游 provider 的 Key；
+//   - 路由侧：按路由表挑候选，失败自动 failover 到下一个；
+//   - 响应侧：非流式原样回传，流式按 SSE 逐帧转发并采集 usage。
+package proxy
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/erishen/llm-router/internal/quota"
+	"github.com/erishen/llm-router/internal/router"
+	"github.com/erishen/llm-router/internal/store"
+)
+
+// Proxy 持有转发所需的全部依赖。
+type Proxy struct {
+	store  *store.Store
+	router *router.Router
+	health *router.Tracker
+	rec    *quota.Recorder
+	client *http.Client
+}
+
+// New 创建转发器。
+func New(s *store.Store, rt *router.Router, h *router.Tracker, rec *quota.Recorder) *Proxy {
+	return &Proxy{
+		store:  s,
+		router: rt,
+		health: h,
+		rec:    rec,
+		client: &http.Client{
+			// 不用全局 Transport，避免被别的库改动；超时交给 context 控制。
+			Transport: &http.Transport{
+				MaxIdleConns:        256,
+				MaxIdleConnsPerHost: 32,
+				IdleConnTimeout:     90 * time.Second,
+			},
+		},
+	}
+}
+
+// Result 描述一次转发的最终 outcome，用于记账。
+type Result struct {
+	ProviderID      string
+	UpstreamModel   string
+	PromptTokens    int
+	CompletionToken int
+	TotalTokens     int
+	Status          int
+	Stream          bool
+	Latency         time.Duration
+	Err             string
+	// ProviderFault 表示失败源于上游服务端（网络错误或 5xx），计入健康熔断；
+	// 客户端引发的 4xx 等错误不置位，避免坏请求把健康上游拖下架。
+	ProviderFault bool
+}
+
+type usageObj struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
+}
+
+type chatRequest struct {
+	Model  string `json:"model"`
+	Stream bool   `json:"stream"`
+}
+
+// Handle 处理一个代理请求。path 是 /v1/xxx 形式的 OpenAI 路径。
+func (p *Proxy) Handle(w http.ResponseWriter, r *http.Request, key store.APIKey, path string, body []byte) Result {
+	started := time.Now()
+
+	var req chatRequest
+	if len(body) > 0 {
+		_ = json.Unmarshal(body, &req)
+	}
+	if req.Model == "" {
+		return p.fail(w, started, key, req.Model, http.StatusBadRequest, "model is required")
+	}
+	if len(key.Models) > 0 && !allowsModel(key.Models, req.Model) {
+		return p.fail(w, started, key, req.Model, http.StatusForbidden,
+			fmt.Sprintf("key is not allowed to use model %q", req.Model))
+	}
+
+	cands, err := p.router.Pick(req.Model)
+	if err != nil {
+		return p.fail(w, started, key, req.Model, http.StatusBadGateway, err.Error())
+	}
+
+	var lastErr string
+	for _, c := range cands {
+		res, retryable := p.attempt(w, r, c, path, body, req)
+		if retryable {
+			lastErr = res.Err
+			p.health.ReportFailure(c.ProviderID, res.Err)
+			continue
+		}
+		switch {
+		case res.ProviderFault:
+			p.health.ReportFailure(c.ProviderID, res.Err)
+		case res.Err == "":
+			p.health.ReportSuccess(c.ProviderID, time.Since(started))
+		}
+		p.account(key, req.Model, res)
+		return res
+	}
+	// 所有候选都失败。
+	res := Result{
+		ProviderID: strings.Join(providerIDs(cands), ","),
+		Status:     http.StatusBadGateway,
+		Stream:     req.Stream,
+		Latency:    time.Since(started),
+		Err:        lastErr,
+	}
+	p.account(key, req.Model, res)
+	writeError(w, res.Status, "upstream_unavailable", orDefault(lastErr, "all upstream providers failed"))
+	return res
+}
+
+func providerIDs(cs []router.Candidate) []string {
+	out := make([]string, 0, len(cs))
+	for _, c := range cs {
+		out = append(out, c.ProviderID)
+	}
+	return out
+}
+
+func orDefault(s, def string) string {
+	if s == "" {
+		return def
+	}
+	return s
+}
+
+// attempt 尝试把请求转发给某个候选。
+// 返回值 retryable=true 表示本次没有向客户端写出任何字节，可以换下一个候选重试。
+func (p *Proxy) attempt(w http.ResponseWriter, r *http.Request, c router.Candidate, path string, body []byte, req chatRequest) (Result, bool) {
+	started := time.Now()
+	upBody, err := rewriteBody(body, c.UpstreamModel, req.Stream)
+	if err != nil {
+		// 客户端请求体不合法：直接回 400，且不换候选（换谁都一样）。
+		res := Result{ProviderID: c.ProviderID, UpstreamModel: c.UpstreamModel,
+			Status: http.StatusBadRequest, Stream: req.Stream, Latency: time.Since(started), Err: err.Error()}
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return res, false
+	}
+
+	timeout := time.Duration(c.Provider.TimeoutMS) * time.Millisecond
+	if c.Provider.TimeoutMS <= 0 {
+		timeout = time.Duration(p.store.Settings().DefaultTimeoutMS) * time.Millisecond
+	}
+	if req.Stream {
+		timeout *= 5 // 流式是长连接，给更宽裕的整体超时
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
+	defer cancel()
+
+	upReq, err := http.NewRequestWithContext(ctx, r.Method, upstreamURL(c.Provider.BaseURL, path), bytes.NewReader(upBody))
+	if err != nil {
+		return Result{ProviderID: c.ProviderID, UpstreamModel: c.UpstreamModel, Status: http.StatusBadGateway,
+			Stream: req.Stream, Latency: time.Since(started), Err: err.Error(), ProviderFault: true}, true
+	}
+	copyHeaders(upReq.Header, r.Header)
+	upReq.Header.Set("Authorization", "Bearer "+c.Provider.ResolvedAPIKey())
+	upReq.Header.Set("Content-Type", "application/json")
+	for k, v := range c.Provider.Headers {
+		upReq.Header.Set(k, v)
+	}
+	upReq.ContentLength = int64(len(upBody))
+
+	resp, err := p.client.Do(upReq)
+	if err != nil {
+		return Result{ProviderID: c.ProviderID, UpstreamModel: c.UpstreamModel, Status: http.StatusBadGateway,
+			Stream: req.Stream, Latency: time.Since(started),
+			Err: fmt.Sprintf("upstream request failed: %v", err), ProviderFault: true}, true
+	}
+	defer resp.Body.Close()
+
+	// 5xx 视为可重试（尚未向客户端写任何字节），并计入上游故障。
+	if resp.StatusCode >= 500 {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
+		return Result{ProviderID: c.ProviderID, UpstreamModel: c.UpstreamModel, Status: resp.StatusCode,
+			Stream: req.Stream, Latency: time.Since(started),
+			Err: fmt.Sprintf("upstream %d: %s", resp.StatusCode, compact(string(b))), ProviderFault: true}, true
+	}
+
+	if req.Stream {
+		res := p.streamResponse(w, resp, c)
+		res.Latency = time.Since(started)
+		// 首帧之前就失败才允许重试；一旦写过帧就只能认了。
+		return res, false
+	}
+
+	res := p.bufferedResponse(w, resp, c)
+	res.Latency = time.Since(started)
+	return res, false
+}
+
+// bufferedResponse 处理非流式响应：整包读完再回传，便于解析 usage。
+func (p *Proxy) bufferedResponse(w http.ResponseWriter, resp *http.Response, c router.Candidate) Result {
+	data, err := io.ReadAll(io.LimitReader(resp.Body, p.store.Settings().MaxBodyBytes))
+	res := Result{
+		ProviderID:    c.ProviderID,
+		UpstreamModel: c.UpstreamModel,
+		Status:        resp.StatusCode,
+	}
+	if err != nil {
+		res.Err = fmt.Sprintf("read upstream body: %v", err)
+		res.ProviderFault = true // 上游连接中途断开
+		writeError(w, http.StatusBadGateway, "upstream_read_error", res.Err)
+		return res
+	}
+	copyResponseHeaders(w.Header(), resp.Header)
+	w.Header().Set("X-LLM-Router-Provider", c.ProviderID)
+	w.WriteHeader(resp.StatusCode)
+	_, _ = w.Write(data)
+
+	var payload struct {
+		Usage usageObj `json:"usage"`
+	}
+	if err := json.Unmarshal(data, &payload); err == nil {
+		res.PromptTokens = payload.Usage.PromptTokens
+		res.CompletionToken = payload.Usage.CompletionTokens
+		res.TotalTokens = payload.Usage.TotalTokens
+	}
+	if resp.StatusCode >= 400 {
+		res.Err = fmt.Sprintf("upstream %d: %s", resp.StatusCode, compact(string(data)))
+		// 5xx 在 attempt 里已按可重试处理，走到这里说明是 4xx 等客户端问题，
+		// 不置 ProviderFault，避免坏请求把健康上游熔断摘除。
+	}
+	return res
+}
+
+// streamResponse 逐帧转发 SSE，并从最后一帧里取 usage。
+func (p *Proxy) streamResponse(w http.ResponseWriter, resp *http.Response, c router.Candidate) Result {
+	res := Result{
+		ProviderID:    c.ProviderID,
+		UpstreamModel: c.UpstreamModel,
+		Status:        resp.StatusCode,
+		Stream:        true,
+	}
+	copyResponseHeaders(w.Header(), resp.Header)
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.Header().Set("X-LLM-Router-Provider", c.ProviderID)
+	w.WriteHeader(resp.StatusCode)
+
+	flusher, _ := w.(http.Flusher)
+	if flusher != nil {
+		flusher.Flush()
+	}
+
+	var prompt, completion, total int
+	br := bufio.NewReaderSize(resp.Body, 32*1024)
+	wrote := false
+	for {
+		line, err := br.ReadString('\n')
+		if line != "" {
+			wrote = true
+			if _, werr := io.WriteString(w, line); werr != nil {
+				res.Err = fmt.Sprintf("write client: %v", werr)
+				res.PromptTokens, res.CompletionToken, res.TotalTokens = prompt, completion, total
+				return res
+			}
+			if strings.HasPrefix(line, "data:") {
+				if pt, ct, tt, ok := parseSSEUsage(line); ok {
+					prompt, completion, total = pt, ct, tt
+				}
+			}
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			if !wrote {
+				// 首帧之前断流：上游问题，标记为故障。
+				res.Err = fmt.Sprintf("read upstream stream: %v", err)
+				res.ProviderFault = true
+			}
+			res.PromptTokens, res.CompletionToken, res.TotalTokens = prompt, completion, total
+			return res
+		}
+	}
+	if resp.StatusCode >= 400 {
+		res.Err = fmt.Sprintf("upstream %d in stream", resp.StatusCode)
+	}
+	res.PromptTokens, res.CompletionToken, res.TotalTokens = prompt, completion, total
+	return res
+}
+
+// parseSSEUsage 从 "data: {...}" 帧里解析 usage。
+func parseSSEUsage(line string) (int, int, int, bool) {
+	payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+	if payload == "" || payload == "[DONE]" {
+		return 0, 0, 0, false
+	}
+	var chunk struct {
+		Usage *usageObj `json:"usage"`
+	}
+	if err := json.Unmarshal([]byte(payload), &chunk); err != nil || chunk.Usage == nil {
+		return 0, 0, 0, false
+	}
+	u := chunk.Usage
+	total := u.TotalTokens
+	if total == 0 {
+		total = u.PromptTokens + u.CompletionTokens
+	}
+	return u.PromptTokens, u.CompletionTokens, total, true
+}
+
+// rewriteBody 改写 model 名，并在流式请求里注入 stream_options 以索取 usage。
+func rewriteBody(body []byte, upstreamModel string, stream bool) ([]byte, error) {
+	if len(body) == 0 {
+		return body, nil
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(body, &m); err != nil {
+		return nil, fmt.Errorf("invalid json body: %w", err)
+	}
+	m["model"] = json.RawMessage(strconv.Quote(upstreamModel))
+	if stream {
+		if _, has := m["stream_options"]; !has {
+			m["stream_options"] = json.RawMessage(`{"include_usage":true}`)
+		}
+	}
+	out, err := json.Marshal(m)
+	if err != nil {
+		return nil, fmt.Errorf("re-marshal body: %w", err)
+	}
+	return out, nil
+}
+
+// upstreamURL 拼接上游地址。
+//
+// 上游 base_url 常见两种写法：https://api.openai.com/v1 或 https://api.openai.com，
+// 而客户端请求的路径固定带 /v1 前缀（/v1/chat/completions），
+// 因此当 base 已经以 /v1 结尾时，要把 path 的 /v1 前缀去掉，避免拼成 /v1/v1/...。
+func upstreamURL(base, path string) string {
+	base = strings.TrimRight(base, "/")
+	if strings.HasSuffix(base, "/v1") && strings.HasPrefix(path, "/v1/") {
+		path = strings.TrimPrefix(path, "/v1")
+	}
+	return base + path
+}
+
+func allowsModel(allowed []string, model string) bool {
+	for _, m := range allowed {
+		if m == model || m == "*" {
+			return true
+		}
+	}
+	return false
+}
+
+func copyHeaders(dst, src http.Header) {
+	for k, vs := range src {
+		lk := strings.ToLower(k)
+		if lk == "authorization" || lk == "host" || lk == "content-length" ||
+			lk == "content-encoding" || lk == "transfer-encoding" || lk == "connection" {
+			continue
+		}
+		for _, v := range vs {
+			dst.Add(k, v)
+		}
+	}
+}
+
+func copyResponseHeaders(dst, src http.Header) {
+	for k, vs := range src {
+		lk := strings.ToLower(k)
+		if lk == "content-length" || lk == "transfer-encoding" || lk == "connection" {
+			continue
+		}
+		for _, v := range vs {
+			dst.Add(k, v)
+		}
+	}
+}
+
+func compact(s string) string {
+	s = strings.TrimSpace(strings.ReplaceAll(s, "\n", " "))
+	if len(s) > 300 {
+		return s[:300] + "…"
+	}
+	return s
+}
+
+// account 把一次请求写入用量流水。
+func (p *Proxy) account(key store.APIKey, model string, res Result) {
+	st := p.store.Settings()
+	// 计价优先按真实上游模型查表（别名 smart/cheap 永远命中不了 gpt-4o 的单价），
+	// 再回落到客户端模型名，最后用 default。
+	price, ok := st.Pricing[res.UpstreamModel]
+	if !ok {
+		price, ok = st.Pricing[model]
+	}
+	if !ok {
+		price = st.Pricing["default"]
+	}
+	cost := float64(res.PromptTokens)/1000*price.InputPer1K + float64(res.CompletionToken)/1000*price.OutputPer1K
+	total := res.TotalTokens
+	if total == 0 {
+		total = res.PromptTokens + res.CompletionToken
+	}
+	_ = p.rec.Record(store.UsageRecord{
+		TS:              time.Now(),
+		KeyID:           key.ID,
+		Model:           model,
+		ProviderID:      res.ProviderID,
+		UpstreamModel:   res.UpstreamModel,
+		PromptTokens:    res.PromptTokens,
+		CompletionToken: res.CompletionToken,
+		TotalTokens:     total,
+		CostUSD:         cost,
+		LatencyMS:       res.Latency.Milliseconds(),
+		Stream:          res.Stream,
+		Status:          res.Status,
+		Error:           res.Err,
+	})
+}
+
+// fail 写错误响应并记账。
+func (p *Proxy) fail(w http.ResponseWriter, started time.Time, key store.APIKey, model string, status int, msg string) Result {
+	res := Result{Status: status, Latency: time.Since(started), Err: msg}
+	p.account(key, model, res)
+	writeError(w, status, httpStatusSlug(status), msg)
+	return res
+}
+
+func httpStatusSlug(status int) string {
+	switch status {
+	case http.StatusBadRequest:
+		return "bad_request"
+	case http.StatusForbidden:
+		return "forbidden"
+	case http.StatusTooManyRequests:
+		return "rate_limited"
+	default:
+		return "bad_gateway"
+	}
+}
+
+// writeError 输出 OpenAI 风格的错误体。
+func writeError(w http.ResponseWriter, status int, code, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"error": map[string]any{
+			"message": msg,
+			"type":    code,
+			"code":    code,
+		},
+	})
+}
