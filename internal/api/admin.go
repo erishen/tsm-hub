@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -465,14 +466,38 @@ func parseMoonshotBalance(body []byte) map[string]any {
 	}
 }
 
-// parseDeepSeekBalance: {"balance_infos":[{"currency":"CNY","total_balance":"114.5","granted_balance":"14.5","topped_up_balance":"100"}]}
+// flexFloat 兼容 JSON 字符串与数字两种表示（DeepSeek 余额字段是 "51.75" 字符串）。
+type flexFloat float64
+
+func (f *flexFloat) UnmarshalJSON(b []byte) error {
+	if len(b) > 0 && b[0] == '"' {
+		var s string
+		if err := json.Unmarshal(b, &s); err != nil {
+			return err
+		}
+		v, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
+		if err != nil {
+			return err
+		}
+		*f = flexFloat(v)
+		return nil
+	}
+	var n float64
+	if err := json.Unmarshal(b, &n); err != nil {
+		return err
+	}
+	*f = flexFloat(n)
+	return nil
+}
+
+// parseDeepSeekBalance: {"balance_infos":[{"currency":"CNY","total_balance":"51.75","granted_balance":"0","topped_up_balance":"51.75"}]}
 func parseDeepSeekBalance(body []byte) map[string]any {
 	var raw struct {
 		BalanceInfos []struct {
-			Currency       string  `json:"currency"`
-			TotalBalance   float64 `json:"total_balance"`
-			GrantedBalance float64 `json:"granted_balance"`
-			ToppedUp       float64 `json:"topped_up_balance"`
+			Currency       string    `json:"currency"`
+			TotalBalance   flexFloat `json:"total_balance"`
+			GrantedBalance flexFloat `json:"granted_balance"`
+			ToppedUp       flexFloat `json:"topped_up_balance"`
 		} `json:"balance_infos"`
 	}
 	if err := json.Unmarshal(body, &raw); err != nil || len(raw.BalanceInfos) == 0 {
@@ -485,9 +510,9 @@ func parseDeepSeekBalance(body []byte) map[string]any {
 	return map[string]any{
 		"kind":      "deepseek",
 		"currency":  b.Currency,
-		"total":     b.TotalBalance,
-		"granted":   b.GrantedBalance,
-		"topped_up": b.ToppedUp,
+		"total":     float64(b.TotalBalance),
+		"granted":   float64(b.GrantedBalance),
+		"topped_up": float64(b.ToppedUp),
 	}
 }
 

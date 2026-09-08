@@ -83,6 +83,16 @@ func (m *mockUpstream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	if r.URL.Path == "/v1/user/balance" {
+		// DeepSeek 风格：余额字段是字符串
+		writeMockJSON(w, map[string]any{
+			"is_available": true,
+			"balance_infos": []any{
+				map[string]any{"currency": "CNY", "total_balance": "51.75", "granted_balance": "0.00", "topped_up_balance": "51.75"},
+			},
+		})
+		return
+	}
 	var req map[string]any
 	_ = json.Unmarshal(body, &req)
 	m.model, _ = req["model"].(string)
@@ -323,6 +333,27 @@ func TestProviderBalances(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("upsert mock-local: %v", err)
 	}
+	// deepseek 风格：独立 mock 仅提供 /v1/user/balance（字符串余额字段），
+	// 避免被通用 mock 的 moonshot 余额端点抢先命中。
+	dsSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/user/balance" {
+			writeMockJSON(w, map[string]any{
+				"is_available": true,
+				"balance_infos": []any{
+					map[string]any{"currency": "CNY", "total_balance": "51.75", "granted_balance": "0.00", "topped_up_balance": "51.75"},
+				},
+			})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer dsSrv.Close()
+	if err := e.store.UpsertProvider(store.Provider{
+		ID: "bal-ds", Name: "DeepSeek", BaseURL: dsSrv.URL + "/v1",
+		APIKey: "sk-ds", Models: []string{"mock-model"},
+	}); err != nil {
+		t.Fatalf("upsert ds: %v", err)
+	}
 
 	resp := e.do(t, http.MethodGet, "/api/admin/providers/balances", "", e.adminHeaders())
 	defer resp.Body.Close()
@@ -337,6 +368,10 @@ func TestProviderBalances(t *testing.T) {
 				Available float64 `json:"available"`
 				Voucher   float64 `json:"voucher"`
 				Cash      float64 `json:"cash"`
+				Total     float64 `json:"total"`
+				Granted   float64 `json:"granted"`
+				ToppedUp  float64 `json:"topped_up"`
+				Currency  string  `json:"currency"`
 			} `json:"balance"`
 			Error string `json:"error"`
 		} `json:"balances"`
@@ -344,13 +379,17 @@ func TestProviderBalances(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	var p1, p2 *struct {
+	var p1, p2, p3 *struct {
 		ID      string `json:"id"`
 		Balance *struct {
 			Kind      string  `json:"kind"`
 			Available float64 `json:"available"`
 			Voucher   float64 `json:"voucher"`
 			Cash      float64 `json:"cash"`
+			Total     float64 `json:"total"`
+			Granted   float64 `json:"granted"`
+			ToppedUp  float64 `json:"topped_up"`
+			Currency  string  `json:"currency"`
 		} `json:"balance"`
 		Error string `json:"error"`
 	}
@@ -363,6 +402,8 @@ func TestProviderBalances(t *testing.T) {
 			p1 = &payload.Balances[i]
 		case "bal-p2":
 			p2 = &payload.Balances[i]
+		case "bal-ds":
+			p3 = &payload.Balances[i]
 		}
 	}
 	if p1 == nil || p1.Balance == nil || p1.Balance.Kind != "moonshot" || p1.Balance.Available != 14.99736 {
@@ -373,6 +414,10 @@ func TestProviderBalances(t *testing.T) {
 	}
 	if p2 == nil || p2.Error != "no_key" {
 		t.Fatalf("p2 = %+v, want no_key", p2)
+	}
+	if p3 == nil || p3.Balance == nil || p3.Balance.Kind != "deepseek" ||
+		p3.Balance.Total != 51.75 || p3.Balance.Granted != 0 || p3.Balance.ToppedUp != 51.75 || p3.Balance.Currency != "CNY" {
+		t.Fatalf("p3 = %+v, want deepseek 51.75/0/51.75 CNY", p3)
 	}
 }
 
