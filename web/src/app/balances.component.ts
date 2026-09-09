@@ -39,6 +39,8 @@ import { Balance, ProviderBalance } from './models';
           <td>
             <ng-container *ngIf="b.balance; else noBal">
               <strong [title]="balanceNote(b.balance!)">{{ balanceText(b.balance!) }}</strong>
+              <a *ngIf="b.balance!.url" [href]="b.balance!.url" target="_blank" rel="noopener"
+                 class="muted small" style="margin-left:8px">控制台 ↗</a>
               <span class="badge free" *ngIf="freeBadge(b.balance!)" style="margin-left:8px">{{ freeBadge(b.balance!) }}</span>
             </ng-container>
             <ng-template #noBal><span class="muted">—</span></ng-template>

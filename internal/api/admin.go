@@ -376,6 +376,7 @@ func (s *Server) probeAliBailianLimits(ctx context.Context, baseURL, key string)
 		"plan":  "阿里云百炼",
 		"quota": "限流配额：" + strings.Join(parts, " · "),
 		"note":  "免费额度剩余量无公开 API，请在百炼控制台「免费额度」页查看；此为限流配额（每周期可调用 tokens 上限）",
+		"url":   "https://bailian.console.aliyun.com",
 	}
 }
 
@@ -817,14 +818,16 @@ func (s *Server) probeBalance(ctx context.Context, baseURL, key string) map[stri
 	// 无公开余额接口的平台（如 SenseNova Token Plan、TokenRouter）：
 	// 实测常见余额端点全 404，额度只在各自控制台/Dashboard 查看。
 	// 这里返回官方公开的配额/平台信息（非实时余额），让额度页不至于空白。
-	type platformNote struct{ host, plan, quota, reset, note string }
+	type platformNote struct{ host, plan, quota, reset, note, url string }
 	platforms := []platformNote{
 		{"token.sensenova.cn", "免费公测",
 			"每5小时 1500 次调用（自研）/ 500 次（DeepSeek V4 Flash）",
 			"每5小时独立刷新，无一次性总量限制",
-			"无公开余额接口，剩余次数请在商汤控制台查看"},
+			"无公开余额接口，剩余次数请在商汤控制台查看",
+			"https://platform.sensenova.cn"},
 		{"tokenrouter.com", "免费/低价模型聚合", "", "",
-			"无公开余额接口，余额请在 TokenRouter Dashboard 查看"},
+			"无公开余额接口，余额请在 TokenRouter Dashboard 查看",
+			"https://www.tokenrouter.com"},
 	}
 	for _, pn := range platforms {
 		if strings.Contains(baseURL, pn.host) {
@@ -834,6 +837,7 @@ func (s *Server) probeBalance(ctx context.Context, baseURL, key string) map[stri
 				"quota":  pn.quota,
 				"reset":  pn.reset,
 				"note":   pn.note,
+				"url":    pn.url,
 			}
 		}
 	}

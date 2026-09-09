@@ -149,11 +149,13 @@ export interface Balance {
   expires_at?: string;
   total_credits?: number;
   total_usage?: number;
-  /** 无公开余额接口的平台（SenseNova Token Plan / TokenRouter）：官方公开信息 */
+  /** 无公开余额接口的平台（SenseNova Token Plan / TokenRouter / 阿里云百炼）：官方公开信息 */
   plan?: string;
   quota?: string;
   reset?: string;
   note?: string;
+  /** 平台控制台直达链接（查看剩余免费额度等） */
+  url?: string;
 }
 
 /** 额度页：单个 Provider 的余额查询结果（error: no_key | unavailable）。 */
