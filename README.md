@@ -126,6 +126,34 @@ llm-router/
 | `providers[]` | 上游：`base_url`（可带或不带 `/v1`）、`api_key`、`models`、`weight`、`priority` |
 | `routes[]` | 对外模型名 → 候选列表；`strategy`: `failover`（按 priority 降级）/ `weighted`（按权重分流）|
 | `keys[]` | 自制 Key，**只存 sha256 哈希** |
+| `settings.skills_dir` | Agent Skills 技能库目录（支持相对路径）；空 = 不启用技能 |
+| `settings.agent.*` | 网关 agent（通用工具 + 服务端执行循环），见下 |
+
+**网关 agent（内置通用工具）**：客户端请求**不传 `tools`** 时，网关自动附加内置工具池
+并在服务端执行 `tool_calls` 循环，最终返回答案（流式请求同样内部跑完循环后按 SSE 回放）：
+
+| 工具 | 说明 |
+|------|------|
+| `get_time` | 服务器当前本地时间 |
+| `calc` | 数学表达式计算（四则 + 括号 + sqrt/pow/min/max/round/floor/ceil/sin/cos/tan/log/exp）|
+| `fetch_url` | 抓取网页/API 文本（仅 http/https，**默认拒绝内网地址**防 SSRF）|
+| `echo` | 回显文本 |
+| `skill-run` | 加载网关技能库中指定技能的完整说明 |
+| `remember` / `recall` | 按 key 隔离的键值记忆（进程内存）|
+| `read_file` | 读取白名单根目录内文件（需配置 `agent.read_root` 才提供）|
+
+`settings.agent` 配置：
+
+| 字段 | 说明 |
+|------|------|
+| `disabled` | `true` 关闭 agent（默认启用）|
+| `max_rounds` | 工具循环最大轮数（默认 4）|
+| `allow_private_url` | `fetch_url` 放行内网/环回地址（默认拒绝）|
+| `read_root` | `read_file` 允许的根目录（空 = 不提供该工具）|
+| `memory_file` | `remember` 持久化文件（空 = 仅内存）|
+
+请求级开关：`X-Llm-Router-Agent: off` 请求头可对本请求关闭 agent；客户端自带
+`tools` 时网关始终尊重客户端（纯透传，不注入、不执行）。
 
 **上游 Key 不写进配置文件**：`api_key` 支持 `env:OPENAI_API_KEY` 这种引用形式，
 启动前把真实 Key 放到环境变量里即可（管理台回显会保留引用本身，不含密钥）。

@@ -20,6 +20,7 @@ import (
 
 	"github.com/erishen/llm-router/internal/quota"
 	"github.com/erishen/llm-router/internal/router"
+	"github.com/erishen/llm-router/internal/skills"
 	"github.com/erishen/llm-router/internal/store"
 )
 
@@ -30,15 +31,17 @@ type Proxy struct {
 	health *router.Tracker
 	rec    *quota.Recorder
 	client *http.Client
+	skills *skills.Library
 }
 
 // New 创建转发器。
-func New(s *store.Store, rt *router.Router, h *router.Tracker, rec *quota.Recorder) *Proxy {
+func New(s *store.Store, rt *router.Router, h *router.Tracker, rec *quota.Recorder, sk *skills.Library) *Proxy {
 	return &Proxy{
 		store:  s,
 		router: rt,
 		health: h,
 		rec:    rec,
+		skills: sk,
 		client: &http.Client{
 			// 不用全局 Transport，避免被别的库改动；超时交给 context 控制。
 			Transport: &http.Transport{
@@ -94,6 +97,12 @@ func (p *Proxy) Handle(w http.ResponseWriter, r *http.Request, key store.APIKey,
 	if len(key.Models) > 0 && !allowsModel(key.Models, req.Model) {
 		return p.fail(w, started, key, req.Model, http.StatusForbidden,
 			fmt.Sprintf("key is not allowed to use model %q", req.Model))
+	}
+	// 网关 agent：客户端不传 tools 时，自动附加内置工具并在服务端执行循环。
+	if p.agentChat(body, r) {
+		if handled, res := p.agentRun(w, r, key, path, body, req); handled {
+			return res
+		}
 	}
 	slog.Info("chat request", "model", req.Model, "key", key.ID)
 
@@ -520,8 +529,7 @@ func httpStatusSlug(status int) string {
 }
 
 // writeError 输出 OpenAI 风格的错误体。
-func writeError(w http.ResponseWriter, status int, code, msg string) {
-	w.Header().Set("Content-Type", "application/json")
+func writeError(w http.ResponseWriter, status int, code, msg string) {	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"error": map[string]any{
@@ -530,4 +538,11 @@ func writeError(w http.ResponseWriter, status int, code, msg string) {
 			"code":    code,
 		},
 	})
+}
+
+// writeJSON 输出 JSON 响应（agent 回放用）。
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
 }

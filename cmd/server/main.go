@@ -87,7 +87,7 @@ func run(cfg config.Config) error {
 	limiter := quota.NewLimiter(rec)
 	tracker := router.NewTracker(settings.FailThreshold, settings.CooldownSec)
 	rt := router.New(st, tracker)
-	px := proxy.New(st, rt, tracker, rec)
+	px := proxy.New(st, rt, tracker, rec, skills.New(settings.SkillsDir))
 
 	srv := api.New(api.Options{
 		Store:   st,

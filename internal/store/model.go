@@ -42,6 +42,24 @@ type Settings struct {
 	// SkillsDir 指向外部 Agent Skills 技能库目录（如 resolve-skills/skills）。
 	// 空 = 不启用技能库浏览。
 	SkillsDir string `json:"skills_dir,omitempty"`
+	// Agent 是网关 agent 能力（内置通用工具 + 服务端执行循环）的配置。
+	Agent AgentCfg `json:"agent,omitempty"`
+}
+
+// AgentCfg 配置网关 agent：客户端不传 tools 时，网关自动附加内置工具池
+// （get_time/calc/fetch_url/echo/skill-run/remember/recall/read_file）并在
+// 服务端执行 tool_calls 循环，最终把答案（含工具结果）返回给客户端。
+type AgentCfg struct {
+	// Disabled=true 时关闭网关工具循环（默认启用）。
+	Disabled bool `json:"disabled,omitempty"`
+	// MaxRounds 工具循环最大轮数（默认 4）。
+	MaxRounds int `json:"max_rounds,omitempty"`
+	// AllowPrivateURL 放行 fetch_url 访问内网/环回地址（默认拒绝，防 SSRF）。
+	AllowPrivateURL bool `json:"allow_private_url,omitempty"`
+	// ReadRoot 为 read_file 的允许根目录；空 = 不提供 read_file 工具。
+	ReadRoot string `json:"read_root,omitempty"`
+	// MemoryFile 为 remember 的持久化文件；空 = 仅进程内存（重启丢失）。
+	MemoryFile string `json:"memory_file,omitempty"`
 }
 
 // SmartScoreCfg 是 smart 策略的可调参数。0 值表示用默认值。

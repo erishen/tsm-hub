@@ -94,6 +94,38 @@ func (m *mockUpstream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	// agent 模式：第一轮返回 calc tool_call，第二轮（带 tool 结果）返回最终答案。
+	if m.mode == "agent" {
+		var req2 map[string]any
+		_ = json.Unmarshal(body, &req2)
+		msgs, _ := req2["messages"].([]any)
+		hasTool := false
+		for _, mm := range msgs {
+			if role, ok := mm.(map[string]any)["role"].(string); ok && role == "tool" {
+				hasTool = true
+			}
+		}
+		if !hasTool {
+			writeMockJSON(w, map[string]any{
+				"id": "chatcmpl-mock-agent", "object": "chat.completion", "model": m.model,
+				"choices": []any{map[string]any{"message": map[string]any{
+					"role": "assistant", "content": nil,
+					"tool_calls": []any{map[string]any{
+						"id": "call_1", "type": "function",
+						"function": map[string]any{"name": "calc", "arguments": `{"expression":"1+1"}`},
+					}},
+				}}},
+				"usage": map[string]any{"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+			})
+			return
+		}
+		writeMockJSON(w, map[string]any{
+			"id": "chatcmpl-mock-agent2", "object": "chat.completion", "model": m.model,
+			"choices": []any{map[string]any{"message": map[string]any{"role": "assistant", "content": "答案是 2（已用 calc 工具计算）"}}},
+			"usage": map[string]any{"prompt_tokens": 20, "completion_tokens": 10, "total_tokens": 30},
+		})
+		return
+	}
 	var req map[string]any
 	_ = json.Unmarshal(body, &req)
 	m.model, _ = req["model"].(string)
@@ -205,7 +237,7 @@ func newEnv(t *testing.T, mode string) *env {
 	limiter := quota.NewLimiter(rec)
 	tracker := router.NewTracker(3, 60)
 	rt := router.New(st, tracker)
-	px := proxy.New(st, rt, tracker, rec)
+	px := proxy.New(st, rt, tracker, rec, nil)
 	srv := New(Options{Store: st, Rec: rec, Limiter: limiter, Router: rt, Health: tracker, Proxy: px})
 
 	plaintext, hash, display, err := auth.Generate()
@@ -245,6 +277,13 @@ func (e *env) do(t *testing.T, method, path, body string, headers map[string]str
 
 func (e *env) authHeaders() map[string]string {
 	return map[string]string{"Authorization": "Bearer " + e.plain, "Content-Type": "application/json"}
+}
+
+// passthruHeaders 显式关闭网关 agent，用于验证纯透传路径（旧行为回归）。
+func (e *env) passthruHeaders() map[string]string {
+	h := e.authHeaders()
+	h["X-Llm-Router-Agent"] = "off"
+	return h
 }
 
 func (e *env) adminHeaders() map[string]string {
@@ -692,9 +731,9 @@ func TestMetricsEndpoint(t *testing.T) {
 	e := newEnv(t, "ok")
 	defer e.server.Close()
 
-	// 1) 正常请求（主 key）
+	// 1) 正常请求（主 key，纯透传路径）
 	resp := e.do(t, http.MethodPost, "/v1/chat/completions",
-		`{"model":"smart","messages":[{"role":"user","content":"hi"}]}`, e.authHeaders())
+		`{"model":"smart","messages":[{"role":"user","content":"hi"}]}`, e.passthruHeaders())
 	resp.Body.Close()
 	// 2) 未授权请求 → 401
 	resp = e.do(t, http.MethodPost, "/v1/chat/completions", `{"model":"smart"}`, nil)
@@ -849,7 +888,7 @@ func TestProxySetsProviderHeader(t *testing.T) {
 	defer e.server.Close()
 
 	resp := e.do(t, http.MethodPost, "/v1/chat/completions",
-		`{"model":"smart","messages":[{"role":"user","content":"hi"}]}`, e.authHeaders())
+		`{"model":"smart","messages":[{"role":"user","content":"hi"}]}`, e.passthruHeaders())
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d", resp.StatusCode)
@@ -885,7 +924,7 @@ func TestClient4xxDoesNotEvictProvider(t *testing.T) {
 	// 连续 3 次 400（客户端问题），达到 fail_threshold=3，provider 也不应被熔断。
 	for i := 0; i < 3; i++ {
 		resp := e.do(t, http.MethodPost, "/v1/chat/completions",
-			`{"model":"smart4","messages":[{"role":"user","content":"hi"}]}`, e.authHeaders())
+			`{"model":"smart4","messages":[{"role":"user","content":"hi"}]}`, e.passthruHeaders())
 		resp.Body.Close()
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Fatalf("request %d: status = %d, want 400", i, resp.StatusCode)
@@ -967,7 +1006,7 @@ func TestProxyStream(t *testing.T) {
 	defer e.server.Close()
 
 	resp := e.do(t, http.MethodPost, "/v1/chat/completions",
-		`{"model":"smart","stream":true,"messages":[{"role":"user","content":"hi"}]}`, e.authHeaders())
+		`{"model":"smart","stream":true,"messages":[{"role":"user","content":"hi"}]}`, e.passthruHeaders())
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(resp.Body)
@@ -1386,3 +1425,142 @@ func TestProbeProviderModels(t *testing.T) {
 	}
 }
 
+
+// TestAgentToolLoop 验证网关 agent：客户端不传 tools，网关自动附加工具池并在
+// 服务端执行 tool_calls 循环，最终返回带工具结果的答案。
+func TestAgentToolLoop(t *testing.T) {
+	e := newEnv(t, "agent")
+	defer e.server.Close()
+
+	resp := e.do(t, http.MethodPost, "/v1/chat/completions",
+		`{"model":"smart","messages":[{"role":"user","content":"1+1=?"}]}`, e.authHeaders())
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d %s", resp.StatusCode, b)
+	}
+	if got := resp.Header.Get("X-Llm-Router-Provider"); got != "backup" {
+		t.Fatalf("X-Llm-Router-Provider = %q, want backup (agent served by backup)", got)
+	}
+	var out struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+		Usage struct {
+			TotalTokens int `json:"total_tokens"`
+		} `json:"usage"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Choices) != 1 || !strings.Contains(out.Choices[0].Message.Content, "2") {
+		t.Fatalf("answer = %q, want content containing 2", out.Choices[0].Message.Content)
+	}
+	if out.Usage.TotalTokens != 30 {
+		t.Fatalf("usage total = %d, want 30 (final round)", out.Usage.TotalTokens)
+	}
+	// 工具循环确实发生了：mock 收到过第二轮带 tool 结果的请求。
+	if up := e.upOK; up != nil && len(up.bodies) < 2 {
+		t.Fatalf("expected >=2 upstream calls (tool loop), got %d", len(up.bodies))
+	}
+}
+
+// TestAgentStreamReplay 验证流式：agent 内部跑完工具循环后，以 SSE 回放最终答案。
+func TestAgentStreamReplay(t *testing.T) {
+	e := newEnv(t, "agent")
+	defer e.server.Close()
+
+	resp := e.do(t, http.MethodPost, "/v1/chat/completions",
+		`{"model":"smart","stream":true,"messages":[{"role":"user","content":"1+1=?"}]}`, e.authHeaders())
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d %s", resp.StatusCode, b)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.Contains(ct, "text/event-stream") {
+		t.Fatalf("content-type = %q", ct)
+	}
+	sc := bufio.NewScanner(resp.Body)
+	text, done, chunks := "", false, 0
+	for sc.Scan() {
+		line := sc.Text()
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		chunks++
+		if strings.Contains(line, "[DONE]") {
+			done = true
+			continue
+		}
+		var chunk struct {
+			Choices []struct {
+				Delta struct {
+					Content string `json:"content"`
+				} `json:"delta"`
+			} `json:"choices"`
+		}
+		_ = json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &chunk)
+		for _, c := range chunk.Choices {
+			text += c.Delta.Content
+		}
+	}
+	if !done || chunks < 3 {
+		t.Fatalf("stream: chunks=%d done=%v", chunks, done)
+	}
+	if !strings.Contains(text, "2") {
+		t.Fatalf("streamed text = %q, want containing 2", text)
+	}
+}
+
+// TestAgent4xxPassthrough 验证 agent 路径下上游 4xx 原样透传（不 502、不熔断）。
+func TestAgent4xxPassthrough(t *testing.T) {
+	e := newEnv(t, "ok")
+	defer e.server.Close()
+
+	up4 := &mockUpstream{mode: "400"}
+	srv4 := httptest.NewServer(up4)
+	defer srv4.Close()
+	if err := e.store.UpsertProvider(store.Provider{
+		ID: "four", Name: "Four", BaseURL: srv4.URL + "/v1",
+		APIKey: "sk-up-4xx", Models: []string{"gpt-mock"}, Enabled: true,
+		Weight: 100, Priority: 1, TimeoutMS: 5000,
+	}); err != nil {
+		t.Fatalf("upsert 4xx provider: %v", err)
+	}
+	if err := e.store.UpsertRoute(store.Route{
+		Model: "smart4", Strategy: "failover",
+		Targets: []store.RouteTarget{{ProviderID: "four", Model: "gpt-mock", Priority: 1, Weight: 100}},
+	}); err != nil {
+		t.Fatalf("upsert route: %v", err)
+	}
+	// agent 默认启用（无 off 头）。
+	resp := e.do(t, http.MethodPost, "/v1/chat/completions",
+		`{"model":"smart4","messages":[{"role":"user","content":"hi"}]}`, e.authHeaders())
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+	if !e.srv.health.Available("four") {
+		t.Fatal("provider was evicted by client-side 4xx response (agent path)")
+	}
+}
+
+// TestAgentSkillsInjection 验证 agent 路径也执行 key 的技能注入。
+func TestAgentSkillsInjection(t *testing.T) {
+	e := newEnv(t, "agent")
+	defer e.server.Close()
+
+	// 给主 key 开启技能注入（list 无技能库时为空，仅验证不破坏循环）。
+	if err := e.store.UpdateKey("k-test", "", nil, store.Quota{}, "list"); err != nil {
+		t.Fatalf("update key: %v", err)
+	}
+	resp := e.do(t, http.MethodPost, "/v1/chat/completions",
+		`{"model":"smart","messages":[{"role":"user","content":"1+1=?"}]}`, e.authHeaders())
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d %s", resp.StatusCode, b)
+	}
+}
