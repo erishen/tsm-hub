@@ -127,8 +127,9 @@ func TestDeleteProviderCleansRoutes(t *testing.T) {
 
 func TestRouteValidation(t *testing.T) {
 	s := newStore(t)
-	if err := s.UpsertRoute(Route{}); err == nil {
-		t.Fatal("empty model should error")
+	// 空 model = 通配兜底路由，合法；策略不合法才报错。
+	if err := s.UpsertRoute(Route{}); err != nil {
+		t.Fatalf("catch-all empty model should be allowed: %v", err)
 	}
 	if err := s.UpsertRoute(Route{Model: "m", Strategy: "nonsense"}); err == nil {
 		t.Fatal("bad strategy should error")

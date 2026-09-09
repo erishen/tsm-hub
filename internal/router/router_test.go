@@ -341,3 +341,61 @@ func TestPickAllMarkedUnavailableErrors(t *testing.T) {
 		t.Fatalf("expected error when all candidates unavailable")
 	}
 }
+
+func TestPickFallsBackToCatchAllRoute(t *testing.T) {
+	// 精确路由优先；未显式路由的模型走通配兜底路由。
+	st := newStore(t,
+		[]store.Provider{
+			p("exact", 1, 100, "m"),
+			p("catchall", 1, 100, "other-model"),
+		},
+		[]store.Route{
+			{Model: "m", Strategy: "failover", Targets: []store.RouteTarget{{ProviderID: "exact"}}},
+			{Model: "", Strategy: "failover", Targets: []store.RouteTarget{{ProviderID: "catchall"}}},
+		},
+	)
+	rt := New(st, NewTracker(3, 60))
+
+	cands, err := rt.Pick("m")
+	if err != nil {
+		t.Fatalf("pick m: %v", err)
+	}
+	if len(cands) != 1 || cands[0].ProviderID != "exact" {
+		t.Fatalf("expected exact route for m, got %+v", cands)
+	}
+
+	cands, err = rt.Pick("anything-else")
+	if err != nil {
+		t.Fatalf("pick catchall: %v", err)
+	}
+	if len(cands) != 1 || cands[0].ProviderID != "catchall" {
+		t.Fatalf("expected catchall route, got %+v", cands)
+	}
+	// 通配 target 未配模型时，透传请求的模型名。
+	if cands[0].UpstreamModel != "anything-else" {
+		t.Fatalf("expected upstream model passthrough, got %q", cands[0].UpstreamModel)
+	}
+}
+
+func TestUpsertCatchAllRouteAllowsEmptyModel(t *testing.T) {
+	st := newStore(t, nil, nil)
+	if err := st.UpsertRoute(store.Route{Model: "", Strategy: "failover", Targets: []store.RouteTarget{{ProviderID: "a"}}}); err != nil {
+		t.Fatalf("upsert catch-all: %v", err)
+	}
+	if err := st.UpsertRoute(store.Route{Model: "", Strategy: "smart", Targets: []store.RouteTarget{{ProviderID: "b"}}}); err != nil {
+		t.Fatalf("upsert smart: %v", err)
+	}
+	routes := st.ListRoutes()
+	empty := 0
+	for _, r := range routes {
+		if r.Model == "" {
+			empty++
+			if len(r.Targets) != 1 || r.Targets[0].ProviderID != "b" {
+				t.Fatalf("expected catch-all replaced, got %+v", r)
+			}
+		}
+	}
+	if empty != 1 {
+		t.Fatalf("expected exactly one catch-all route, got %d", empty)
+	}
+}

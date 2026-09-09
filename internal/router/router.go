@@ -110,10 +110,17 @@ func (r *Router) Pick(model string) ([]Candidate, error) {
 	return r.order(usable, strategy), nil
 }
 
-// resolveTargets 先查显式路由表，再回退到「provider 声明支持该模型」的隐式路由。
+// resolveTargets 先查显式路由表（精确 model），再查通配兜底路由，
+// 最后回退到「provider 声明支持该模型」的隐式路由。
 func (r *Router) resolveTargets(model string) ([]store.RouteTarget, string) {
 	for _, rt := range r.store.ListRoutes() {
 		if rt.Model == model && len(rt.Targets) > 0 {
+			return rt.Targets, rt.Strategy
+		}
+	}
+	// 通配路由（Model 留空）：任何未显式路由的模型都兜底进这个池子。
+	for _, rt := range r.store.ListRoutes() {
+		if rt.Model == "" && len(rt.Targets) > 0 {
 			return rt.Targets, rt.Strategy
 		}
 	}

@@ -1044,6 +1044,9 @@ func (s *Server) handleUpsertRoute(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDeleteRoute(w http.ResponseWriter, r *http.Request) {
 	model := r.PathValue("model")
+	if model == "_default" {
+		model = "" // 通配兜底路由（空 model）用 _default 哨兵标识
+	}
 	if err := s.store.DeleteRoute(model); err != nil {
 		writeError(w, http.StatusNotFound, "not_found", err.Error())
 		return

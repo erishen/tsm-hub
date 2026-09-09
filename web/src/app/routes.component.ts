@@ -34,7 +34,7 @@ import { Provider, Route, RouteTarget } from './models';
           <div class="form-section">
             <h3>映射</h3>
             <div class="form-row">
-              <div><label>对外模型名</label><input [(ngModel)]="form.model" placeholder="smart" /></div>
+              <div><label>对外模型名（留空 = 通配兜底）</label><input [(ngModel)]="form.model" placeholder="留空：任何未路由的模型都走它" /></div>
               <div>
                 <label>策略</label>
                 <select [(ngModel)]="form.strategy">
@@ -85,7 +85,8 @@ import { Provider, Route, RouteTarget } from './models';
         <tbody>
           <tr *ngFor="let r of routes()">
             <td class="mono">
-              {{ r.model }}
+              {{ r.model || '*(通配)' }}
+              <span class="badge" *ngIf="!r.model">兜底</span>
               <div class="muted small" *ngIf="r.remark" style="color:#b45309;margin-top:2px" title="路由备注">{{ r.remark }}</div>
             </td>
             <td><span class="badge">{{ r.strategy }}</span></td>
@@ -186,7 +187,8 @@ export class RoutesComponent implements OnInit {
   }
 
   remove(r: Route): void {
-    if (!confirm(`删除路由 ${r.model}？`)) return;
+    const label = r.model || '*(通配)';
+    if (!confirm(`删除路由 ${label}？`)) return;
     this.api.deleteRoute(r.model).subscribe({
       next: () => this.load(),
       error: (e: Error) => this.error.set(e.message),

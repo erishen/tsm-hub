@@ -139,7 +139,8 @@ export class ApiService {
   }
 
   deleteRoute(model: string): Observable<unknown> {
-    return this.http.delete(`/api/admin/routes/${encodeURIComponent(model)}`, { headers: this.headers() })
+    const m = model || '_default'; // 通配兜底路由（空 model）用 _default 哨兵
+    return this.http.delete(`/api/admin/routes/${encodeURIComponent(m)}`, { headers: this.headers() })
       .pipe(catchError(this.handleError));
   }
 

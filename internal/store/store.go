@@ -334,15 +334,13 @@ func (s *Store) ListRoutes() []Route {
 
 func (s *Store) UpsertRoute(r Route) error {
 	return s.Update(func(c *Config) error {
-		if r.Model == "" {
-			return fmt.Errorf("route model is required")
-		}
 		if r.Strategy == "" {
 			r.Strategy = "weighted"
 		}
-		if r.Strategy != "weighted" && r.Strategy != "failover" {
+		if r.Strategy != "weighted" && r.Strategy != "failover" && r.Strategy != "smart" {
 			return fmt.Errorf("unknown strategy %q", r.Strategy)
 		}
+		// Model 留空 = 通配兜底路由（全局唯一）：任何未命中显式路由的模型都走它。
 		for i := range c.Routes {
 			if c.Routes[i].Model == r.Model {
 				c.Routes[i] = r
