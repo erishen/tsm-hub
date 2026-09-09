@@ -43,6 +43,10 @@ import { Provider, Route, RouteTarget } from './models';
                 </select>
               </div>
             </div>
+            <div>
+              <label>备注（可选，如「百炼免费额度优先，用完可删」）</label>
+              <input [(ngModel)]="form.remark" placeholder="临时策略说明…" />
+            </div>
           </div>
 
           <div class="form-section">
@@ -79,7 +83,10 @@ import { Provider, Route, RouteTarget } from './models';
         </thead>
         <tbody>
           <tr *ngFor="let r of routes()">
-            <td class="mono">{{ r.model }}</td>
+            <td class="mono">
+              {{ r.model }}
+              <div class="muted small" *ngIf="r.remark" style="color:#b45309;margin-top:2px" title="路由备注">{{ r.remark }}</div>
+            </td>
             <td><span class="badge">{{ r.strategy }}</span></td>
             <td>
               <div *ngFor="let t of r.targets" class="mono">
@@ -110,7 +117,7 @@ export class RoutesComponent implements OnInit {
   readonly saving = signal(false);
   editingModel = '';
 
-  form: Route = { model: '', strategy: 'failover', targets: [] };
+  form: Route = { model: '', strategy: 'failover', targets: [], remark: '' };
 
   constructor(private api: ApiService) {}
 
@@ -130,7 +137,7 @@ export class RoutesComponent implements OnInit {
   }
 
   startNew(): void {
-    this.form = { model: '', strategy: 'failover', targets: [this.blankTarget()] };
+    this.form = { model: '', strategy: 'failover', targets: [this.blankTarget()], remark: '' };
     this.editingModel = '';
     this.editing.set(true);
   }

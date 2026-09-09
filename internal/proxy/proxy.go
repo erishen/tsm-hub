@@ -196,6 +196,14 @@ func (p *Proxy) attempt(w http.ResponseWriter, r *http.Request, c router.Candida
 			Err: fmt.Sprintf("upstream %d: %s", resp.StatusCode, compact(string(b))), ProviderFault: true}, true
 	}
 
+	// 429（限流 / 免费额度耗尽）同样可重试：换到下一候选（failover 路由会因此自动降级）。
+	if resp.StatusCode == http.StatusTooManyRequests {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
+		return Result{ProviderID: c.ProviderID, UpstreamModel: c.UpstreamModel, Status: resp.StatusCode,
+			Stream: req.Stream, Latency: time.Since(started),
+			Err: fmt.Sprintf("upstream 429: %s", compact(string(b))), ProviderFault: true}, true
+	}
+
 	// 上游 4xx 直接透传；记日志便于定位（如上游 "model is not found" 是哪家、哪个模型）。
 	if resp.StatusCode >= 400 {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))

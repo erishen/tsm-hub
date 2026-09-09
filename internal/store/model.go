@@ -102,6 +102,8 @@ type Route struct {
 	// Strategy 取值：weighted（同优先级内加权随机）、failover（按优先级顺序降级）。
 	Strategy string        `json:"strategy"`
 	Targets  []RouteTarget `json:"targets"`
+	// Remark 备注（如「百炼免费额度优先，用完可删」等临时策略说明），仅展示用。
+	Remark string `json:"remark,omitempty"`
 }
 
 // Quota 是绑定在自制 Key 上的配额。0 表示不限制。
