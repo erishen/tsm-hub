@@ -41,7 +41,18 @@
      "-y",
      "@modelcontextprotocol/server-fetch"
     ]
+   },
+   "remote": {
+    "transport": "http",
+    "url": "http://127.0.0.1:8787/mcp"
    }
+  },
+  "sandbox": {
+   "enabled": true,
+   "timeout_seconds": 30,
+   "memory_mb": 512,
+   "cpus": 1,
+   "max_output_kb": 100
   }
  },
  "providers": [

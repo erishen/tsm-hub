@@ -37,6 +37,19 @@ func (a toolArgs) str(k string) string {
 	return v
 }
 
+func (a toolArgs) num(k string) float64 {
+	switch v := a[k].(type) {
+	case float64:
+		return v
+	case int:
+		return float64(v)
+	case string:
+		f, _ := strconv.ParseFloat(v, 64)
+		return f
+	}
+	return 0
+}
+
 // 内置工具名（工具池的排序与 schema 输出）。
 var builtinTools = []string{"calc", "echo", "fetch_url", "get_time", "query_exchange_rate", "recall", "remember", "skill-run", "system_info"}
 
@@ -67,6 +80,12 @@ func (p *Proxy) ToolCatalog() []ToolInfo {
 		fn2, _ := s2["function"].(map[string]any)
 		params2, _ := fn2["parameters"].(map[string]any)
 		out = append(out, ToolInfo{Name: "csv_analyze", Description: toolDef("csv_analyze"), Source: "builtin-conditional", Parameters: params2})
+	}
+	if p.store.Settings().Sandbox.Enabled {
+		s := toolSchema("execute_code", toolDef("execute_code"))
+		fn, _ := s["function"].(map[string]any)
+		params, _ := fn["parameters"].(map[string]any)
+		out = append(out, ToolInfo{Name: "execute_code", Description: toolDef("execute_code"), Source: "builtin-conditional", Parameters: params})
 	}
 	cfg := p.store.Settings().Mcps
 	names := make([]string, 0, len(cfg))
@@ -134,6 +153,12 @@ func (p *Proxy) execTool(keyID, name string, args toolArgs) string {
 			return "error: " + err.Error()
 		}
 		return s
+	case "execute_code":
+		s, err := p.toolExecuteCode(args)
+		if err != nil {
+			return "error: " + err.Error()
+		}
+		return s
 	case "skill-run":
 		s, err := p.toolSkillRun(args)
 		if err != nil {
@@ -177,6 +202,9 @@ func (p *Proxy) toolSchemas() []map[string]any {
 	if p.store.Settings().Agent.ReadRoot != "" {
 		out = append(out, toolSchema("read_file", "读取本地文件内容（仅限白名单根目录内；目录返回其内容列表）。"))
 		out = append(out, toolSchema("csv_analyze", toolDef("csv_analyze")))
+	}
+	if p.store.Settings().Sandbox.Enabled {
+		out = append(out, toolSchema("execute_code", toolDef("execute_code")))
 	}
 	out = append(out, p.mcpToolSchemas()...)
 	return out
@@ -230,6 +258,17 @@ func toolSchema(name, desc string) map[string]any {
 			"type": "string", "description": "read_root 内的 CSV 文件路径（相对或绝对）",
 		}
 		params["required"] = []string{"path"}
+	case "execute_code":
+		params["properties"].(map[string]any)["language"] = map[string]any{
+			"type": "string", "description": "语言：python / javascript / shell / java / go / rust / c / cpp（支持 py/js/sh/c++ 等别名）",
+		}
+		params["properties"].(map[string]any)["code"] = map[string]any{
+			"type": "string", "description": "要执行的完整代码",
+		}
+		params["properties"].(map[string]any)["timeout"] = map[string]any{
+			"type": "number", "description": "超时秒数（默认 30，最大 300）",
+		}
+		params["required"] = []string{"language", "code"}
 	}
 	return map[string]any{
 		"type": "function",
@@ -265,6 +304,8 @@ func toolDef(name string) string {
 		return "获取网关运行环境信息：操作系统/架构/CPU 核数/内存占用/磁盘可用空间/进程启动时长。"
 	case "csv_analyze":
 		return "分析 read_root 内 CSV 文件的结构：行列数、列名、每列类型（数值/文本）、数值列统计与数据预览。"
+	case "execute_code":
+		return "在 Docker 沙箱中执行代码（python/javascript/shell/java/go/rust/c/cpp）。沙箱禁网络、只读根文件系统、限制内存/CPU/超时，执行完容器自动销毁。适用于复杂计算、数据分析、算法验证、文件处理等需要实际运行代码的场景。"
 	}
 	return ""
 }

@@ -44,9 +44,26 @@ type Settings struct {
 	SkillsDir string `json:"skills_dir,omitempty"`
 	// Agent 是网关 agent 能力（内置通用工具 + 服务端执行循环）的配置。
 	Agent AgentCfg `json:"agent,omitempty"`
-	// Mcps 是外部 MCP server 配置：name → {command, args, env}（stdio 传输）。
+	// Mcps 是外部 MCP server 配置：name → {command, args, env}（stdio 传输）或
+	// {transport:"http", url}（Streamable HTTP 远程）。
 	// 连接后其工具以 mcp_<server>_<tool> 注册进网关工具池，由网关执行。
 	Mcps map[string]MCPServer `json:"mcps,omitempty"`
+	// Sandbox 是 Docker 沙箱（execute_code 工具）配置。
+	Sandbox SandboxCfg `json:"sandbox,omitempty"`
+}
+
+// SandboxCfg 配置 execute_code 的 Docker 沙箱执行环境。
+type SandboxCfg struct {
+	// Enabled=true 时注册 execute_code 工具（需本机 docker 可用）。
+	Enabled bool `json:"enabled,omitempty"`
+	// TimeoutSec 单次执行超时（默认 30s）。
+	TimeoutSec int `json:"timeout_seconds,omitempty"`
+	// MemoryMB 容器内存上限（默认 512）。
+	MemoryMB int `json:"memory_mb,omitempty"`
+	// CPUs 容器 CPU 上限（默认 1）。
+	CPUs float64 `json:"cpus,omitempty"`
+	// MaxOutputKB stdout/stderr 输出上限（默认 100KB）。
+	MaxOutputKB int `json:"max_output_kb,omitempty"`
 }
 
 // MCPServer 描述一个 MCP server 连接。Transport 为空或 "stdio" 时是本地进程

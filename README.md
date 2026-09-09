@@ -142,6 +142,10 @@ llm-router/
 | `skill-run` | 加载网关技能库中指定技能的完整说明 |
 | `remember` / `recall` | 按 key 隔离的键值记忆（进程内存）|
 | `read_file` | 读取白名单根目录内文件（需配置 `agent.read_root` 才提供）|
+| `csv_analyze` | 分析白名单根目录内 CSV 结构（需配置 `agent.read_root` 才提供）|
+| `execute_code` | Docker 沙箱执行代码（需 `settings.sandbox.enabled=true` 且本机有 docker 才提供）|
+| `query_exchange_rate` | 实时汇率查询（open.er-api.com 免费接口）|
+| `system_info` | 服务器 OS/架构/CPU/内存/磁盘/运行时长 |
 
 `settings.agent` 配置：
 
@@ -171,6 +175,19 @@ llm-router/
 传输方式：`command`（stdio，本地子进程）或 `transport: "http"` + `url`（远程
 Streamable HTTP 端点，响应支持 application/json 与 SSE）。工具的能力边界由你
 配置的 MCP server 决定（如 filesystem 可读写配置的目录）。
+
+**Docker 沙箱（execute_code）**：`settings.sandbox.enabled=true` 时网关注册
+`execute_code` 工具，把代码放入一次性 Docker 容器执行（支持 python /
+javascript / shell / java / go / rust / c / cpp）。沙箱安全边界：禁网络
+（`--network none`）、只读根文件系统（仅 /tmp 可写）、丢弃全部 capabilities、
+禁提权、内存/CPU/进程数/文件描述符限制、超时自动 kill 并清理容器，执行完自动销毁。
+
+```json
+"sandbox": {"enabled": true, "timeout_seconds": 30, "memory_mb": 512, "cpus": 1, "max_output_kb": 100}
+```
+
+工具参数：`language`（含 py/js/sh/c++ 等别名）+ `code`（完整源码）+ 可选
+`timeout`。需要联网的任务请用 `fetch_url` 等工具，沙箱内一律不可联网。
 
 **上游 Key 不写进配置文件**：`api_key` 支持 `env:OPENAI_API_KEY` 这种引用形式，
 启动前把真实 Key 放到环境变量里即可（管理台回显会保留引用本身，不含密钥）。
