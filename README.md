@@ -219,6 +219,39 @@ javascript / shell / java / go / rust / c / cpp）。沙箱安全边界：禁网
 
 路由表未命中时的兜底：直接找所有声明支持该模型的 enabled provider，按权重分流。
 
+**smart 成本智能路由**：`strategy: "smart"` 时按「免费加分 + 单价档位 + 健康度 +
+冷却」综合评分选候选，参数均可调（0 = 默认值）：
+
+| 字段 | 默认 | 说明 |
+|------|------|------|
+| `smart.free_bonus` | 100 | 免费模型的基础加分 |
+| `smart.half_open_penalty` | 30 | 半开（冷却后探测期）候选扣分 |
+| `smart.throttle_sec` | 60 | 上游 429 后的冷却秒数，期间不选该 provider |
+| `smart.unavailable_sec` | 1800 | 上游 404「模型不存在」的标记时长 |
+| `smart.price_tiers` | `[{0,60},{0.5,40},{2,20},{10,5}]` | 单价分档加分：prompt 单价 ≤ max 的档得 score（高→低匹配） |
+
+**场景路由（auto 无脑调用）**：客户端 `model` 不传或传 `"auto"` 时，网关按请求
+内容自动分类并走对应场景路由（`chat` / `reason` / `code` / `fast`），响应头
+`X-Llm-Router-Scene` 返回命中信号。管理台「路由表」可分别配置各场景的候选。
+无 `auto` 场景路由时回退到 `smart` 通配路由。
+
+**Key 技能注入**：`keys[].inject_skills` 控制该 Key 请求时向 system 注入技能：
+`""`（默认，不注入）/ `"list"`（技能清单，供模型判断何时调用）/ `"all"`（全部
+技能全文）/ 其他字符串（单个技能名）。技能源目录由 `settings.skills_dir` 指定。
+
+**可观测性**：每次请求写一条流水（`data/usage/YYYY-MM-DD.jsonl`），除用量外还
+记录归因字段：
+
+| 字段 | 说明 |
+|------|------|
+| `scene` | auto 分流命中的场景（chat/reason/code/fast；非 auto 为空）|
+| `fastpath` | 快路径命中标记（`arithmetic` / `unit_convert` / `plugin:xxx` 等）|
+| `attempt` | 实际尝试的第几个候选（>1 表示发生过 failover）|
+
+管理 API `GET /api/admin/observability/overview` 返回聚合视图：`today/week/month`
+总览（请求数/错误率/平均延迟/成本/failover 次数）、按 provider 归因、按场景分布、
+按天趋势。管理台「监控」页直接展示。历史流水（旧字段缺失）自动兼容，无需迁移。
+
 ---
 
 ## 管理 API

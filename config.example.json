@@ -1,132 +1,161 @@
 {
- "version": 1,
- "settings": {
-  "listen": ":9070",
-  "admin_token": "change-me-admin",
-  "default_timeout_ms": 120000,
-  "max_body_bytes": 8388608,
-  "fail_threshold": 3,
-  "cooldown_sec": 60,
-  "pricing": {
-   "default": {
-    "input_per_1k": 0.001,
-    "output_per_1k": 0.002
-   },
-   "gpt-4o": {
-    "input_per_1k": 0.005,
-    "output_per_1k": 0.015
-   },
-   "deepseek-chat": {
-    "input_per_1k": 0.00027,
-    "output_per_1k": 0.0011
-   }
+  "version": 1,
+  "settings": {
+    "listen": ":9070",
+    "admin_token": "change-me-admin",
+    "default_timeout_ms": 120000,
+    "max_body_bytes": 8388608,
+    "fail_threshold": 3,
+    "cooldown_sec": 60,
+    "pricing": {
+      "default": {
+        "input_per_1k": 0.001,
+        "output_per_1k": 0.002
+      },
+      "gpt-4o": {
+        "input_per_1k": 0.005,
+        "output_per_1k": 0.015
+      },
+      "deepseek-chat": {
+        "input_per_1k": 0.00027,
+        "output_per_1k": 0.0011
+      }
+    },
+    "agent": {
+      "disabled": false,
+      "max_rounds": 4,
+      "allow_private_url": false,
+      "read_root": "",
+      "memory_file": ""
+    },
+    "mcps": {
+      "demo": {
+        "command": "python3",
+        "args": [
+          "/path/to/mcp_server.py"
+        ]
+      },
+      "fetch": {
+        "command": "npx",
+        "args": [
+          "-y",
+          "@modelcontextprotocol/server-fetch"
+        ]
+      },
+      "remote": {
+        "transport": "http",
+        "url": "http://127.0.0.1:8787/mcp"
+      }
+    },
+    "sandbox": {
+      "enabled": true,
+      "timeout_seconds": 30,
+      "memory_mb": 512,
+      "cpus": 1,
+      "max_output_kb": 100
+    },
+    "fastpath": {
+      "enabled": true,
+      "codegen": true,
+      "plugins_dir": ""
+    },
+    "smart": {
+      "free_bonus": 100,
+      "half_open_penalty": 30,
+      "throttle_sec": 60,
+      "unavailable_sec": 1800,
+      "price_tiers": [
+        {
+          "prompt_max": 0,
+          "score": 60
+        },
+        {
+          "prompt_max": 0.5,
+          "score": 40
+        }
+      ]
+    }
   },
-  "agent": {
-   "disabled": false,
-   "max_rounds": 4,
-   "allow_private_url": false,
-   "read_root": "",
-   "memory_file": ""
-  },
-  "mcps": {
-   "demo": {
-    "command": "python3",
-    "args": [
-     "/path/to/mcp_server.py"
-    ]
-   },
-   "fetch": {
-    "command": "npx",
-    "args": [
-     "-y",
-     "@modelcontextprotocol/server-fetch"
-    ]
-   },
-   "remote": {
-    "transport": "http",
-    "url": "http://127.0.0.1:8787/mcp"
-   }
-  },
-  "sandbox": {
-   "enabled": true,
-   "timeout_seconds": 30,
-   "memory_mb": 512,
-   "cpus": 1,
-   "max_output_kb": 100
-  },
-  "fastpath": {
-   "enabled": true,
-   "codegen": true,
-   "plugins_dir": ""
-  }
- },
- "providers": [
-  {
-   "id": "openai-main",
-   "name": "OpenAI 主账号",
-   "base_url": "https://api.openai.com/v1",
-   "api_key": "sk-REPLACE-ME",
-   "models": [
-    "gpt-4o",
-    "gpt-4o-mini"
-   ],
-   "enabled": true,
-   "weight": 100,
-   "priority": 10,
-   "timeout_ms": 120000
-  },
-  {
-   "id": "deepseek",
-   "name": "DeepSeek",
-   "base_url": "https://api.deepseek.com/v1",
-   "api_key": "sk-REPLACE-ME",
-   "models": [
-    "deepseek-chat",
-    "deepseek-reasoner"
-   ],
-   "enabled": true,
-   "weight": 100,
-   "priority": 20,
-   "timeout_ms": 120000
-  }
- ],
- "routes": [
-  {
-   "model": "smart",
-   "strategy": "failover",
-   "targets": [
+  "providers": [
     {
-     "provider_id": "openai-main",
-     "model": "gpt-4o",
-     "weight": 100,
-     "priority": 1
+      "id": "openai-main",
+      "name": "OpenAI 主账号",
+      "base_url": "https://api.openai.com/v1",
+      "api_key": "sk-REPLACE-ME",
+      "models": [
+        "gpt-4o",
+        "gpt-4o-mini"
+      ],
+      "enabled": true,
+      "weight": 100,
+      "priority": 10,
+      "timeout_ms": 120000
     },
     {
-     "provider_id": "deepseek",
-     "model": "deepseek-chat",
-     "weight": 100,
-     "priority": 2
+      "id": "deepseek",
+      "name": "DeepSeek",
+      "base_url": "https://api.deepseek.com/v1",
+      "api_key": "sk-REPLACE-ME",
+      "models": [
+        "deepseek-chat",
+        "deepseek-reasoner"
+      ],
+      "enabled": true,
+      "weight": 100,
+      "priority": 20,
+      "timeout_ms": 120000
     }
-   ]
-  },
-  {
-   "model": "cheap",
-   "strategy": "weighted",
-   "targets": [
+  ],
+  "routes": [
     {
-     "provider_id": "deepseek",
-     "model": "deepseek-chat",
-     "weight": 70,
-     "priority": 10
+      "model": "smart",
+      "strategy": "failover",
+      "targets": [
+        {
+          "provider_id": "openai-main",
+          "model": "gpt-4o",
+          "weight": 100,
+          "priority": 1
+        },
+        {
+          "provider_id": "deepseek",
+          "model": "deepseek-chat",
+          "weight": 100,
+          "priority": 2
+        }
+      ]
     },
     {
-     "provider_id": "openai-main",
-     "model": "gpt-4o-mini",
-     "weight": 30,
-     "priority": 10
+      "model": "cheap",
+      "strategy": "weighted",
+      "targets": [
+        {
+          "provider_id": "deepseek",
+          "model": "deepseek-chat",
+          "weight": 70,
+          "priority": 10
+        },
+        {
+          "provider_id": "openai-main",
+          "model": "gpt-4o-mini",
+          "weight": 30,
+          "priority": 10
+        }
+      ]
     }
-   ]
-  }
- ],
- "keys": []
+  ],
+  "keys": [
+    {
+      "id": "example-key",
+      "name": "示例 Key",
+      "enabled": true,
+      "quota": {
+        "max_tokens": 0,
+        "max_cost_usd": 0,
+        "daily_tokens": 0,
+        "rpm": 60
+      },
+      "inject_skills": "list"
+    }
+  ]
 }
