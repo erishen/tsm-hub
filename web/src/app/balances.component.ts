@@ -147,16 +147,18 @@ export class BalancesComponent implements OnInit {
         const exp = b.expires_at ? ` · 有效期至 ${b.expires_at.slice(0, 10)}` : '';
         return used + limit + exp;
       }
-      case 'sensenova_token_plan':
-        return `${b.plan ?? ''} · ${b.quota ?? ''} · ${b.reset ?? ''}`;
+      case 'platform_note': {
+        const parts = [b.plan ?? '', b.quota ?? '', b.reset ?? ''].filter(Boolean);
+        return parts.length ? parts.join(' · ') : '—';
+      }
       default:
         return '';
     }
   }
 
-  /** SenseNova Token Plan 无公开余额接口的说明（作为 hover 提示）。 */
+  /** 无公开余额接口平台的说明（作为 hover 提示）。 */
   balanceNote(b?: Balance): string {
-    if (!b || b.kind !== 'sensenova_token_plan') return '';
+    if (!b || b.kind !== 'platform_note') return '';
     return b.note ?? '';
   }
 }

@@ -741,16 +741,27 @@ func (s *Server) probeBalance(ctx context.Context, baseURL, key string) map[stri
 	if key == "" {
 		return nil
 	}
-	// SenseNova Token Plan（token.sensenova.cn）只兼容 chat/completions 等核心接口，
-	// 无公开余额/额度接口（实测常见端点均 404），剩余次数只在商汤控制台查看。
-	// 这里返回官方公开的配额信息（非实时余额），让额度页不至于空白。
-	if strings.Contains(baseURL, "token.sensenova.cn") {
-		return map[string]any{
-			"kind":  "sensenova_token_plan",
-			"plan":  "免费公测",
-			"quota": "每5小时 1500 次调用（自研）/ 500 次（DeepSeek V4 Flash）",
-			"reset": "每5小时独立刷新，无一次性总量限制",
-			"note":  "无公开余额接口，剩余次数请在商汤控制台查看",
+	// 无公开余额接口的平台（如 SenseNova Token Plan、TokenRouter）：
+	// 实测常见余额端点全 404，额度只在各自控制台/Dashboard 查看。
+	// 这里返回官方公开的配额/平台信息（非实时余额），让额度页不至于空白。
+	type platformNote struct{ host, plan, quota, reset, note string }
+	platforms := []platformNote{
+		{"token.sensenova.cn", "免费公测",
+			"每5小时 1500 次调用（自研）/ 500 次（DeepSeek V4 Flash）",
+			"每5小时独立刷新，无一次性总量限制",
+			"无公开余额接口，剩余次数请在商汤控制台查看"},
+		{"tokenrouter.com", "免费/低价模型聚合", "", "",
+			"无公开余额接口，余额请在 TokenRouter Dashboard 查看"},
+	}
+	for _, pn := range platforms {
+		if strings.Contains(baseURL, pn.host) {
+			return map[string]any{
+				"kind":   "platform_note",
+				"plan":   pn.plan,
+				"quota":  pn.quota,
+				"reset":  pn.reset,
+				"note":   pn.note,
+			}
 		}
 	}
 	type probe struct {
