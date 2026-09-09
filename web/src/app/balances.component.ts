@@ -27,7 +27,7 @@ import { Balance, ProviderBalance } from './models';
     <table *ngIf="balances().length; else none">
       <thead>
         <tr>
-          <th>Provider</th><th>额度 / token 可使用总量</th><th>状态</th>
+          <th>Provider</th><th>额度 / token 可使用总量</th><th>Key 过期</th><th>状态</th>
         </tr>
       </thead>
       <tbody>
@@ -42,6 +42,14 @@ import { Balance, ProviderBalance } from './models';
               <span class="badge free" *ngIf="freeBadge(b.balance!)" style="margin-left:8px">{{ freeBadge(b.balance!) }}</span>
             </ng-container>
             <ng-template #noBal><span class="muted">—</span></ng-template>
+          </td>
+          <td>
+            <ng-container *ngIf="b.balance">
+              <span class="badge warn" *ngIf="keyExpiryClass(b.balance!) === 'warn'">{{ keyExpiry(b.balance!) }}</span>
+              <span class="badge bad" *ngIf="keyExpiryClass(b.balance!) === 'err'">{{ keyExpiry(b.balance!) }}</span>
+              <span class="muted" *ngIf="!keyExpiryClass(b.balance!)">{{ keyExpiry(b.balance!) }}</span>
+            </ng-container>
+            <ng-container *ngIf="!b.balance"><span class="muted">—</span></ng-container>
           </td>
           <td>
             <ng-container *ngIf="b.balance">
@@ -87,6 +95,24 @@ export class BalancesComponent implements OnInit {
         this.error.set(e.message);
       },
     });
+  }
+
+  /** Key 过期：仅 OpenRouter API 返回有效期；临近 14 天显示剩余天数（黄），已过期标红。 */
+  keyExpiry(b?: Balance): string {
+    if (!b || b.kind !== 'openrouter' || !b.expires_at) return '—';
+    const days = Math.ceil((new Date(b.expires_at).getTime() - Date.now()) / 86400000);
+    const base = b.expires_at.slice(0, 10);
+    if (days < 0) return base + '（已过期）';
+    if (days <= 14) return base + `（剩 ${days} 天）`;
+    return base;
+  }
+
+  keyExpiryClass(b?: Balance): string {
+    if (!b || b.kind !== 'openrouter' || !b.expires_at) return '';
+    const days = Math.ceil((new Date(b.expires_at).getTime() - Date.now()) / 86400000);
+    if (days < 0) return 'err';
+    if (days <= 14) return 'warn';
+    return '';
   }
 
   statusText(b: ProviderBalance): string {
