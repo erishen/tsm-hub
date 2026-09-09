@@ -38,7 +38,7 @@ import { Balance, ProviderBalance } from './models';
           </td>
           <td>
             <ng-container *ngIf="b.balance; else noBal">
-              <strong>{{ balanceText(b.balance!) }}</strong>
+              <strong [title]="balanceNote(b.balance!)">{{ balanceText(b.balance!) }}</strong>
               <span class="badge free" *ngIf="freeBadge(b.balance!)" style="margin-left:8px">{{ freeBadge(b.balance!) }}</span>
             </ng-container>
             <ng-template #noBal><span class="muted">—</span></ng-template>
@@ -147,8 +147,16 @@ export class BalancesComponent implements OnInit {
         const exp = b.expires_at ? ` · 有效期至 ${b.expires_at.slice(0, 10)}` : '';
         return used + limit + exp;
       }
+      case 'sensenova_token_plan':
+        return `${b.plan ?? ''} · ${b.quota ?? ''} · ${b.reset ?? ''}`;
       default:
         return '';
     }
+  }
+
+  /** SenseNova Token Plan 无公开余额接口的说明（作为 hover 提示）。 */
+  balanceNote(b?: Balance): string {
+    if (!b || b.kind !== 'sensenova_token_plan') return '';
+    return b.note ?? '';
   }
 }

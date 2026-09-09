@@ -131,7 +131,7 @@ export interface ProbeModel {
 
 /** 探测返回的账户余额/额度（token 可使用总量），格式因上游而异。 */
 export interface Balance {
-  kind: 'moonshot' | 'deepseek' | 'openai' | 'openrouter';
+  kind: 'moonshot' | 'deepseek' | 'openai' | 'openrouter' | 'sensenova_token_plan';
   available?: number;
   voucher?: number;
   cash?: number;
@@ -147,6 +147,11 @@ export interface Balance {
   limit_remaining?: number;
   is_free_tier?: boolean;
   expires_at?: string;
+  /** SenseNova Token Plan：官方公开配额信息（无实时余额接口） */
+  plan?: string;
+  quota?: string;
+  reset?: string;
+  note?: string;
 }
 
 /** 额度页：单个 Provider 的余额查询结果（error: no_key | unavailable）。 */
