@@ -134,8 +134,8 @@ import { Agg, DailyPoint, UsageRecord, UsageResponse } from './models';
               <span class="badge" [class.bad]="r.status >= 400 || !!r.error" [class.ok]="r.status < 400 && !r.error">
                 {{ r.status }}
               </span>
-              <span class="muted" style="font-size:12px;max-width:300px;display:inline-block;vertical-align:middle;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
-                    [title]="r.error" *ngIf="r.error">{{ r.error }}</span>
+              <span class="muted" style="font-size:12px;margin-left:8px;vertical-align:middle"
+                    [title]="r.error" *ngIf="r.error">{{ shortErr(r.error) }}</span>
             </td>
           </tr>
         </tbody>
@@ -177,6 +177,11 @@ export class UsageComponent implements OnInit {
       }),
       { requests: 0, prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, cost_usd: 0, errors: 0 },
     );
+  }
+
+  /** 错误信息模板层截断：DOM 文本本来就短，绝不撑宽；hover title 看全文。 */
+  shortErr(e: string): string {
+    return e.length > 32 ? e.slice(0, 32) + '…' : e;
   }
 
   trackByTs(_: number, r: UsageRecord): string {
