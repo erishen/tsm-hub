@@ -89,9 +89,9 @@ import { Provider, Route, RouteTarget } from './models';
                 <span class="badge">p{{ t.priority }}</span>
               </div>
             </td>
-            <td>
+            <td style="white-space:nowrap">
               <button class="small" (click)="edit(r)">编辑</button>
-              <button class="small danger" (click)="remove(r)">删除</button>
+              <button class="small danger" style="margin-left:6px" (click)="remove(r)">删除</button>
             </td>
           </tr>
         </tbody>

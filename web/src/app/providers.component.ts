@@ -45,9 +45,9 @@ import { Balance, Provider, ProbeModel } from './models';
               </span>
             </td>
             <td class="num">{{ p.latency_ms }} ms</td>
-            <td>
+            <td style="white-space:nowrap">
               <button class="small" (click)="edit(p)">编辑</button>
-              <button class="small danger" (click)="remove(p)">删除</button>
+              <button class="small danger" style="margin-left:6px" (click)="remove(p)">删除</button>
             </td>
           </tr>
         </tbody>

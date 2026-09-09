@@ -102,9 +102,9 @@ import { ApiKey, Quota } from './models';
             <td class="num">{{ usd(k.usage?.cost_usd ?? 0) }}</td>
             <td class="num">{{ k.rpm_current }}/{{ k.quota.rpm || '∞' }}</td>
             <td class="muted" style="font-size:12px">{{ quotaRemain(k) }}</td>
-            <td>
+            <td style="white-space:nowrap">
               <button class="small" (click)="toggle(k)">{{ k.enabled ? '停用' : '启用' }}</button>
-              <button class="small danger" (click)="remove(k)">删除</button>
+              <button class="small danger" style="margin-left:6px" (click)="remove(k)">删除</button>
             </td>
           </tr>
         </tbody>
