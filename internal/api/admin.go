@@ -325,6 +325,60 @@ func parseOpenRouterCredits(body []byte) map[string]any {
 	}
 }
 
+// probeAliBailianLimits 查询阿里云百炼限流配额（GET /api/v1/models/limits），
+// 返回前 3 个模型配额摘要；免费额度剩余量无公开 API，由 note 指引控制台。
+func (s *Server) probeAliBailianLimits(ctx context.Context, baseURL, key string) map[string]any {
+	host := strings.TrimSuffix(strings.TrimRight(baseURL, "/"), "/compatible-mode/v1")
+	ctx2, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx2, http.MethodGet, host+"/api/v1/models/limits?page_size=100", nil)
+	if err != nil {
+		return nil
+	}
+	req.Header.Set("Authorization", "Bearer "+key)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil
+	}
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	var raw struct {
+		Output struct {
+			Quotas []struct {
+				Model      string `json:"model"`
+				ModelLimit struct {
+					UsageLimit       *int64 `json:"usage_limit"`
+					UsageLimitPeriod *int64 `json:"usage_limit_period"`
+				} `json:"model_limit"`
+			} `json:"quotas"`
+		} `json:"output"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil
+	}
+	parts := make([]string, 0, 3)
+	for _, q := range raw.Output.Quotas {
+		if q.ModelLimit.UsageLimit != nil && q.ModelLimit.UsageLimitPeriod != nil {
+			parts = append(parts, fmt.Sprintf("%s %d tokens/%d", q.Model, *q.ModelLimit.UsageLimit, *q.ModelLimit.UsageLimitPeriod))
+		}
+		if len(parts) >= 3 {
+			break
+		}
+	}
+	if len(parts) == 0 {
+		return nil
+	}
+	return map[string]any{
+		"kind":  "platform_note",
+		"plan":  "阿里云百炼",
+		"quota": "限流配额：" + strings.Join(parts, " · "),
+		"note":  "免费额度剩余量无公开 API，请在百炼控制台「免费额度」页查看；此为限流配额（每周期可调用 tokens 上限）",
+	}
+}
+
 // isProbeRetryable 判断探测失败是否属于可重试的瞬时连接错误
 //（unexpected EOF、连接重置、超时等），避免对 4xx/业务错误做无意义重试。
 func isProbeRetryable(err error) bool {
@@ -781,6 +835,13 @@ func (s *Server) probeBalance(ctx context.Context, baseURL, key string) map[stri
 				"reset":  pn.reset,
 				"note":   pn.note,
 			}
+		}
+	}
+	// 阿里云百炼（专属 endpoint …maas.aliyuncs.com）：免费额度剩余量无公开 API（仅控制台「免费额度」页可见），
+	// 唯一可自动获取的是 /api/v1/models/limits 限流配额（每周期可调用 tokens 上限）。
+	if strings.Contains(baseURL, "maas.aliyuncs.com") {
+		if m := s.probeAliBailianLimits(ctx, baseURL, key); m != nil {
+			return m
 		}
 	}
 	type probe struct {
