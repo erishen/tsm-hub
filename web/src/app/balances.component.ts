@@ -140,6 +140,10 @@ export class BalancesComponent implements OnInit {
           ? `订阅上限 $${b.hard_limit_usd}`
           : `已用 $${b.total_usage_usd?.toFixed(2)}`;
       case 'openrouter': {
+        // /credits 接口：总额度 total_credits + 总已用 total_usage
+        if (b.total_credits != null) {
+          return `已用 $${b.total_usage?.toFixed(2) ?? '0.00'} / 总额度 $${b.total_credits.toFixed(2)}`;
+        }
         const used = `已用 $${b.usage?.toFixed(2) ?? '0.00'}`;
         const limit = b.limit != null
           ? ` / 上限 $${b.limit}`

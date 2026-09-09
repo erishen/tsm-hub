@@ -306,6 +306,25 @@ func parseOpenRouterKey(body []byte) map[string]any {
 	return m
 }
 
+// parseOpenRouterCredits: {"data":{"total_credits":0,"total_usage":0}}
+// OpenRouter 新接口兜底（与 /auth/key 二选一，命中即返回）。
+func parseOpenRouterCredits(body []byte) map[string]any {
+	var raw struct {
+		Data struct {
+			TotalCredits float64 `json:"total_credits"`
+			TotalUsage   float64 `json:"total_usage"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil || raw.Data.TotalCredits == 0 && raw.Data.TotalUsage == 0 {
+		return nil
+	}
+	return map[string]any{
+		"kind":          "openrouter",
+		"total_credits": raw.Data.TotalCredits,
+		"total_usage":   raw.Data.TotalUsage,
+	}
+}
+
 // isProbeRetryable 判断探测失败是否属于可重试的瞬时连接错误
 //（unexpected EOF、连接重置、超时等），避免对 4xx/业务错误做无意义重试。
 func isProbeRetryable(err error) bool {
@@ -774,6 +793,7 @@ func (s *Server) probeBalance(ctx context.Context, baseURL, key string) map[stri
 		{"/dashboard/billing/subscription", parseOpenAISubscription},
 		{"/dashboard/billing/usage", parseOpenAIUsage},
 		{"/auth/key", parseOpenRouterKey},
+		{"/credits", parseOpenRouterCredits},
 	}
 	for _, p := range probes {
 		ctx2, cancel := context.WithTimeout(ctx, 3*time.Second)

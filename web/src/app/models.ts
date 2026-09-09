@@ -141,12 +141,14 @@ export interface Balance {
   topped_up?: number;
   hard_limit_usd?: number;
   total_usage_usd?: number;
-  /** OpenRouter：已用 / 上限（null=无上限）/ 免费层 / key 有效期 */
+  /** OpenRouter：已用 / 上限（null=无上限）/ 免费层 / key 有效期；/credits 接口的总额度/总已用 */
   usage?: number;
   limit?: number;
   limit_remaining?: number;
   is_free_tier?: boolean;
   expires_at?: string;
+  total_credits?: number;
+  total_usage?: number;
   /** 无公开余额接口的平台（SenseNova Token Plan / TokenRouter）：官方公开信息 */
   plan?: string;
   quota?: string;
