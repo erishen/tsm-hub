@@ -355,6 +355,24 @@ func TestProviderBalances(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("upsert ds: %v", err)
 	}
+	// openrouter 风格：独立 mock 仅提供 /v1/auth/key（usage/limit/免费层）
+	orSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/auth/key" {
+			writeMockJSON(w, map[string]any{"data": map[string]any{
+				"label": "sk-or-x", "usage": 1.25, "limit": nil, "is_free_tier": true,
+				"expires_at": "2026-09-21T01:25:00.001Z",
+			}})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer orSrv.Close()
+	if err := e.store.UpsertProvider(store.Provider{
+		ID: "bal-or", Name: "OpenRouter", BaseURL: orSrv.URL + "/v1",
+		APIKey: "sk-or-x", Models: []string{"mock-model"},
+	}); err != nil {
+		t.Fatalf("upsert or: %v", err)
+	}
 
 	resp := e.do(t, http.MethodGet, "/api/admin/providers/balances", "", e.adminHeaders())
 	defer resp.Body.Close()
@@ -373,6 +391,9 @@ func TestProviderBalances(t *testing.T) {
 				Granted   float64 `json:"granted"`
 				ToppedUp  float64 `json:"topped_up"`
 				Currency  string  `json:"currency"`
+				Usage     float64 `json:"usage"`
+				IsFree    bool    `json:"is_free_tier"`
+				Expires   string  `json:"expires_at"`
 			} `json:"balance"`
 			Error string `json:"error"`
 		} `json:"balances"`
@@ -380,7 +401,7 @@ func TestProviderBalances(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	var p1, p2, p3 *struct {
+	var p1, p2, p3, p4 *struct {
 		ID      string `json:"id"`
 		Balance *struct {
 			Kind      string  `json:"kind"`
@@ -391,6 +412,9 @@ func TestProviderBalances(t *testing.T) {
 			Granted   float64 `json:"granted"`
 			ToppedUp  float64 `json:"topped_up"`
 			Currency  string  `json:"currency"`
+			Usage     float64 `json:"usage"`
+			IsFree    bool    `json:"is_free_tier"`
+			Expires   string  `json:"expires_at"`
 		} `json:"balance"`
 		Error string `json:"error"`
 	}
@@ -405,6 +429,8 @@ func TestProviderBalances(t *testing.T) {
 			p2 = &payload.Balances[i]
 		case "bal-ds":
 			p3 = &payload.Balances[i]
+		case "bal-or":
+			p4 = &payload.Balances[i]
 		}
 	}
 	if p1 == nil || p1.Balance == nil || p1.Balance.Kind != "moonshot" || p1.Balance.Available != 14.99736 {
@@ -419,6 +445,10 @@ func TestProviderBalances(t *testing.T) {
 	if p3 == nil || p3.Balance == nil || p3.Balance.Kind != "deepseek" ||
 		p3.Balance.Total != 51.75 || p3.Balance.Granted != 0 || p3.Balance.ToppedUp != 51.75 || p3.Balance.Currency != "CNY" {
 		t.Fatalf("p3 = %+v, want deepseek 51.75/0/51.75 CNY", p3)
+	}
+	if p4 == nil || p4.Balance == nil || p4.Balance.Kind != "openrouter" ||
+		p4.Balance.Usage != 1.25 || !p4.Balance.IsFree || p4.Balance.Expires[:10] != "2026-09-21" {
+		t.Fatalf("p4 = %+v, want openrouter usage 1.25 free tier", p4)
 	}
 }
 

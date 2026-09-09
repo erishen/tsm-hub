@@ -267,6 +267,43 @@ func (s *Server) handleProviderBalances(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, map[string]any{"balances": out})
 }
 
+// parseOpenRouterKey: {"data":{"label":"…","limit":null,"limit_remaining":null,"usage":0,
+// "is_free_tier":true,"expires_at":"…","rate_limit":{…}}}
+// OpenRouter 无充值余额概念，额度信息来自 auth/key：已用 usage、上限 limit（null=无上限）、免费层标记。
+func parseOpenRouterKey(body []byte) map[string]any {
+	var raw struct {
+		Data struct {
+			Usage         float64  `json:"usage"`
+			Limit         *float64 `json:"limit"`
+			LimitRemaining *float64 `json:"limit_remaining"`
+			IsFreeTier    bool     `json:"is_free_tier"`
+			ExpiresAt     string   `json:"expires_at"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil
+	}
+	d := raw.Data
+	if d.Usage == 0 && d.Limit == nil && d.LimitRemaining == nil && !d.IsFreeTier && d.ExpiresAt == "" {
+		return nil
+	}
+	m := map[string]any{
+		"kind":         "openrouter",
+		"usage":        d.Usage,
+		"is_free_tier": d.IsFreeTier,
+	}
+	if d.Limit != nil {
+		m["limit"] = *d.Limit
+	}
+	if d.LimitRemaining != nil {
+		m["limit_remaining"] = *d.LimitRemaining
+	}
+	if d.ExpiresAt != "" {
+		m["expires_at"] = d.ExpiresAt
+	}
+	return m
+}
+
 // isProbeRetryable 判断探测失败是否属于可重试的瞬时连接错误
 //（unexpected EOF、连接重置、超时等），避免对 4xx/业务错误做无意义重试。
 func isProbeRetryable(err error) bool {
@@ -460,6 +497,7 @@ func (s *Server) probeBalance(ctx context.Context, baseURL, key string) map[stri
 		{"/user/balance", parseDeepSeekBalance},
 		{"/dashboard/billing/subscription", parseOpenAISubscription},
 		{"/dashboard/billing/usage", parseOpenAIUsage},
+		{"/auth/key", parseOpenRouterKey},
 	}
 	for _, p := range probes {
 		ctx2, cancel := context.WithTimeout(ctx, 3*time.Second)

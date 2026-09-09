@@ -100,6 +100,7 @@ import { Balance, Provider, ProbeModel } from './models';
               <span>额度：<strong>{{ balanceText(balance()!) }}</strong></span>
               <span class="badge free" *ngIf="balance()!.kind === 'moonshot' && balance()!.voucher && !balance()!.cash">全赠送额度</span>
               <span class="badge ok" *ngIf="balance()!.kind === 'deepseek' && balance()!.granted">含赠送</span>
+              <span class="badge free" *ngIf="balance()!.kind === 'openrouter' && balance()!.is_free_tier">免费层</span>
             </div>
             <div *ngIf="probeModels().length" style="margin-top:10px">
               <div class="muted small" style="margin-bottom:6px">上游实际提供的模型（多选，勾选自动写入上方输入框）</div>
@@ -261,6 +262,14 @@ export class ProvidersComponent implements OnInit {
         return b.hard_limit_usd
           ? `订阅上限 $${b.hard_limit_usd}`
           : `已用 $${b.total_usage_usd?.toFixed(2)}`;
+      case 'openrouter': {
+        const used = `已用 $${b.usage?.toFixed(2) ?? '0.00'}`;
+        const limit = b.limit != null
+          ? ` / 上限 $${b.limit}`
+          : '（无额度上限）';
+        const exp = b.expires_at ? ` · 有效期至 ${b.expires_at.slice(0, 10)}` : '';
+        return used + limit + exp;
+      }
       default:
         return '';
     }

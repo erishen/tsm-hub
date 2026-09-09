@@ -94,11 +94,12 @@ export class BalancesComponent implements OnInit {
     return '无法获取额度';
   }
 
-  /** 免费徽标：Moonshot 券余额>0 且现金=0 → 全赠送；DeepSeek 含赠送。 */
+  /** 免费徽标：Moonshot 券余额>0 且现金=0 → 全赠送；DeepSeek 含赠送；OpenRouter 免费层。 */
   freeBadge(b?: Balance): string {
     if (!b) return '';
     if (b.kind === 'moonshot' && b.voucher && !b.cash) return '全赠送额度';
     if (b.kind === 'deepseek' && b.granted) return '含赠送';
+    if (b.kind === 'openrouter' && b.is_free_tier) return '免费层';
     return '';
   }
 
@@ -114,6 +115,14 @@ export class BalancesComponent implements OnInit {
         return b.hard_limit_usd
           ? `订阅上限 $${b.hard_limit_usd}`
           : `已用 $${b.total_usage_usd?.toFixed(2)}`;
+      case 'openrouter': {
+        const used = `已用 $${b.usage?.toFixed(2) ?? '0.00'}`;
+        const limit = b.limit != null
+          ? ` / 上限 $${b.limit}`
+          : '（无额度上限）';
+        const exp = b.expires_at ? ` · 有效期至 ${b.expires_at.slice(0, 10)}` : '';
+        return used + limit + exp;
+      }
       default:
         return '';
     }
