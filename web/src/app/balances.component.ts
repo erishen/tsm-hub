@@ -33,15 +33,20 @@ import { Balance, ProviderBalance } from './models';
       <tbody>
         <tr *ngFor="let b of balances()">
           <td>
-            <span class="mono">{{ b.name || b.id }}</span>
-            <span class="muted small" style="margin-left:6px">{{ b.id }}</span>
+            <div style="display:inline-flex;align-items:baseline;gap:6px;white-space:nowrap;max-width:100%">
+              <span class="mono">{{ b.name || b.id }}</span>
+              <span class="muted small" *ngIf="b.name && b.name !== b.id">{{ b.id }}</span>
+            </div>
           </td>
           <td>
             <ng-container *ngIf="b.balance; else noBal">
-              <strong [title]="balanceNote(b.balance!)">{{ balanceText(b.balance!) }}</strong>
-              <a *ngIf="b.balance!.url" [href]="b.balance!.url" target="_blank" rel="noopener"
-                 class="muted small" style="margin-left:8px">控制台 ↗</a>
-              <span class="badge free" *ngIf="freeBadge(b.balance!)" style="margin-left:8px">{{ freeBadge(b.balance!) }}</span>
+              <div style="display:inline-flex;align-items:center;gap:8px">
+                <strong [title]="balanceNote(b.balance!)"
+                        style="display:inline-block;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle">{{ balanceText(b.balance!) }}</strong>
+                <a *ngIf="b.balance!.url" [href]="b.balance!.url" target="_blank" rel="noopener"
+                   class="muted small" style="white-space:nowrap">控制台 ↗</a>
+                <span class="badge free" *ngIf="freeBadge(b.balance!)" style="white-space:nowrap">{{ freeBadge(b.balance!) }}</span>
+              </div>
             </ng-container>
             <ng-template #noBal><span class="muted">—</span></ng-template>
           </td>
