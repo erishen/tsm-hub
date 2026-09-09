@@ -35,8 +35,8 @@ import { Balance, Provider, ProbeModel } from './models';
               <div class="mono">{{ p.id }}</div>
               <div class="muted">{{ p.name }}</div>
             </td>
-            <td class="mono">{{ p.base_url }}</td>
-            <td>{{ (p.models || []).join(', ') }}</td>
+            <td class="mono nowrap" style="max-width:300px" [title]="p.base_url">{{ shortUrl(p.base_url) }}</td>
+            <td class="nowrap" style="max-width:240px" [title]="(p.models || []).join(', ')">{{ modelsPreview(p.models) }}</td>
             <td class="num">{{ p.weight }}</td>
             <td class="num">{{ p.priority }}</td>
             <td>
@@ -198,6 +198,18 @@ export class ProvidersComponent implements OnInit {
       next: (r) => this.providers.set(r.providers ?? []),
       error: (e: Error) => this.error.set(e.message),
     });
+  }
+
+  /** Base URL 模板层截断：前 44 字符 + …，hover title 看全。 */
+  shortUrl(u: string): string {
+    return u.length > 44 ? u.slice(0, 44) + '…' : u;
+  }
+
+  /** 模型列表模板层截断：显示前 3 个 + “+N”，hover title 看全。 */
+  modelsPreview(models: string[] | undefined): string {
+    const ms = models || [];
+    if (!ms.length) return '—';
+    return ms.length > 3 ? ms.slice(0, 3).join(', ') + ` +${ms.length - 3}` : ms.join(', ');
   }
 
   startNew(): void {
