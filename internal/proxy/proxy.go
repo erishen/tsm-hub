@@ -246,6 +246,21 @@ func (p *Proxy) attempt(w http.ResponseWriter, r *http.Request, c router.Candida
 			Err: fmt.Sprintf("upstream 429: %s", compact(string(b))), ProviderFault: true}, true
 	}
 
+	// 非流式且上游返回 2xx/3xx 但 body 带 OpenAI error（部分供应商过载时如此）：
+	// 视为上游故障换下一候选，避免把坏响应当成功透传给客户端。
+	if !req.Stream && resp.StatusCode < 400 {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
+		var eb struct {
+			Error map[string]any `json:"error"`
+		}
+		if json.Unmarshal(b, &eb) == nil && eb.Error != nil {
+			return Result{ProviderID: c.ProviderID, UpstreamModel: c.UpstreamModel, Status: http.StatusBadGateway,
+				Stream: req.Stream, Latency: time.Since(started),
+				Err: fmt.Sprintf("upstream error: %s", compact(string(b))), ProviderFault: true}, true
+		}
+		resp.Body = io.NopCloser(bytes.NewReader(b))
+	}
+
 	// 上游 4xx 直接透传；记日志便于定位（如上游 "model is not found" 是哪家、哪个模型）。
 	if resp.StatusCode >= 400 {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))

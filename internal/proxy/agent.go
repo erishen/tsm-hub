@@ -301,6 +301,21 @@ func (p *Proxy) agentUpstream(r *http.Request, c router.Candidate, path string, 
 		p.health.ReportThrottle(c.ProviderID, compact(string(b)), time.Duration(throttleSec)*time.Second)
 		return nil, fmt.Sprintf("upstream 429: %s", compact(string(b))), 0
 	}
+	if resp.StatusCode < 400 {
+		// 部分上游（如 openrouter 免费模型过载）返回 200 + {"error":{...}} 或空 body：
+		// 视为上游故障，触发 failover 换下一候选，而不是把坏响应当成功。
+		var eb struct {
+			Error map[string]any `json:"error"`
+		}
+		if json.Unmarshal(b, &eb) == nil && eb.Error != nil {
+			p.health.ReportFailure(c.ProviderID, compact(string(b)))
+			return nil, fmt.Sprintf("upstream error: %s", compact(string(b))), 0
+		}
+		if len(bytes.TrimSpace(b)) == 0 {
+			p.health.ReportFailure(c.ProviderID, "empty upstream response")
+			return nil, "upstream returned empty response", 0
+		}
+	}
 	if resp.StatusCode >= 400 {
 		// 4xx 是客户端/上游固定错误：原样透传，不换候选、不驱逐 provider。
 		return b, compact(string(b)), resp.StatusCode

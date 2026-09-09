@@ -64,6 +64,13 @@ func (m *mockUpstream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"error":{"message":"Incorrect API key provided","type":"incorrect_api_key_error"}}`))
 		return
 	}
+	// error200：HTTP 200 但 body 是 OpenAI 错误体（部分上游过载时如此），应触发 failover。
+	if m.mode == "error200" {
+		writeMockJSON(w, map[string]any{"error": map[string]any{
+			"code": 502, "message": "Upstream error from Nvidia: Service temporarily overloaded",
+		}})
+		return
+	}
 	if r.URL.Path == "/v1/models" {
 		writeMockJSON(w, map[string]any{"object": "list", "data": []any{
 			map[string]any{"id": "mock-model", "object": "model", "owned_by": "mock", "context_length": 131072,
@@ -122,7 +129,7 @@ func (m *mockUpstream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeMockJSON(w, map[string]any{
 			"id": "chatcmpl-mock-agent2", "object": "chat.completion", "model": m.model,
 			"choices": []any{map[string]any{"message": map[string]any{"role": "assistant", "content": "答案是 2（已用 calc 工具计算）"}}},
-			"usage": map[string]any{"prompt_tokens": 20, "completion_tokens": 10, "total_tokens": 30},
+			"usage":   map[string]any{"prompt_tokens": 20, "completion_tokens": 10, "total_tokens": 30},
 		})
 		return
 	}
@@ -369,7 +376,7 @@ func TestModelsCatalog(t *testing.T) {
 	// 探测快照覆盖：模拟 cat-agnes 最近一次探测，上游把 agnes-2.0-flash 改成收费（$0.01/$0.02）且上下文 200K。
 	if err := e.store.UpsertProvider(store.Provider{
 		ID: "cat-agnes", Name: "cat-agnes", BaseURL: "http://a/v1", APIKey: "sk-x",
-		Models: []string{"agnes-2.0-flash", "agnes-video-v2.0"},
+		Models:  []string{"agnes-2.0-flash", "agnes-video-v2.0"},
 		ProbeAt: time.Now(),
 		ProbeModels: []store.ProbeModel{
 			{ID: "agnes-2.0-flash", ContextLength: 200000, Free: false,
@@ -387,13 +394,13 @@ func TestModelsCatalog(t *testing.T) {
 	var payload struct {
 		ProbeAt string `json:"probe_at"`
 		Models  []struct {
-			ID            string   `json:"id"`
-			Provider      string   `json:"provider"`
-			Category      string   `json:"category"`
-			Purpose       string   `json:"purpose"`
-			Ctx           string   `json:"context"`
-			ContextLength int      `json:"context_length"`
-			Free          bool     `json:"free"`
+			ID            string `json:"id"`
+			Provider      string `json:"provider"`
+			Category      string `json:"category"`
+			Purpose       string `json:"purpose"`
+			Ctx           string `json:"context"`
+			ContextLength int    `json:"context_length"`
+			Free          bool   `json:"free"`
 			Pricing       *struct {
 				Prompt     string `json:"prompt"`
 				Completion string `json:"completion"`
@@ -499,11 +506,11 @@ func TestRefreshModels(t *testing.T) {
 		t.Fatalf("status = %d", resp.StatusCode)
 	}
 	var payload struct {
-		ProbeAt  string            `json:"probe_at"`
-		Models   []struct {
-			ID    string `json:"id"`
-			Free  bool   `json:"free"`
-			Ctx   int    `json:"context_length"`
+		ProbeAt string `json:"probe_at"`
+		Models  []struct {
+			ID   string `json:"id"`
+			Free bool   `json:"free"`
+			Ctx  int    `json:"context_length"`
 		} `json:"models"`
 		Providers map[string]string `json:"providers"`
 	}
@@ -1425,7 +1432,6 @@ func TestProbeProviderModels(t *testing.T) {
 	}
 }
 
-
 // TestAgentToolLoop 验证网关 agent：客户端不传 tools，网关自动附加工具池并在
 // 服务端执行 tool_calls 循环，最终返回带工具结果的答案。
 func TestAgentToolLoop(t *testing.T) {
@@ -1511,6 +1517,38 @@ func TestAgentStreamReplay(t *testing.T) {
 	}
 	if !strings.Contains(text, "2") {
 		t.Fatalf("streamed text = %q, want containing 2", text)
+	}
+}
+
+// TestAgentError200Failover 验证上游返回 200 + error body（过载/坏响应）时，
+// agent 路径视为上游故障并 failover 到下一候选，而不是把坏响应当成功透传。
+func TestAgentError200Failover(t *testing.T) {
+	e := newEnv(t, "agent")
+	defer e.server.Close()
+	e.upBad.mode = "error200" // primary 返回 200 + {"error":{...}}
+
+	resp := e.do(t, http.MethodPost, "/v1/chat/completions",
+		`{"model":"smart","messages":[{"role":"user","content":"1+1=?"}]}`, e.authHeaders())
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d %s", resp.StatusCode, b)
+	}
+	if got := resp.Header.Get("X-Llm-Router-Provider"); got != "backup" {
+		t.Fatalf("X-Llm-Router-Provider = %q, want backup (error200 should failover)", got)
+	}
+	var out struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Choices) != 1 || !strings.Contains(out.Choices[0].Message.Content, "2") {
+		t.Fatalf("answer = %q, want content containing 2", out.Choices[0].Message.Content)
 	}
 }
 
