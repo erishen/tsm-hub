@@ -1,7 +1,6 @@
 package api
 
 import (
-	"slices"
 	"bufio"
 	"bytes"
 	"encoding/json"
@@ -350,7 +349,7 @@ func TestModelsCatalog(t *testing.T) {
 		ProbeAt string `json:"probe_at"`
 		Models  []struct {
 			ID            string   `json:"id"`
-			Providers     []string `json:"providers"`
+			Provider      string   `json:"provider"`
 			Category      string   `json:"category"`
 			Purpose       string   `json:"purpose"`
 			Ctx           string   `json:"context"`
@@ -365,8 +364,8 @@ func TestModelsCatalog(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	byID := map[string]struct {
-		Providers     []string
+	byKey := map[string]struct {
+		Provider      string
 		Category      string
 		Ctx           string
 		ContextLength int
@@ -377,8 +376,8 @@ func TestModelsCatalog(t *testing.T) {
 		}
 	}{}
 	for _, m := range payload.Models {
-		byID[m.ID] = struct {
-			Providers     []string
+		byKey[m.ID+"@"+m.Provider] = struct {
+			Provider      string
 			Category      string
 			Ctx           string
 			ContextLength int
@@ -387,29 +386,35 @@ func TestModelsCatalog(t *testing.T) {
 				Prompt     string `json:"prompt"`
 				Completion string `json:"completion"`
 			}
-		}{m.Providers, m.Category, m.Ctx, m.ContextLength, m.Free, m.Pricing}
+		}{m.Provider, m.Category, m.Ctx, m.ContextLength, m.Free, m.Pricing}
 	}
-	a := byID["agnes-2.0-flash"]
-	if len(a.Providers) != 2 || !slices.Contains(a.Providers, "cat-agnes") || !slices.Contains(a.Providers, "cat-kimi") {
-		t.Fatalf("agnes-2.0-flash providers = %v, want merged [cat-agnes cat-kimi]", a.Providers)
+	// 同一模型在不同 Provider 分行展示，各自独立免费/价格状态。
+	aAgnes := byKey["agnes-2.0-flash@cat-agnes"]
+	if aAgnes.Provider != "cat-agnes" {
+		t.Fatalf("agnes@cat-agnes missing: %+v", aAgnes)
 	}
-	// 快照优先：静态表本是 256K/FREE/$0，探测快照改为 200K/收费/$0.01-$0.02 → 目录跟随快照。
-	if a.ContextLength != 200000 || a.Free || a.Pricing == nil ||
-		a.Pricing.Prompt != "0.01" || a.Pricing.Completion != "0.02" {
-		t.Fatalf("agnes-2.0-flash = %+v, want snapshot 200K/paid/$0.01-$0.02 overrides static", a)
+	// 快照优先：cat-agnes 最近探测把 agnes-2.0-flash 改成收费（$0.01/$0.02）且上下文 200K。
+	if aAgnes.ContextLength != 200000 || aAgnes.Free || aAgnes.Pricing == nil ||
+		aAgnes.Pricing.Prompt != "0.01" || aAgnes.Pricing.Completion != "0.02" {
+		t.Fatalf("agnes@cat-agnes = %+v, want snapshot 200K/paid/$0.01-$0.02", aAgnes)
+	}
+	// cat-kimi 无探测快照 → 保持静态表 256K/FREE。
+	aKimi := byKey["agnes-2.0-flash@cat-kimi"]
+	if aKimi.Provider != "cat-kimi" || aKimi.Free || aKimi.Ctx != "256K" {
+		t.Fatalf("agnes@cat-kimi = %+v, want static 256K", aKimi)
 	}
 	if payload.ProbeAt == "" {
 		t.Fatalf("probe_at empty, want latest probe timestamp")
 	}
-	k := byID["kimi-k2.7-code"]
+	k := byKey["kimi-k2.7-code@cat-kimi"]
 	if k.Category != "text" || k.Ctx != "256K" {
 		t.Fatalf("kimi-k2.7-code = %+v, want text/256K", k)
 	}
-	o := byID["nex-agi/nex-n2.5-mini:free"]
+	o := byKey["nex-agi/nex-n2.5-mini:free@cat-or"]
 	if o.Category != "text" || !o.Free {
 		t.Fatalf("nex :free = %+v, want text/free", o)
 	}
-	v := byID["brand-new-video-gen"]
+	v := byKey["brand-new-video-gen@cat-or"]
 	if v.Category != "video" || v.Pricing != nil {
 		t.Fatalf("brand-new-video-gen = %+v, want inferred video/no pricing", v)
 	}

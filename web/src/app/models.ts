@@ -107,10 +107,10 @@ export interface ProviderHealth {
   errors: number;
 }
 
-/** 模型目录条目（各 Provider 已配置模型聚合）。 */
+/** 模型目录条目：Provider×模型 一行（同一模型在不同 Provider 的免费/价格可能不同，不合并）。 */
 export interface CatalogModel {
   id: string;
-  providers: string[];
+  provider: string;
   category: string;
   purpose: string;
   context?: string;

@@ -464,11 +464,13 @@ func (s *Server) handleRefreshModels(w http.ResponseWriter, r *http.Request) {
 }
 
 // buildCatalog 聚合目录（快照优先于静态知识表），返回响应体（含 models 与最近探测时间）。
+// 同一模型在不同 Provider 的免费/价格可能不同（如 deepseek-v4-flash 在官方付费、商汤免费），
+// 因此按 Provider×模型展开为独立行，不合并去重。
 func (s *Server) buildCatalog() map[string]any {
 	providers := s.store.ListProviders()
 	type item struct {
 		ID            string   `json:"id"`
-		Providers     []string `json:"providers"`
+		Provider      string   `json:"provider"`
 		Category      string   `json:"category"`
 		Purpose       string   `json:"purpose"`
 		Ctx           string   `json:"context,omitempty"`
@@ -479,8 +481,7 @@ func (s *Server) buildCatalog() map[string]any {
 			Completion string `json:"completion"`
 		} `json:"pricing,omitempty"`
 	}
-	merged := map[string]*item{}
-	order := []string{}
+	out := make([]*item, 0)
 	var latestProbe time.Time
 	for _, p := range providers {
 		if p.ID == "mock-local" {
@@ -498,43 +499,46 @@ func (s *Server) buildCatalog() map[string]any {
 			if id == "" {
 				continue
 			}
-			it, ok := merged[id]
-			if !ok {
-				meta, has := modelCatalog[id]
-				if !has {
-					meta = inferModelMeta(id)
+			meta, has := modelCatalog[id]
+			if !has {
+				meta = inferModelMeta(id)
+			}
+			it := &item{ID: id, Provider: p.ID, Category: meta.Category, Purpose: meta.Purpose, Ctx: meta.Ctx}
+			// 快照覆盖：该 Provider 最近一次探测的 context_length/free/pricing 优先于静态表。
+			if pm, ok2 := probeByID[id]; ok2 {
+				it.ContextLength = pm.ContextLength
+				it.Free = pm.Free
+				if pm.Pricing != nil {
+					it.Pricing = &struct {
+						Prompt     string `json:"prompt"`
+						Completion string `json:"completion"`
+					}{pm.Pricing.Prompt, pm.Pricing.Completion}
 				}
-				it = &item{ID: id, Category: meta.Category, Purpose: meta.Purpose, Ctx: meta.Ctx}
-				// 快照覆盖：上游最近一次探测的 context_length/free/pricing 优先于静态表。
-				if pm, ok2 := probeByID[id]; ok2 {
-					it.ContextLength = pm.ContextLength
-					it.Free = pm.Free
-					if pm.Pricing != nil {
-						it.Pricing = &struct {
-							Prompt     string `json:"prompt"`
-							Completion string `json:"completion"`
-						}{pm.Pricing.Prompt, pm.Pricing.Completion}
-					}
-				} else if pr, ok2 := agnesPricing[id]; ok2 {
+			} else if p.ID == "agnes" {
+				// agnes 官方定价静态表（仅 agnes Provider 适用，防止定价串到同 id 的其他 Provider）。
+				if pr, ok2 := agnesPricing[id]; ok2 {
 					it.Pricing = &struct {
 						Prompt     string `json:"prompt"`
 						Completion string `json:"completion"`
 					}{pr[0], pr[1]}
 					it.Free = pr[0] == "0" && pr[1] == "0"
-				} else if strings.HasSuffix(id, ":free") {
-					it.Free = true
 				}
-				merged[id] = it
-				order = append(order, id)
+			} else if p.ID == "sensenova" {
+				// SenseNova Token Plan 免费公测：其全部模型免费（自研 1500 次/5h、DeepSeek V4 Flash 500 次/5h）。
+				it.Free = true
+			} else if strings.HasSuffix(id, ":free") {
+				// OpenRouter :free 后缀约定（id 层面即表示免费）。
+				it.Free = true
 			}
-			it.Providers = append(it.Providers, p.ID)
+			out = append(out, it)
 		}
 	}
-	sort.Slice(order, func(i, j int) bool { return order[i] < order[j] })
-	out := make([]*item, 0, len(order))
-	for _, id := range order {
-		out = append(out, merged[id])
-	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].ID != out[j].ID {
+			return out[i].ID < out[j].ID
+		}
+		return out[i].Provider < out[j].Provider
+	})
 	resp := map[string]any{"models": out}
 	if !latestProbe.IsZero() {
 		resp["probe_at"] = latestProbe.Format(time.RFC3339)

@@ -31,7 +31,7 @@ const CATEGORY_LABEL: Record<string, string> = {
 
     <div style="display:flex;gap:12px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
       <input [(ngModel)]="q" placeholder="搜索模型 id / 用途 / Provider…" style="min-width:280px" />
-      <span class="muted small">共 {{ models().length }} 个模型 · {{ freeCount() }} 个免费</span>
+      <span class="muted small">共 {{ models().length }} 条模型记录 · {{ freeCount() }} 个免费（同模型不同 Provider 分行显示）</span>
     </div>
     <div class="muted" style="margin-bottom:8px">
       <ng-container *ngIf="probeAt()">免费/价格状态来自最近一次探测（{{ probeAt() }}，缓存数据），点「重新探测」更新</ng-container>
@@ -52,9 +52,7 @@ const CATEGORY_LABEL: Record<string, string> = {
           <tbody>
             <tr *ngFor="let m of byCategory()[cat]">
               <td class="mono">{{ m.id }}</td>
-              <td>
-                <span class="badge ok" *ngFor="let p of m.providers" style="margin-right:4px">{{ p }}</span>
-              </td>
+              <td><span class="badge ok">{{ m.provider }}</span></td>
               <td class="muted">{{ ctx(m) }}</td>
               <td>
                 <span class="badge free" *ngIf="m.free">FREE</span>
@@ -99,7 +97,7 @@ export class ModelsComponent implements OnInit {
       (m) =>
         m.id.toLowerCase().includes(s) ||
         m.purpose.toLowerCase().includes(s) ||
-        m.providers.some((p) => p.toLowerCase().includes(s))
+        m.provider.toLowerCase().includes(s)
     );
   });
 
