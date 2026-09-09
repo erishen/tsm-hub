@@ -1067,10 +1067,11 @@ func (s *Server) handleListKeys(w http.ResponseWriter, r *http.Request) {
 		out = append(out, map[string]any{
 			"id": k.ID, "name": k.Name, "prefix": k.Prefix, "enabled": k.Enabled,
 			"models": k.Models, "quota": k.Quota,
-			"created_at":  k.CreatedAt,
-			"expires_at":  k.ExpiresAt,
-			"usage":       agg,
-			"rpm_current": rpm[k.ID],
+			"created_at":    k.CreatedAt,
+			"expires_at":    k.ExpiresAt,
+			"inject_skills": k.InjectSkills,
+			"usage":         agg,
+			"rpm_current":   rpm[k.ID],
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"keys": out})
@@ -1092,6 +1093,10 @@ func (s *Server) handleCreateKey(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", err.Error())
 		return
+	}
+	// 默认注入技能清单：新签发的 key 天然带技能库上下文（可后续通过重新签发调整）。
+	if req.InjectSkills == "" {
+		req.InjectSkills = "list"
 	}
 	k := store.APIKey{
 		ID:           newID(),

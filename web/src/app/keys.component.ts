@@ -209,8 +209,8 @@ export class KeysComponent implements OnInit {
   modelsText = '';
   expireDays = 0;
   form: { name: string; quota: Quota } = { name: '', quota: this.blankQuota() };
-  /** 技能注入：''=不注入 | list | all | __name__(指定技能) */
-  injectSkills = '';
+  /** 技能注入：''=不注入 | list | all | __name__(指定技能)，默认 list（技能清单）。 */
+  injectSkills = 'list';
   injectSkillName = '';
   readonly skillOptions = signal<SkillSummary[]>([]);
 
@@ -298,7 +298,7 @@ export class KeysComponent implements OnInit {
     this.form = { name: '', quota: this.blankQuota() };
     this.modelsText = '';
     this.expireDays = 0;
-    this.injectSkills = '';
+    this.injectSkills = 'list';
     this.injectSkillName = '';
     this.creating.set(true);
   }
