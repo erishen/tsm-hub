@@ -39,6 +39,7 @@ func (s *Server) adminMux() http.Handler {
 	m.HandleFunc("GET /api/admin/keys", s.admin(s.handleListKeys))
 	m.HandleFunc("POST /api/admin/keys", s.admin(s.handleCreateKey))
 	m.HandleFunc("POST /api/admin/keys/{id}/toggle", s.admin(s.handleToggleKey))
+	m.HandleFunc("PATCH /api/admin/keys/{id}", s.admin(s.handleUpdateKey))
 	m.HandleFunc("DELETE /api/admin/keys/{id}", s.admin(s.handleDeleteKey))
 	m.HandleFunc("GET /api/admin/usage", s.admin(s.handleUsage))
 	m.HandleFunc("GET /api/admin/health", s.admin(s.handleAdminHealth))
@@ -1140,6 +1141,24 @@ func (s *Server) handleToggleKey(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDeleteKey(w http.ResponseWriter, r *http.Request) {
 	if err := s.store.DeleteKey(r.PathValue("id")); err != nil {
+		writeError(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (s *Server) handleUpdateKey(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name         string      `json:"name"`
+		Models       []string    `json:"models"`
+		Quota        store.Quota `json:"quota"`
+		InjectSkills string      `json:"inject_skills"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid json: "+err.Error())
+		return
+	}
+	if err := s.store.UpdateKey(r.PathValue("id"), req.Name, req.Models, req.Quota, req.InjectSkills); err != nil {
 		writeError(w, http.StatusNotFound, "not_found", err.Error())
 		return
 	}

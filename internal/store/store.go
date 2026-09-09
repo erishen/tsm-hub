@@ -426,6 +426,22 @@ func (s *Store) SetKeyEnabled(id string, enabled bool) error {
 	})
 }
 
+// UpdateKey 更新已有 key 的可编辑字段（Name/Models/Quota/InjectSkills）。
+func (s *Store) UpdateKey(id string, name string, models []string, quota Quota, injectSkills string) error {
+	return s.Update(func(c *Config) error {
+		for i := range c.Keys {
+			if c.Keys[i].ID == id {
+				c.Keys[i].Name = name
+				c.Keys[i].Models = models
+				c.Keys[i].Quota = quota
+				c.Keys[i].InjectSkills = injectSkills
+				return nil
+			}
+		}
+		return fmt.Errorf("key %q not found", id)
+	})
+}
+
 // LookupKeyHash 用 sha256 哈希查 Key，热路径（每次代理请求都会走）。
 func (s *Store) LookupKeyHash(hash string) (APIKey, bool) {
 	s.mu.RLock()

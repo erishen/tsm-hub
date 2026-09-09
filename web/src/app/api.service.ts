@@ -173,6 +173,13 @@ export class ApiService {
       .pipe(catchError(this.handleError));
   }
 
+  updateKey(id: string, body: {
+    name?: string; models?: string[]; quota?: Partial<Quota>; inject_skills?: string;
+  }): Observable<unknown> {
+    return this.http.patch(`/api/admin/keys/${encodeURIComponent(id)}`, body, { headers: this.headers() })
+      .pipe(catchError(this.handleError));
+  }
+
   deleteKey(id: string): Observable<unknown> {
     return this.http.delete(`/api/admin/keys/${encodeURIComponent(id)}`, { headers: this.headers() })
       .pipe(catchError(this.handleError));

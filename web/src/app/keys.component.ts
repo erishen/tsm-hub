@@ -95,13 +95,13 @@ import { ApiKey, Quota, SkillSummary } from './models';
     </div>
 
     <!-- 签发弹窗 -->
-    <div class="modal-backdrop" *ngIf="creating()">
+    <div class="modal-backdrop" *ngIf="creating() || editing()">
       <div class="modal" (click)="$event.stopPropagation()">
         <div class="modal-head">
           <div class="modal-icon">+</div>
           <div class="modal-titles">
-            <h2>签发新 Key</h2>
-            <div class="sub">生成 sk-tr- 开头的自制 Key，服务端只保存哈希</div>
+            <h2>{{ editing() ? '编辑 Key' : '签发新 Key' }}</h2>
+            <div class="sub">{{ editing() ? editing()!.prefix + ' · key 本身不变' : '生成 sk-tr- 开头的自制 Key，服务端只保存哈希' }}</div>
           </div>
           <button class="icon" (click)="cancel()" aria-label="关闭">×</button>
         </div>
@@ -143,8 +143,8 @@ import { ApiKey, Quota, SkillSummary } from './models';
         </div>
         <div class="modal-foot">
           <button (click)="cancel()" [disabled]="saving()">取消</button>
-          <button class="primary" (click)="create()" [disabled]="saving()">
-            {{ saving() ? '签发中…' : '签发' }}
+          <button class="primary" (click)="saveOrCreate()" [disabled]="saving()">
+            {{ saving() ? (editing() ? '保存中…' : '签发中…') : (editing() ? '保存' : '签发') }}
           </button>
         </div>
       </div>
@@ -184,7 +184,8 @@ import { ApiKey, Quota, SkillSummary } from './models';
             <td class="num">{{ k.rpm_current }}/{{ k.quota.rpm || '∞' }}</td>
             <td class="muted" style="font-size:12px">{{ quotaRemain(k) }}</td>
             <td style="white-space:nowrap">
-              <button class="small" (click)="toggle(k)">{{ k.enabled ? '停用' : '启用' }}</button>
+              <button class="small" (click)="startEdit(k)">编辑</button>
+              <button class="small" style="margin-left:6px" (click)="toggle(k)">{{ k.enabled ? '停用' : '启用' }}</button>
               <button class="small danger" style="margin-left:6px" (click)="remove(k)">删除</button>
             </td>
           </tr>
@@ -198,6 +199,7 @@ export class KeysComponent implements OnInit {
   readonly keys = signal<ApiKey[]>([]);
   readonly error = signal('');
   readonly creating = signal(false);
+  readonly editing = signal<ApiKey | null>(null);
   readonly saving = signal(false);
   /** 复制的目标标记：'' = 无；'key' | 'curl' | 'py' | 'curlKey' */
   readonly copied = signal('');
@@ -291,7 +293,7 @@ export class KeysComponent implements OnInit {
 
   @HostListener('document:keydown.escape')
   onEsc(): void {
-    if (this.creating() && !this.saving()) this.cancel();
+    if ((this.creating() || this.editing()) && !this.saving()) this.cancel();
   }
 
   startNew(): void {
@@ -303,8 +305,61 @@ export class KeysComponent implements OnInit {
     this.creating.set(true);
   }
 
+  startEdit(k: ApiKey): void {
+    this.form = {
+      name: k.name,
+      quota: {
+        max_tokens: k.quota.max_tokens ?? 0,
+        max_cost_usd: k.quota.max_cost_usd ?? 0,
+        daily_tokens: k.quota.daily_tokens ?? 0,
+        rpm: k.quota.rpm ?? 0,
+      },
+    };
+    this.modelsText = (k.models && k.models.length) ? k.models.join(',') : '';
+    this.expireDays = 0; // 编辑不改有效期
+    const inj = k.inject_skills || '';
+    if (inj === 'list' || inj === 'all' || inj === '') {
+      this.injectSkills = inj;
+      this.injectSkillName = '';
+    } else {
+      this.injectSkills = '__name__';
+      this.injectSkillName = inj;
+    }
+    this.editing.set(k);
+  }
+
   cancel(): void {
     this.creating.set(false);
+    this.editing.set(null);
+  }
+
+  saveOrCreate(): void {
+    if (this.editing()) { this.save(); return; }
+    this.create();
+  }
+
+  save(): void {
+    const k = this.editing();
+    if (!k) return;
+    this.saving.set(true);
+    const models = this.modelsText.split(',').map((s) => s.trim()).filter(Boolean);
+    const inject = this.injectSkills === '__name__' ? this.injectSkillName : this.injectSkills;
+    this.api.updateKey(k.id, {
+      name: this.form.name,
+      models: models.length ? models : [],
+      quota: this.form.quota,
+      inject_skills: inject,
+    }).subscribe({
+      next: () => {
+        this.saving.set(false);
+        this.editing.set(null);
+        this.load();
+      },
+      error: (e: Error) => {
+        this.saving.set(false);
+        this.error.set(e.message);
+      },
+    });
   }
 
   create(): void {

@@ -166,7 +166,7 @@ func (l *Library) Render(mode string) string {
 		for _, s := range list {
 			fmt.Fprintf(&b, "- %s: %s\n", s.Name, s.Description)
 		}
-		b.WriteString("\n当用户要求执行某个技能时，按对应 SKILL.md 的说明执行；不确定用哪个技能时先列出清单询问。")
+		b.WriteString("\n技能说明已内联在上下文中，不要尝试读取任何文件路径（不存在）；当用户要求执行某个技能时，直接依据上面的说明执行；不确定用哪个技能时先列出清单询问。")
 		return b.String()
 	case "all":
 		list := l.List()
@@ -174,7 +174,7 @@ func (l *Library) Render(mode string) string {
 			return ""
 		}
 		var b strings.Builder
-		b.WriteString("[llm-router 技能库] 以下是网关挂载的全部技能（SKILL.md 全文，按技能执行）：\n")
+		b.WriteString("[llm-router 技能库] 以下是网关挂载的全部技能（SKILL.md 全文已内联，按此执行；不要尝试读取任何文件路径）：\n")
 		for _, s := range list {
 			d, ok := l.Get(s.Name)
 			if !ok {
@@ -188,7 +188,7 @@ func (l *Library) Render(mode string) string {
 		if !ok {
 			return ""
 		}
-		return fmt.Sprintf("[llm-router 技能库] 技能 %s 的 SKILL.md（按此执行）：\n%s", d.Name, d.Raw)
+		return fmt.Sprintf("[llm-router 技能库] 技能 %s 的 SKILL.md（全文已内联，按此执行；不要尝试读取任何文件路径）：\n%s", d.Name, d.Raw)
 	}
 }
 
