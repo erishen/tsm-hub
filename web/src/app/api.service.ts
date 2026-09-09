@@ -3,7 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { Observable, of, forkJoin, throwError } from 'rxjs';
 import { catchError, map, mergeMap, tap } from 'rxjs/operators';
 import {
-  Agg, ApiKey, Balance, CatalogModel, Overview, ProbeModel, Provider, ProviderBalance, ProviderHealth, Quota, Route, SkillDetail, SkillSummary, UsageResponse,
+  Agg, ApiKey, Balance, CatalogModel, McpServer, Overview, ProbeModel, Provider, ProviderBalance, ProviderHealth, Quota, Route, SkillDetail, SkillSummary, ToolInfo, UsageResponse,
 } from './models';
 
 const SESSION_KEY = 'llm-router.session';
@@ -151,6 +151,26 @@ export class ApiService {
 
   getSkill(name: string): Observable<SkillDetail> {
     return this.http.get<SkillDetail>(`/api/admin/skills/${encodeURIComponent(name)}`, { headers: this.headers() })
+      .pipe(catchError(this.handleError));
+  }
+
+  listMcps(): Observable<{ mcps: McpServer[] }> {
+    return this.http.get<{ mcps: McpServer[] }>('/api/admin/mcps', { headers: this.headers() })
+      .pipe(catchError(this.handleError));
+  }
+
+  saveMcp(name: string, body: { command: string; args?: string[]; env?: Record<string, string> }): Observable<unknown> {
+    return this.http.post(`/api/admin/mcps/${encodeURIComponent(name)}`, body, { headers: this.headers() })
+      .pipe(catchError(this.handleError));
+  }
+
+  deleteMcp(name: string): Observable<unknown> {
+    return this.http.delete(`/api/admin/mcps/${encodeURIComponent(name)}`, { headers: this.headers() })
+      .pipe(catchError(this.handleError));
+  }
+
+  listTools(): Observable<{ tools: ToolInfo[] }> {
+    return this.http.get<{ tools: ToolInfo[] }>('/api/admin/tools', { headers: this.headers() })
       .pipe(catchError(this.handleError));
   }
 

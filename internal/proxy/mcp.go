@@ -53,6 +53,49 @@ func newMCPManager() *mcpManager {
 	return &mcpManager{servers: map[string]*mcpServer{}}
 }
 
+// Reset 关闭全部 MCP server 并清空连接（配置变更后调用，下次请求重新连接）。
+func (m *mcpManager) Reset() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for name, s := range m.servers {
+		s.close()
+		delete(m.servers, name)
+	}
+}
+
+// MCPStatus 是单个 MCP server 的连接状态快照。
+type MCPStatus struct {
+	Connected bool     `json:"connected"`
+	Err       string   `json:"err,omitempty"`
+	Tools     []string `json:"tools"`
+}
+
+// MCPStatuses 返回全部配置 MCP server 的状态（供管理台展示）。
+func (p *Proxy) MCPStatuses() map[string]MCPStatus {
+	return p.mcps.Statuses(p.store.Settings().Mcps)
+}
+
+// ResetMCP 断开全部 MCP server（配置变更后调用）。
+func (p *Proxy) ResetMCP() {
+	p.mcps.Reset()
+}
+
+// Statuses 返回全部配置 MCP server 的状态（配置但未连接时也返回占位）。
+func (m *mcpManager) Statuses(cfg map[string]store.MCPServer) map[string]MCPStatus {
+	out := map[string]MCPStatus{}
+	for name := range cfg {
+		m.mu.Lock()
+		s, ok := m.servers[name]
+		m.mu.Unlock()
+		if !ok || !s.connected() {
+			out[name] = MCPStatus{Connected: false}
+			continue
+		}
+		out[name] = MCPStatus{Connected: true, Tools: s.toolNames()}
+	}
+	return out
+}
+
 // ensure 确保 server 已连接并拉取了工具列表（懒连接 + 失败重连）。
 func (m *mcpManager) ensure(name string, cfg store.MCPServer) (*mcpServer, error) {
 	m.mu.Lock()

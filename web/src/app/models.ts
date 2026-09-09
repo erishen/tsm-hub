@@ -191,3 +191,20 @@ export interface SkillDetail extends SkillSummary {
   size: number;
   updated: string;
 }
+
+/** MCP：单个 server 的配置 + 连接状态（管理台 /mcps）。 */
+export interface McpServer {
+  name: string;
+  command: string;
+  args?: string[];
+  env?: Record<string, string>;
+  connected: boolean;
+  tools: string[];
+}
+
+/** 工具池目录：内置 / 条件 / MCP 工具。 */
+export interface ToolInfo {
+  name: string;
+  description: string;
+  source: string; // builtin | builtin-conditional | mcp:<server>
+}

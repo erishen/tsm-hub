@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -32,6 +33,41 @@ func (a toolArgs) str(k string) string {
 
 // 内置工具名（工具池的排序与 schema 输出）。
 var builtinTools = []string{"calc", "echo", "fetch_url", "get_time", "recall", "remember", "skill-run"}
+
+// ToolInfo 是工具池目录项（管理台 /mcps 页展示）。
+type ToolInfo struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Source      string `json:"source"` // builtin / builtin-conditional / mcp:<server>
+}
+
+// ToolCatalog 返回当前工具池目录（内置 + 条件 + MCP，MCP 触发连接）。
+func (p *Proxy) ToolCatalog() []ToolInfo {
+	out := make([]ToolInfo, 0, len(builtinTools)+4)
+	for _, n := range builtinTools {
+		out = append(out, ToolInfo{Name: n, Description: toolDef(n), Source: "builtin"})
+	}
+	if p.store.Settings().Agent.ReadRoot != "" {
+		out = append(out, ToolInfo{Name: "read_file", Description: "读取本地文件内容（白名单根目录内）", Source: "builtin-conditional"})
+	}
+	cfg := p.store.Settings().Mcps
+	names := make([]string, 0, len(cfg))
+	for n := range cfg {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		s, err := p.mcps.ensure(name, cfg[name])
+		if err != nil {
+			out = append(out, ToolInfo{Name: "mcp_" + name + "_*", Description: "MCP server 连接失败: " + err.Error(), Source: "mcp:" + name})
+			continue
+		}
+		for _, t := range s.tools {
+			out = append(out, ToolInfo{Name: mcpToolName(name, t.Name), Description: t.Description, Source: "mcp:" + name})
+		}
+	}
+	return out
+}
 
 // execTool 执行工具（keyID 用于 remember/recall 的隔离命名空间）。
 func (p *Proxy) execTool(keyID, name string, args toolArgs) string {

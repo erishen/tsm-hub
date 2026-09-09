@@ -47,6 +47,10 @@ func (s *Server) adminMux() http.Handler {
 	m.HandleFunc("POST /api/admin/settings", s.admin(s.handleUpdateSettings))
 	m.HandleFunc("GET /api/admin/skills", s.admin(s.handleListSkills))
 	m.HandleFunc("GET /api/admin/skills/{name}", s.admin(s.handleGetSkill))
+	m.HandleFunc("GET /api/admin/mcps", s.admin(s.handleListMcps))
+	m.HandleFunc("POST /api/admin/mcps/{name}", s.admin(s.handleUpsertMcp))
+	m.HandleFunc("DELETE /api/admin/mcps/{name}", s.admin(s.handleDeleteMcp))
+	m.HandleFunc("GET /api/admin/tools", s.admin(s.handleListTools))
 	return m
 }
 
@@ -1243,6 +1247,87 @@ func (s *Server) handleGetSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, d)
+}
+
+// ---------- mcps / tools ----------
+
+// handleListMcps 返回 MCP server 配置 + 连接状态 + 工具数。
+func (s *Server) handleListMcps(w http.ResponseWriter, r *http.Request) {
+	cfg := s.store.Settings().Mcps
+	names := make([]string, 0, len(cfg))
+	for n := range cfg {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	out := make([]map[string]any, 0, len(names))
+	for _, name := range names {
+		c := cfg[name]
+		st := s.proxy.MCPStatuses()[name]
+		out = append(out, map[string]any{
+			"name":      name,
+			"command":   c.Command,
+			"args":      c.Args,
+			"env":       c.Env,
+			"connected": st.Connected,
+			"tools":     st.Tools,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"mcps": out})
+}
+
+// handleUpsertMcp 新增/更新一个 MCP server 配置，并重建连接。
+func (s *Server) handleUpsertMcp(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if name == "" || strings.Contains(name, "/") || strings.Contains(name, "\\") {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid mcp name")
+		return
+	}
+	var c struct {
+		Command string            `json:"command"`
+		Args    []string          `json:"args"`
+		Env     map[string]string `json:"env"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&c); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid json: "+err.Error())
+		return
+	}
+	if c.Command == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", "command required")
+		return
+	}
+	if err := s.store.Update(func(cfg *store.Config) error {
+		if cfg.Settings.Mcps == nil {
+			cfg.Settings.Mcps = map[string]store.MCPServer{}
+		}
+		cfg.Settings.Mcps[name] = store.MCPServer{Command: c.Command, Args: c.Args, Env: c.Env}
+		return nil
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", err.Error())
+		return
+	}
+	s.proxy.ResetMCP()
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// handleDeleteMcp 删除一个 MCP server 配置并断开连接。
+func (s *Server) handleDeleteMcp(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if err := s.store.Update(func(cfg *store.Config) error {
+		if cfg.Settings.Mcps != nil {
+			delete(cfg.Settings.Mcps, name)
+		}
+		return nil
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", err.Error())
+		return
+	}
+	s.proxy.ResetMCP()
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// handleListTools 返回网关工具池目录（内置 + 条件 + MCP）。
+func (s *Server) handleListTools(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"tools": s.proxy.ToolCatalog()})
 }
 
 func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
