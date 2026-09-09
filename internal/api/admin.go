@@ -1484,12 +1484,8 @@ func (s *Server) handleFastpathGenerate(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "bad_request", "query required")
 		return
 	}
-	answer, method := s.proxy.FastPathTry(r, store.APIKey{}, "/v1/chat/completions", c.Query)
-	if answer == "" {
-		writeJSON(w, http.StatusOK, map[string]any{"answer": "", "method": ""})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"answer": answer, "method": method})
+	answer, method, chain := s.proxy.FastPathProbe(r, store.APIKey{}, "/v1/chat/completions", c.Query)
+	writeJSON(w, http.StatusOK, map[string]any{"answer": answer, "method": method, "chain": chain})
 }
 
 // handleListTools 返回网关工具池目录（内置 + 条件 + MCP）。

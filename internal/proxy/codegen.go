@@ -321,15 +321,18 @@ function detect(text) {
 如果不能确定性解决（需要常识、写作、开放推理）→ 只输出 NONE。`
 
 // codegenSolve 让 LLM 生成检测器并立即执行验证；命中则持久化插件并返回答案。
-func (p *Proxy) codegenSolve(r *http.Request, key store.APIKey, path, text string) (string, bool) {
+func (p *Proxy) codegenSolve(r *http.Request, key store.APIKey, path, text string) (string, bool, string) {
 	if !p.store.Settings().Fastpath.Codegen {
-		return "", false
+		return "", false, "codegen 未启用（settings.fastpath.codegen=false）"
 	}
 	prompt := strings.Replace(codeGenPrompt, "{query}", text, 1)
 	msgs := []chatMessage{{"role": "user", "content": prompt}}
-	body, ok := p.complete(r, key, path, msgs)
-	if !ok || len(body) == 0 {
-		return "", false
+	body, why := p.complete(r, key, path, msgs)
+	if len(body) == 0 {
+		if why == "" {
+			why = "codegen 上游调用失败（所有候选不可用）"
+		}
+		return "", false, why
 	}
 	var resp struct {
 		Choices []struct {
@@ -339,27 +342,29 @@ func (p *Proxy) codegenSolve(r *http.Request, key store.APIKey, path, text strin
 		} `json:"choices"`
 	}
 	if err := json.Unmarshal(body, &resp); err != nil || len(resp.Choices) == 0 {
-		return "", false
+		return "", false, "codegen 响应无 choices（上游异常）"
 	}
 	source := extractJSDetector(resp.Choices[0].Message.Content)
 	if source == "" {
-		return "", false
+		return "", false, "codegen 未从模型输出中提取到 JS 检测器（模型没按格式返回代码）"
 	}
 	answer, hit := runJSDetector(source, text)
 	if !hit {
-		return "", false
+		return "", false, "codegen 生成的检测器校验未命中（沙箱执行结果为空）"
 	}
 	p.saveFastPlugin(source, text)
-	return answer, true
+	return answer, true, ""
 }
 
 // complete 走候选链做一次无工具的纯补全（codegen 专用：不带工具 schema，
-// 避免模型返回 tool_calls 而非代码）。
-func (p *Proxy) complete(r *http.Request, key store.APIKey, path string, msgs []chatMessage) ([]byte, bool) {
+// 避免模型返回 tool_calls 而非代码）。返回 (body, reason)：body 非空即成功；
+// 失败时 reason 描述原因（可能为空表示无候选可试）。
+func (p *Proxy) complete(r *http.Request, key store.APIKey, path string, msgs []chatMessage) ([]byte, string) {
 	cands, err := p.router.Pick("chat")
 	if err != nil {
-		return nil, false
+		return nil, "codegen: 无可用的 chat 路由（" + err.Error() + "）"
 	}
+	var lastWhy string
 	for _, c := range cands {
 		reqBody := map[string]any{
 			"model":    c.UpstreamModel,
@@ -368,7 +373,8 @@ func (p *Proxy) complete(r *http.Request, key store.APIKey, path string, msgs []
 		}
 		raw, err := json.Marshal(reqBody)
 		if err != nil {
-			return nil, false
+			lastWhy = "codegen: 请求编码失败"
+			continue
 		}
 		timeout := time.Duration(c.Provider.TimeoutMS) * time.Millisecond
 		if c.Provider.TimeoutMS <= 0 {
@@ -378,6 +384,7 @@ func (p *Proxy) complete(r *http.Request, key store.APIKey, path string, msgs []
 		upReq, err := http.NewRequestWithContext(ctx, http.MethodPost, upstreamURL(c.Provider.BaseURL, path), bytes.NewReader(raw))
 		if err != nil {
 			cancel()
+			lastWhy = "codegen: 构造请求失败"
 			continue
 		}
 		upReq.Header.Set("Authorization", "Bearer "+c.Provider.ResolvedAPIKey())
@@ -388,23 +395,26 @@ func (p *Proxy) complete(r *http.Request, key store.APIKey, path string, msgs []
 		resp, err := p.client.Do(upReq)
 		if err != nil {
 			cancel()
+			lastWhy = "codegen: 上游 " + c.ProviderID + " 不可用（" + err.Error() + "）"
 			continue
 		}
 		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 		resp.Body.Close()
 		cancel()
 		if readErr != nil {
+			lastWhy = "codegen: 读取上游响应失败"
 			continue
 		}
 		if resp.StatusCode >= 400 {
+			lastWhy = fmt.Sprintf("codegen: 上游 %s 返回 %d", c.ProviderID, resp.StatusCode)
 			continue
 		}
-		return body, true
+		return body, ""
 	}
-	return nil, false
+	return nil, lastWhy
 }
 
-// fastPathTry 完整快路径：内置 → 晋升/插件 → codegen。命中返回答案与方法名。
+// FastPathTry 完整快路径：内置 → 晋升/插件 → codegen。命中返回答案与方法名。
 func (p *Proxy) FastPathTry(r *http.Request, key store.APIKey, path, text string) (string, string) {
 	if !p.store.Settings().Fastpath.Enabled {
 		return "", ""
@@ -417,8 +427,47 @@ func (p *Proxy) FastPathTry(r *http.Request, key store.APIKey, path, text string
 			return answer, "plugin:" + pl.Name
 		}
 	}
-	if answer, hit := p.codegenSolve(r, key, path, text); hit {
+	if answer, hit, _ := p.codegenSolve(r, key, path, text); hit {
 		return answer, "codegen"
 	}
 	return "", ""
+}
+
+// FastPathProbe 记录快路径尝试链中的一步（管理台测试/生成用）。
+type FastPathProbe struct {
+	Stage  string `json:"stage"`            // builtin / plugin:name / codegen
+	Hit    bool   `json:"hit"`
+	Detail string `json:"detail,omitempty"` // 命中时答案；未命中时失败原因
+}
+
+// FastPathProbe 探测一条文本的完整快路径尝试链：内置 → 插件 → codegen，
+// 返回最终答案、命中的方法名与每一步的详细结果。生产请求仍走 FastPathTry。
+func (p *Proxy) FastPathProbe(r *http.Request, key store.APIKey, path, text string) (string, string, []FastPathProbe) {
+	chain := make([]FastPathProbe, 0, 4)
+	if !p.store.Settings().Fastpath.Enabled {
+		chain = append(chain, FastPathProbe{Stage: "fastpath", Hit: false, Detail: "fastpath 未启用（settings.fastpath.enabled=false）"})
+		return "", "", chain
+	}
+	if fast := tryFastAnswer(text); fast != nil {
+		chain = append(chain, FastPathProbe{Stage: fast.method, Hit: true, Detail: fast.answer})
+		return fast.answer, fast.method, chain
+	}
+	chain = append(chain, FastPathProbe{Stage: "builtin", Hit: false, Detail: "内置匹配器未命中"})
+	for _, pl := range p.loadPlugins() {
+		if answer, hit := runJSDetector(pl.Source, text); hit {
+			chain = append(chain, FastPathProbe{Stage: "plugin:" + pl.Name, Hit: true, Detail: answer})
+			return answer, "plugin:" + pl.Name, chain
+		}
+		chain = append(chain, FastPathProbe{Stage: "plugin:" + pl.Name, Hit: false, Detail: "插件检测器未命中"})
+	}
+	answer, hit, why := p.codegenSolve(r, key, path, text)
+	detail := answer
+	if !hit {
+		detail = why
+	}
+	chain = append(chain, FastPathProbe{Stage: "codegen", Hit: hit, Detail: detail})
+	if hit {
+		return answer, "codegen", chain
+	}
+	return "", "", chain
 }

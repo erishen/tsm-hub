@@ -79,6 +79,8 @@ type Result struct {
 	FastPath string
 	// Attempt 是本请求实际尝试的第几个候选（1=首次命中；>1 表示发生过 failover）。
 	Attempt int
+	// Failover 是 failover 链：按顺序记录每个失败候选（不含最终命中的那个）。
+	Failover []store.FailoverStep
 }
 
 type usageObj struct {
@@ -132,12 +134,18 @@ func (p *Proxy) Handle(w http.ResponseWriter, r *http.Request, key store.APIKey,
 	}
 
 	var lastErr string
+	var failChain []store.FailoverStep
 	for i, c := range cands {
 		res, retryable := p.attempt(w, r, c, path, body, req)
 		res.Scene = scene
 		res.Attempt = i + 1
 		if retryable {
 			lastErr = res.Err
+			failChain = append(failChain, store.FailoverStep{
+				ProviderID: c.ProviderID,
+				Model:      c.UpstreamModel,
+				Error:      res.Err,
+			})
 			// 模型不存在是模型级问题（failover 换其他家即可），不计入 provider 健康熔断。
 			if !res.ModelFault {
 				p.health.ReportFailure(c.ProviderID, res.Err)
@@ -150,6 +158,7 @@ func (p *Proxy) Handle(w http.ResponseWriter, r *http.Request, key store.APIKey,
 		case res.Err == "":
 			p.health.ReportSuccess(c.ProviderID, time.Since(started))
 		}
+		res.Failover = failChain
 		p.account(key, req.Model, res)
 		return res
 	}
@@ -162,6 +171,7 @@ func (p *Proxy) Handle(w http.ResponseWriter, r *http.Request, key store.APIKey,
 		Err:        lastErr,
 		Scene:      scene,
 		Attempt:    len(cands),
+		Failover:   failChain,
 	}
 	p.account(key, req.Model, res)
 	writeError(w, res.Status, "upstream_unavailable", orDefault(lastErr, "all upstream providers failed"))
@@ -546,6 +556,7 @@ func (p *Proxy) account(key store.APIKey, model string, res Result) {
 		Scene:           res.Scene,
 		FastPath:        res.FastPath,
 		Attempt:         res.Attempt,
+		Failover:        res.Failover,
 	})
 }
 

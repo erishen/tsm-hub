@@ -110,6 +110,21 @@ export interface UsageRecord {
   fastpath?: string;
   /** 实际尝试的第几个候选（>1 表示发生过 failover）。 */
   attempt?: number;
+  /** failover 链：按顺序记录每个失败候选（不含最终命中的那个）。 */
+  failover?: FailoverStep[];
+}
+
+export interface FailoverStep {
+  provider_id: string;
+  model?: string;
+  error?: string;
+}
+
+/** 快路径尝试链中的一步（管理台测试/生成用）。 */
+export interface FastPathProbe {
+  stage: string;
+  hit: boolean;
+  detail?: string;
 }
 
 export interface ObservabilityResponse {

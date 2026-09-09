@@ -266,4 +266,14 @@ type UsageRecord struct {
 	FastPath string `json:"fastpath,omitempty"`
 	// Attempt 是本请求实际尝试的第几个候选（1=首次命中；>1 表示发生过 failover）。
 	Attempt int `json:"attempt,omitempty"`
+	// Failover 是 failover 链：按顺序记录每个失败候选（不含最终命中的那个）。
+	// 旧流水无此字段，兼容。
+	Failover []FailoverStep `json:"failover,omitempty"`
+}
+
+// FailoverStep 是 failover 链中的一个失败候选。
+type FailoverStep struct {
+	ProviderID string `json:"provider_id"`
+	Model      string `json:"model,omitempty"`
+	Error      string `json:"error,omitempty"`
 }

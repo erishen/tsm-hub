@@ -141,11 +141,14 @@ import { Agg, DailyPoint, UsageRecord, UsageResponse } from './models';
               <span class="muted" style="font-size:12px;margin-left:8px;vertical-align:middle"
                     [title]="r.error" *ngIf="r.error">{{ shortErr(r.error) }}</span>
             </td>
-            <td class="nowrap" style="max-width:240px">
+            <td class="nowrap" style="max-width:260px">
               <span class="badge ok" *ngIf="r.fastpath" title="确定性快路径">⚡ {{ r.fastpath }}</span>
               <span class="badge" *ngIf="r.scene" [title]="'场景: ' + r.scene">{{ r.scene }}</span>
-              <span class="muted" *ngIf="r.attempt && r.attempt > 1" style="font-size:12px"
-                    [title]="'发生过 failover，实际第 ' + r.attempt + ' 个候选命中'">↻{{ r.attempt }}</span>
+              <span *ngIf="r.attempt && r.attempt > 1">
+                <span class="badge warn" [title]="failTitle(r)" style="cursor:help">↻{{ r.attempt }}</span>
+                <span class="muted" style="font-size:12px" *ngIf="r.failover?.length"
+                      [title]="failTitle(r)">{{ r.failover!.map(f => f.provider_id).join(' → ') }}</span>
+              </span>
             </td>
           </tr>
         </tbody>
@@ -161,6 +164,12 @@ export class UsageComponent implements OnInit {
 
   readonly compact = compact;
   readonly usd = usd;
+
+  failTitle(r: UsageRecord): string {
+    if (!r.failover?.length) return '发生过 failover，实际第 ' + r.attempt + ' 个候选命中';
+    return r.failover.map((f, i) =>
+      (i + 1) + '. ' + f.provider_id + (f.model ? ' (' + f.model + ')' : '') + (f.error ? ' — ' + f.error : '')).join('\n');
+  }
 
   constructor(private api: ApiService) {}
 

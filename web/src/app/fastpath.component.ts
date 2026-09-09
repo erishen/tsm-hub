@@ -26,6 +26,13 @@ interface FastPlugin { name: string; trigger: string; source: string; promoted: 
       <div class="banner success" *ngIf="testResult !== null" style="margin-top:10px">
         <b>{{ testMethod || '未命中' }}</b>：{{ testResult || '无法用快路径回答（可点上方按钮生成检测器）' }}
       </div>
+      <div *ngIf="chain && chain.length" style="margin-top:10px;font-size:12px">
+        <div class="muted" style="margin-bottom:4px">尝试链：</div>
+        <div *ngFor="let c of chain" style="display:flex;gap:8px;align-items:baseline;margin:2px 0">
+          <span class="tag" [class.green]="c.hit">{{ c.stage }} · {{ c.hit ? '命中' : '未命中' }}</span>
+          <span class="muted" [style.word-break]="'break-all'">{{ c.detail || '—' }}</span>
+        </div>
+      </div>
     </div>
 
     <div class="card" style="margin-bottom:16px">
@@ -87,6 +94,7 @@ export class FastpathComponent implements OnInit {
   testQuery = '';
   testResult: string | null = null;
   testMethod = '';
+  chain: any[] | null = null;
   testing = false;
   genMsg = '';
 
@@ -116,6 +124,7 @@ export class FastpathComponent implements OnInit {
       next: (d: any) => {
         this.testResult = d.answer;
         this.testMethod = d.method || '';
+        this.chain = d.chain || null;
         this.testing = false;
         if (d.method && d.method !== 'codegen' && this.testQuery) {
           this.reload();
@@ -138,7 +147,8 @@ export class FastpathComponent implements OnInit {
         if (d.answer) {
           this.genMsg = '已生成并验证：' + d.answer;
         } else {
-          this.genMsg = '模型认为该问题无法用纯代码确定性解决。';
+          const cg = (d.chain || []).find((x: any) => x.stage === 'codegen');
+          this.genMsg = cg?.detail || '模型认为该问题无法用纯代码确定性解决。';
         }
         this.reload();
       },
