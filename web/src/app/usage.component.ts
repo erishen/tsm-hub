@@ -120,18 +120,22 @@ import { Agg, DailyPoint, UsageRecord, UsageResponse } from './models';
         </thead>
         <tbody>
           <tr *ngFor="let r of data()!.recent">
-            <td class="mono">{{ r.ts | date:'MM-dd HH:mm:ss' }}</td>
-            <td class="mono">{{ r.key_id }}</td>
-            <td class="mono">{{ r.model }}</td>
-            <td class="mono muted">{{ r.provider_id }}<span *ngIf="r.upstream_model"> → {{ r.upstream_model }}</span></td>
-            <td class="num">{{ r.total_tokens }}</td>
-            <td class="num">{{ r.latency_ms }} ms</td>
-            <td>{{ r.stream ? '是' : '否' }}</td>
-            <td>
+            <td class="mono nowrap">{{ r.ts | date:'MM-dd HH:mm:ss' }}</td>
+            <td class="mono nowrap">{{ r.key_id }}</td>
+            <td class="mono nowrap" style="max-width:220px" [title]="r.model">{{ r.model }}</td>
+            <td class="mono muted nowrap" style="max-width:240px"
+                [title]="r.provider_id + (r.upstream_model ? ' → ' + r.upstream_model : '')">
+              {{ r.provider_id }}<span *ngIf="r.upstream_model"> → {{ r.upstream_model }}</span>
+            </td>
+            <td class="num nowrap">{{ r.total_tokens }}</td>
+            <td class="num nowrap">{{ r.latency_ms }} ms</td>
+            <td class="nowrap">{{ r.stream ? '是' : '否' }}</td>
+            <td class="nowrap">
               <span class="badge" [class.bad]="r.status >= 400 || !!r.error" [class.ok]="r.status < 400 && !r.error">
                 {{ r.status }}
               </span>
-              <div class="muted" style="font-size:12px" *ngIf="r.error">{{ r.error }}</div>
+              <span class="muted" style="font-size:12px;max-width:300px;display:inline-block;vertical-align:middle;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+                    [title]="r.error" *ngIf="r.error">{{ r.error }}</span>
             </td>
           </tr>
         </tbody>

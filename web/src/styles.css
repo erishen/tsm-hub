@@ -80,6 +80,7 @@ th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--bor
 th { color: var(--muted); font-weight: 600; font-size: 12px; background: #fafbfc; white-space: nowrap; }
 tbody tr:hover { background: #fbfcfd; }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+td.nowrap { white-space: nowrap; }
 
 /* ---------- forms ---------- */
 label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
