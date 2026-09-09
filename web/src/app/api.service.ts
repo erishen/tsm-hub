@@ -159,7 +159,7 @@ export class ApiService {
       .pipe(catchError(this.handleError));
   }
 
-  saveMcp(name: string, body: { command: string; args?: string[]; env?: Record<string, string> }): Observable<unknown> {
+  saveMcp(name: string, body: { command: string; args?: string[]; env?: Record<string, string>; transport?: string; url?: string }): Observable<unknown> {
     return this.http.post(`/api/admin/mcps/${encodeURIComponent(name)}`, body, { headers: this.headers() })
       .pipe(catchError(this.handleError));
   }

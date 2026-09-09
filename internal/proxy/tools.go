@@ -5,16 +5,22 @@ package proxy
 
 import (
 	"context"
+	"encoding/csv"
+	"encoding/json"
 	"fmt"
 	"io"
 	"math"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -32,7 +38,7 @@ func (a toolArgs) str(k string) string {
 }
 
 // 内置工具名（工具池的排序与 schema 输出）。
-var builtinTools = []string{"calc", "echo", "fetch_url", "get_time", "recall", "remember", "skill-run"}
+var builtinTools = []string{"calc", "echo", "fetch_url", "get_time", "query_exchange_rate", "recall", "remember", "skill-run", "system_info"}
 
 // ToolInfo 是工具池目录项（管理台 /mcps 页展示）。
 type ToolInfo struct {
@@ -57,6 +63,10 @@ func (p *Proxy) ToolCatalog() []ToolInfo {
 		fn, _ := s["function"].(map[string]any)
 		params, _ := fn["parameters"].(map[string]any)
 		out = append(out, ToolInfo{Name: "read_file", Description: "读取本地文件内容（白名单根目录内）", Source: "builtin-conditional", Parameters: params})
+		s2 := toolSchema("csv_analyze", toolDef("csv_analyze"))
+		fn2, _ := s2["function"].(map[string]any)
+		params2, _ := fn2["parameters"].(map[string]any)
+		out = append(out, ToolInfo{Name: "csv_analyze", Description: toolDef("csv_analyze"), Source: "builtin-conditional", Parameters: params2})
 	}
 	cfg := p.store.Settings().Mcps
 	names := make([]string, 0, len(cfg))
@@ -110,6 +120,20 @@ func (p *Proxy) execTool(keyID, name string, args toolArgs) string {
 			return "error: " + err.Error()
 		}
 		return s
+	case "query_exchange_rate":
+		s, err := p.toolExchangeRate(args)
+		if err != nil {
+			return "error: " + err.Error()
+		}
+		return s
+	case "system_info":
+		return systemInfo()
+	case "csv_analyze":
+		s, err := p.toolCSVAnalyze(args)
+		if err != nil {
+			return "error: " + err.Error()
+		}
+		return s
 	case "skill-run":
 		s, err := p.toolSkillRun(args)
 		if err != nil {
@@ -152,6 +176,7 @@ func (p *Proxy) toolSchemas() []map[string]any {
 	}
 	if p.store.Settings().Agent.ReadRoot != "" {
 		out = append(out, toolSchema("read_file", "读取本地文件内容（仅限白名单根目录内；目录返回其内容列表）。"))
+		out = append(out, toolSchema("csv_analyze", toolDef("csv_analyze")))
 	}
 	out = append(out, p.mcpToolSchemas()...)
 	return out
@@ -190,6 +215,21 @@ func toolSchema(name, desc string) map[string]any {
 	case "recall":
 		params["properties"].(map[string]any)["key"] = map[string]any{"type": "string"}
 		params["required"] = []string{"key"}
+	case "query_exchange_rate":
+		params["properties"].(map[string]any)["from"] = map[string]any{
+			"type": "string", "description": "源货币代码，如 USD/EUR/JPY/HKD/GBP",
+		}
+		params["properties"].(map[string]any)["to"] = map[string]any{
+			"type": "string", "description": "目标货币代码，默认 CNY",
+		}
+		params["required"] = []string{"from"}
+	case "system_info":
+		// 无参数。
+	case "csv_analyze":
+		params["properties"].(map[string]any)["path"] = map[string]any{
+			"type": "string", "description": "read_root 内的 CSV 文件路径（相对或绝对）",
+		}
+		params["required"] = []string{"path"}
 	}
 	return map[string]any{
 		"type": "function",
@@ -219,6 +259,12 @@ func toolDef(name string) string {
 		return "记住一条信息（key/value），后续可用 recall 取回。"
 	case "recall":
 		return "取回之前 remember 的信息。"
+	case "query_exchange_rate":
+		return "查询实时汇率（open.er-api.com 免费数据）：指定源货币与目标货币（默认 CNY），返回汇率与更新时间。需要换算货币时必须调用，不要自行估算汇率。"
+	case "system_info":
+		return "获取网关运行环境信息：操作系统/架构/CPU 核数/内存占用/磁盘可用空间/进程启动时长。"
+	case "csv_analyze":
+		return "分析 read_root 内 CSV 文件的结构：行列数、列名、每列类型（数值/文本）、数值列统计与数据预览。"
 	}
 	return ""
 }
@@ -371,5 +417,144 @@ var registry = &toolRegistry{mem: map[string]string{}}
 // reqTimeout 构造带超时的 context。
 func (p *Proxy) reqTimeout(d time.Duration) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), d)
+}
+
+// procStart 记录进程启动时间（system_info 用）。
+var procStart = time.Now()
+
+// toolExchangeRate 查询实时汇率（open.er-api.com 免费，无需 API Key）。
+func (p *Proxy) toolExchangeRate(args toolArgs) (string, error) {
+	from := strings.ToUpper(strings.TrimSpace(args.str("from")))
+	if from == "" {
+		return "", fmt.Errorf("missing 'from'")
+	}
+	to := strings.ToUpper(strings.TrimSpace(args.str("to")))
+	if to == "" {
+		to = "CNY"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		"https://open.er-api.com/v6/latest/"+url.PathEscape(from), nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", "llm-router/1.0")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return "", err
+	}
+	var d struct {
+		Result      string             `json:"result"`
+		TimeLastUTC string             `json:"time_last_update_utc"`
+		Rates       map[string]float64 `json:"rates"`
+		ErrorType   string             `json:"error-type"`
+	}
+	if err := json.Unmarshal(body, &d); err != nil {
+		return "", fmt.Errorf("invalid rate response: %w", err)
+	}
+	if d.Result != "success" {
+		return fmt.Sprintf("汇率查询失败（%s）", d.ErrorType), nil
+	}
+	rate, ok := d.Rates[to]
+	if !ok {
+		return fmt.Sprintf("不支持的目标货币 %q（可用：USD/EUR/JPY/HKD/GBP/CNY 等）", to), nil
+	}
+	return fmt.Sprintf("1 %s = %.4f %s（更新时间 %s）", from, rate, to, d.TimeLastUTC), nil
+}
+
+// systemInfo 返回网关运行环境信息（标准库，无外部依赖）。
+func systemInfo() string {
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	host, _ := os.Hostname()
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "host=%s os=%s arch=%s cpu_cores=%d goroutines=%d uptime=%s",
+		host, runtime.GOOS, runtime.GOARCH, runtime.NumCPU(), runtime.NumGoroutine(),
+		time.Since(procStart).Round(time.Second))
+	if runtime.GOOS == "darwin" || runtime.GOOS == "linux" {
+		var st syscall.Statfs_t
+		if err := syscall.Statfs(".", &st); err == nil {
+			avail := float64(st.Bavail) * float64(st.Bsize)
+			total := float64(st.Blocks) * float64(st.Bsize)
+			fmt.Fprintf(&sb, " disk_avail=%.1fGB/%.1fGB", avail/1e9, total/1e9)
+		}
+	}
+	fmt.Fprintf(&sb, " mem_alloc=%.1fMB", float64(m.Alloc)/1e6)
+	return sb.String()
+}
+
+// toolCSVAnalyze 分析 read_root 内 CSV 文件的结构（行列、列类型、数值统计、预览）。
+func (p *Proxy) toolCSVAnalyze(args toolArgs) (string, error) {
+	root := p.store.Settings().Agent.ReadRoot
+	if root == "" {
+		return "", fmt.Errorf("csv_analyze is not enabled (no agent.read_root configured)")
+	}
+	path := args.str("path")
+	if path == "" {
+		return "", fmt.Errorf("missing 'path'")
+	}
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(root, path)
+	}
+	clean := filepath.Clean(path)
+	if clean != root && !strings.HasPrefix(clean, root+string(filepath.Separator)) {
+		return "", fmt.Errorf("path outside read_root")
+	}
+	f, err := os.Open(clean)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	r := csv.NewReader(f)
+	r.LazyQuotes = true
+	r.FieldsPerRecord = -1
+	rows, err := r.ReadAll()
+	if err != nil {
+		return "", fmt.Errorf("not a readable CSV: %w", err)
+	}
+	if len(rows) == 0 {
+		return "空 CSV（0 行 0 列）", nil
+	}
+	headers := rows[0]
+	ncol := len(headers)
+	sums := make([]float64, ncol)
+	counts := make([]int, ncol)
+	isNum := make([]bool, ncol)
+	for i := range isNum {
+		isNum[i] = true
+	}
+	for _, row := range rows[1:] {
+		for i := 0; i < ncol && i < len(row); i++ {
+			if !isNum[i] {
+				continue
+			}
+			if v, err := strconv.ParseFloat(strings.TrimSpace(row[i]), 64); err == nil {
+				sums[i] += v
+				counts[i]++
+			} else {
+				isNum[i] = false
+			}
+		}
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "文件 %s：%d 行数据，%d 列\n列: %s\n", clean, len(rows)-1, ncol, strings.Join(headers, ", "))
+	for i, h := range headers {
+		if isNum[i] && counts[i] > 0 {
+			fmt.Fprintf(&sb, "  - %s：数值列，非空 %d 个，均值 %.2f\n", h, counts[i], sums[i]/float64(counts[i]))
+		} else {
+			fmt.Fprintf(&sb, "  - %s：文本列\n", h)
+		}
+	}
+	sb.WriteString("预览（前 3 行）:\n")
+	for _, row := range rows[1:4] {
+		sb.WriteString("  " + strings.Join(row, " | ") + "\n")
+	}
+	return sb.String(), nil
 }
 

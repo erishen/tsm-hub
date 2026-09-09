@@ -3,6 +3,10 @@ package proxy
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -129,6 +133,89 @@ func TestCleanSchema(t *testing.T) {
 	empty := cleanSchema(nil)
 	if empty["type"] != "object" {
 		t.Fatalf("nil schema type = %v", empty["type"])
+	}
+}
+
+// fakeHTTPMCP 起一个模拟 Streamable HTTP 型 MCP server（httptest）。
+// 收到 initialize 时回发 Mcp-Session-Id。
+func fakeHTTPMCP(t *testing.T) string {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var msg struct {
+			Method string         `json:"method"`
+			Params map[string]any `json:"params"`
+		}
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &msg)
+		if msg.Method == "initialize" {
+			w.Header().Set("Mcp-Session-Id", "sess-abc")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		res := map[string]any{}
+		switch msg.Method {
+		case "initialize":
+			res["result"] = map[string]any{
+				"protocolVersion": "2024-11-05",
+				"capabilities":    map[string]any{"tools": map[string]any{}},
+				"serverInfo":      map[string]any{"name": "fake-http-mcp", "version": "1.0"},
+			}
+		case "tools/list":
+			res["result"] = map[string]any{"tools": []any{
+				map[string]any{"name": "add", "description": "two numbers added",
+					"inputSchema": map[string]any{"type": "object",
+						"properties": map[string]any{"a": map[string]any{"type": "number"}, "b": map[string]any{"type": "number"}},
+						"required":   []string{"a", "b"}}},
+			}}
+		case "tools/call":
+			args, _ := msg.Params["arguments"].(map[string]any)
+			a, _ := args["a"].(float64)
+			b, _ := args["b"].(float64)
+			res["result"] = map[string]any{"content": []any{
+				map[string]any{"type": "text", "text": fmt.Sprintf("%.0f", a+b)},
+			}}
+		default:
+			res["result"] = map[string]any{}
+		}
+		_ = json.NewEncoder(w).Encode(res)
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL
+}
+
+// TestMCPHTTPTransport 验证 Streamable HTTP 传输：连接、schema 注册、工具调用。
+func TestMCPHTTPTransport(t *testing.T) {
+	url := fakeHTTPMCP(t)
+	st, err := store.New(filepath.Join(t.TempDir(), "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Update(func(c *store.Config) error {
+		c.Settings.Mcps = map[string]store.MCPServer{
+			"remote": {Transport: "http", URL: url},
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	p := &Proxy{store: st, mcps: newMCPManager()}
+
+	schemas := p.toolSchemas()
+	found := false
+	for _, s := range schemas {
+		fn, _ := s["function"].(map[string]any)
+		if fn["name"] == "mcp_remote_add" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("mcp_remote_add not in tool schemas (http transport)")
+	}
+	got := p.execTool("k1", "mcp_remote_add", toolArgs{"a": 40, "b": 2})
+	if got != "42" {
+		t.Fatalf("http mcp exec = %q", got)
+	}
+	if sts := p.MCPStatuses(); sts["remote"].Connected != true {
+		t.Fatalf("http mcp status not connected: %+v", sts["remote"])
 	}
 }
 

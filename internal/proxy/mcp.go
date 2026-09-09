@@ -1,16 +1,19 @@
 package proxy
 
-// MCP host：连接配置的 stdio 型 MCP server（Model Context Protocol），
+// MCP host：连接配置的 MCP server（Model Context Protocol），
 // 把其工具以 mcp_<server>_<tool> 注册进网关工具池，由网关在 agent 循环中执行。
-// 协议：newline-delimited JSON-RPC 2.0（initialize → notifications/initialized →
-// tools/list → tools/call），零第三方依赖。
+// 传输方式：stdio（newline-delimited JSON-RPC 2.0 子进程）与
+// Streamable HTTP（远程端点，POST JSON-RPC，响应可为 application/json 或 SSE）。
+// 流程：initialize → notifications/initialized → tools/list → tools/call，零第三方依赖。
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"sort"
@@ -28,7 +31,7 @@ type mcpTool struct {
 	InputSchema map[string]any `json:"inputSchema"`
 }
 
-// mcpServer 持有一个 MCP server 子进程连接。
+// mcpServer 持有一个 MCP server 连接（stdio 子进程或 Streamable HTTP 远程）。
 type mcpServer struct {
 	name string
 	cfg  store.MCPServer
@@ -39,8 +42,16 @@ type mcpServer struct {
 	read  *bufio.Reader
 	id    int
 	tools []mcpTool
-	// pending 是 id → 响应 channel。
+	// pending 是 id → 响应 channel（stdio 用）。
 	pending map[int]chan json.RawMessage
+	// http 传输状态。
+	httpClient *http.Client
+	sessionID  string
+}
+
+// isHTTP 报告该 server 是否走 Streamable HTTP 传输。
+func (s *mcpServer) isHTTP() bool {
+	return s.cfg.Transport == "http" || s.cfg.URL != ""
 }
 
 // mcpManager 管理全部配置的 MCP servers。
@@ -120,11 +131,21 @@ func (m *mcpManager) ensure(name string, cfg store.MCPServer) (*mcpServer, error
 func (s *mcpServer) connected() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.isHTTP() {
+		return s.httpClient != nil && s.sessionID != ""
+	}
 	return s.cmd != nil && s.cmd.Process != nil && s.stdin != nil
 }
 
-// connect 启动子进程并完成 initialize + tools/list。
+// connect 建立连接并完成 initialize + tools/list。
 func (s *mcpServer) connect() error {
+	if s.isHTTP() {
+		return s.connectHTTP()
+	}
+	return s.connectStdio()
+}
+
+func (s *mcpServer) connectStdio() error {
 	cmd := exec.Command(s.cfg.Command, s.cfg.Args...)
 	if len(s.cfg.Env) > 0 {
 		cmd.Env = append(os.Environ(), envMap(s.cfg.Env)...)
@@ -177,8 +198,57 @@ func (s *mcpServer) connect() error {
 	return nil
 }
 
+// connectHTTP 连接 Streamable HTTP 型 MCP server（initialize + initialized + tools/list）。
+// 会话：每次调用为独立 JSON-RPC POST（协议允许无状态），拿到 Mcp-Session-Id 后复用；
+// 会话失效时下次调用自动重新 initialize。
+func (s *mcpServer) connectHTTP() error {
+	s.mu.Lock()
+	s.httpClient = &http.Client{Timeout: 15 * time.Second}
+	s.sessionID = ""
+	s.mu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if _, err := s.call(ctx, "initialize", map[string]any{
+		"protocolVersion": "2024-11-05",
+		"capabilities":    map[string]any{},
+		"clientInfo":      map[string]any{"name": "llm-router", "version": "1.0"},
+	}); err != nil {
+		return fmt.Errorf("initialize %s: %w", s.name, err)
+	}
+	s.notify("notifications/initialized", map[string]any{})
+	res, err := s.call(ctx, "tools/list", map[string]any{})
+	if err != nil {
+		return fmt.Errorf("tools/list %s: %w", s.name, err)
+	}
+	var list struct {
+		Tools []mcpTool `json:"tools"`
+	}
+	if err := json.Unmarshal(res, &list); err != nil {
+		return fmt.Errorf("tools/list decode %s: %w", s.name, err)
+	}
+	s.mu.Lock()
+	s.tools = list.Tools
+	s.mu.Unlock()
+	return nil
+}
+
+// ensureHTTPInit 保证 http 会话已 initialize（连接后 / 会话失效时调用）。
+func (s *mcpServer) ensureHTTPInit() error {
+	s.mu.Lock()
+	ok := s.httpClient != nil && s.sessionID != ""
+	s.mu.Unlock()
+	if ok {
+		return nil
+	}
+	return s.connectHTTP()
+}
+
 // call 发送一个 JSON-RPC 请求并等待对应 id 的响应。
 func (s *mcpServer) call(ctx context.Context, method string, params map[string]any) (json.RawMessage, error) {
+	if s.isHTTP() {
+		return s.httpCall(ctx, method, params)
+	}
 	s.mu.Lock()
 	s.id++
 	id := s.id
@@ -208,8 +278,86 @@ func (s *mcpServer) call(ctx context.Context, method string, params map[string]a
 	}
 }
 
+// httpCall 通过 Streamable HTTP 发送一个 JSON-RPC 请求。
+// 响应支持 application/json 与 text/event-stream 两种 Content-Type。
+func (s *mcpServer) httpCall(ctx context.Context, method string, params map[string]any) (json.RawMessage, error) {
+	if method != "initialize" {
+		if err := s.ensureHTTPInit(); err != nil {
+			return nil, err
+		}
+	}
+	s.mu.Lock()
+	s.id++
+	id := s.id
+	payload := map[string]any{"jsonrpc": "2.0", "id": id, "method": method, "params": params}
+	raw, _ := json.Marshal(payload)
+	url := s.cfg.URL
+	sess := s.sessionID
+	s.mu.Unlock()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(raw))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	if sess != "" {
+		req.Header.Set("Mcp-Session-Id", sess)
+	}
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("http post: %w", err)
+	}
+	defer resp.Body.Close()
+	if sid := resp.Header.Get("Mcp-Session-Id"); sid != "" {
+		s.mu.Lock()
+		s.sessionID = sid
+		s.mu.Unlock()
+	}
+	if resp.StatusCode >= 400 {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
+		return nil, fmt.Errorf("mcp http %d: %s", resp.StatusCode, compact(string(b)))
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if err != nil {
+		return nil, err
+	}
+	if strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream") {
+		// SSE 封装：取最后一条 data: 行作为 JSON-RPC 响应。
+		last := ""
+		for _, line := range strings.Split(string(body), "\n") {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "data:") {
+				last = strings.TrimSpace(strings.TrimPrefix(trimmed, "data:"))
+			}
+		}
+		body = []byte(last)
+	}
+	var r struct {
+		Result json.RawMessage `json:"result"`
+		Error  *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(body, &r); err != nil {
+		return nil, fmt.Errorf("mcp decode: %w", err)
+	}
+	if r.Error != nil {
+		return nil, fmt.Errorf("mcp error: %s", r.Error.Message)
+	}
+	return r.Result, nil
+}
+
 // notify 发送一个 JSON-RPC notification（无 id、无响应）。
 func (s *mcpServer) notify(method string, params map[string]any) {
+	if s.isHTTP() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if s.ensureHTTPInit() == nil {
+			_, _ = s.httpCall(ctx, method, params)
+		}
+		return
+	}
 	raw, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "method": method, "params": params})
 	s.mu.Lock()
 	if s.stdin != nil {
@@ -276,6 +424,7 @@ func (s *mcpServer) close() {
 		_ = s.stdin.Close()
 	}
 	s.cmd, s.stdin, s.read = nil, nil, nil
+	s.sessionID = ""
 }
 
 // toolNames 返回该 server 的工具名列表（已排序）。

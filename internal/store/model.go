@@ -49,11 +49,16 @@ type Settings struct {
 	Mcps map[string]MCPServer `json:"mcps,omitempty"`
 }
 
-// MCPServer 描述一个 stdio 型 MCP server。
+// MCPServer 描述一个 MCP server 连接。Transport 为空或 "stdio" 时是本地进程
+// （Command/Args/Env）；"http" 时是远程 Streamable HTTP 端点（URL）。
 type MCPServer struct {
 	Command string            `json:"command"`
 	Args    []string          `json:"args,omitempty"`
 	Env     map[string]string `json:"env,omitempty"`
+	// Transport 传输方式："" / "stdio" = 本地子进程；"http" = Streamable HTTP 远程。
+	Transport string `json:"transport,omitempty"`
+	// URL 是 http 传输的 MCP endpoint（如 http://127.0.0.1:8787/mcp）。
+	URL string `json:"url,omitempty"`
 }
 
 // AgentCfg 配置网关 agent：客户端不传 tools 时，网关自动附加内置工具池

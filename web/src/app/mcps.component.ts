@@ -36,8 +36,8 @@ import { McpServer, ToolInfo } from './models';
         <tbody>
           <tr *ngFor="let m of mcps()">
             <td><span class="mono">{{ m.name }}</span></td>
-            <td><span class="mono">{{ m.command }}</span></td>
-            <td><span class="mono small">{{ (m.args || []).join(' ') || '—' }}</span></td>
+            <td><span class="mono small">{{ m.transport === 'http' ? (m.url || '—') : (m.command || '—') }}</span></td>
+            <td><span class="mono small">{{ m.transport === 'http' ? 'HTTP' : ((m.args || []).join(' ') || '—') }}</span></td>
             <td>
               <span class="badge" [class.ok]="m.connected" [class.err]="!m.connected">
                 {{ m.connected ? '已连接' : '未连接' }}
@@ -125,14 +125,28 @@ import { McpServer, ToolInfo } from './models';
         <input [(ngModel)]="form.name" placeholder="如 fetch / fs / demo" [disabled]="editing()!.mode === 'edit'" />
         <div class="muted small">唯一标识；工具名将形如 mcp_&lt;名称&gt;_&lt;tool&gt;</div>
 
-        <label>命令 <span class="req">*</span></label>
-        <input [(ngModel)]="form.command" placeholder="如 npx / python3 / node" />
+        <label>传输方式</label>
+        <select [(ngModel)]="form.transport" style="width:100%;padding:8px;border:1px solid var(--border,#e4e3dd);border-radius:8px">
+          <option value="stdio">stdio（本地子进程）</option>
+          <option value="http">http（Streamable HTTP 远程）</option>
+        </select>
 
-        <label>参数（空格分隔）</label>
-        <input [(ngModel)]="form.argsText" placeholder="如 -y @modelcontextprotocol/server-fetch" />
+        <ng-container *ngIf="form.transport === 'http'">
+          <label>Endpoint URL <span class="req">*</span></label>
+          <input [(ngModel)]="form.url" placeholder="如 http://127.0.0.1:8787/mcp" />
+          <div class="muted small">远程 MCP server 地址（支持 application/json 与 SSE 响应）</div>
+        </ng-container>
 
-        <label>环境变量（可选，KEY=VALUE 每行一个）</label>
-        <textarea [(ngModel)]="form.envText" rows="2" placeholder="如 MY_TOKEN=abc"></textarea>
+        <ng-container *ngIf="form.transport !== 'http'">
+          <label>命令 <span class="req">*</span></label>
+          <input [(ngModel)]="form.command" placeholder="如 npx / python3 / node" />
+
+          <label>参数（空格分隔）</label>
+          <input [(ngModel)]="form.argsText" placeholder="如 -y @modelcontextprotocol/server-fetch" />
+
+          <label>环境变量（可选，KEY=VALUE 每行一个）</label>
+          <textarea [(ngModel)]="form.envText" rows="2" placeholder="如 MY_TOKEN=abc"></textarea>
+        </ng-container>
 
         <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
           <button (click)="closeEdit()">取消</button>
@@ -167,7 +181,7 @@ export class McpsComponent implements OnInit {
   testError = signal('');
   testRunning = signal(false);
   saving = signal(false);
-  form = { name: '', command: '', argsText: '', envText: '' };
+  form = { name: '', transport: 'stdio', command: '', argsText: '', envText: '', url: '' };
 
   constructor(private api: ApiService) {}
 
@@ -209,9 +223,11 @@ export class McpsComponent implements OnInit {
     this.editing.set(m ? { mode: 'edit', server: m } : { mode: 'add' });
     this.form = {
       name: m?.name || '',
+      transport: m?.transport === 'http' ? 'http' : 'stdio',
       command: m?.command || '',
       argsText: (m?.args || []).join(' '),
       envText: Object.entries(m?.env || {}).map(([k, v]) => `${k}=${v}`).join('\n'),
+      url: m?.url || '',
     };
   }
 
@@ -221,9 +237,19 @@ export class McpsComponent implements OnInit {
 
   save(): void {
     const name = this.form.name.trim();
+    const transport = this.form.transport === 'http' ? 'http' : 'stdio';
     const command = this.form.command.trim();
-    if (!name || !command) {
-      this.error.set('名称和命令必填');
+    const url = this.form.url.trim();
+    if (!name) {
+      this.error.set('名称必填');
+      return;
+    }
+    if (transport === 'http' && !url) {
+      this.error.set('http 传输需要 Endpoint URL');
+      return;
+    }
+    if (transport !== 'http' && !command) {
+      this.error.set('stdio 传输需要命令');
       return;
     }
     this.saving.set(true);
@@ -236,7 +262,7 @@ export class McpsComponent implements OnInit {
       if (i <= 0) continue;
       env[l.slice(0, i).trim()] = l.slice(i + 1).trim();
     }
-    this.api.saveMcp(name, { command, args, env }).subscribe({
+    this.api.saveMcp(name, { command, args, env, transport, url }).subscribe({
       next: () => {
         this.saving.set(false);
         this.editing.set(null);

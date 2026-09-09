@@ -198,6 +198,10 @@ export interface McpServer {
   command: string;
   args?: string[];
   env?: Record<string, string>;
+  /** 传输方式：""/"stdio"= 本地进程；"http"= Streamable HTTP 远程 */
+  transport?: string;
+  /** http 传输的 MCP endpoint URL */
+  url?: string;
   connected: boolean;
   tools: string[];
 }

@@ -1294,6 +1294,8 @@ func (s *Server) handleListMcps(w http.ResponseWriter, r *http.Request) {
 			"command":   c.Command,
 			"args":      c.Args,
 			"env":       c.Env,
+			"transport": c.Transport,
+			"url":       c.URL,
 			"connected": st.Connected,
 			"tools":     st.Tools,
 		})
@@ -1309,23 +1311,37 @@ func (s *Server) handleUpsertMcp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var c struct {
-		Command string            `json:"command"`
-		Args    []string          `json:"args"`
-		Env     map[string]string `json:"env"`
+		Command   string            `json:"command"`
+		Args      []string          `json:"args"`
+		Env       map[string]string `json:"env"`
+		Transport string            `json:"transport"`
+		URL       string            `json:"url"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&c); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid json: "+err.Error())
 		return
 	}
-	if c.Command == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "command required")
+	if c.Transport == "" {
+		c.Transport = "stdio"
+	}
+	if c.Transport == "http" {
+		if c.URL == "" {
+			writeError(w, http.StatusBadRequest, "bad_request", "url required for http transport")
+			return
+		}
+		if !strings.HasPrefix(c.URL, "http://") && !strings.HasPrefix(c.URL, "https://") {
+			writeError(w, http.StatusBadRequest, "bad_request", "url must be http(s)")
+			return
+		}
+	} else if c.Command == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", "command required for stdio transport")
 		return
 	}
 	if err := s.store.Update(func(cfg *store.Config) error {
 		if cfg.Settings.Mcps == nil {
 			cfg.Settings.Mcps = map[string]store.MCPServer{}
 		}
-		cfg.Settings.Mcps[name] = store.MCPServer{Command: c.Command, Args: c.Args, Env: c.Env}
+		cfg.Settings.Mcps[name] = store.MCPServer{Command: c.Command, Args: c.Args, Env: c.Env, Transport: c.Transport, URL: c.URL}
 		return nil
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", err.Error())
