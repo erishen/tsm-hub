@@ -82,6 +82,33 @@ tbody tr:hover { background: #fbfcfd; }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 td.nowrap { white-space: nowrap; }
 
+/* ---------- code block ---------- */
+.code-block {
+  position: relative;
+  background: #0d1117;
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-top: 4px;
+}
+.code-block pre {
+  margin: 0;
+  color: #e6edf3;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-all;
+  overflow-x: auto;
+}
+.code-block .small {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #c9d1d9;
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
 /* ---------- forms ---------- */
 label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
 input, select, textarea {
