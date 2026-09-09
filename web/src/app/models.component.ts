@@ -24,6 +24,9 @@ const CATEGORY_LABEL: Record<string, string> = {
         <h1>模型目录</h1>
         <div class="sub">各 Provider 已配置模型的归类与用途（知识表核验于 2026-09-09；未收录模型按 id 推断）</div>
       </div>
+      <button class="primary" (click)="load()" [disabled]="loading()">
+        {{ loading() ? '探测中…' : '重新探测' }}
+      </button>
     </div>
 
     <div style="display:flex;gap:12px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
@@ -123,8 +126,14 @@ export class ModelsComponent implements OnInit {
   constructor(private api: ApiService) {}
 
   ngOnInit(): void {
+    this.load();
+  }
+
+  /** 进入页面自动重新探测所有 Provider（并行、15s 内完成），失败项不阻塞；点按钮可手动重试。 */
+  load(): void {
     this.loading.set(true);
-    this.api.modelsCatalog().subscribe({
+    this.error.set('');
+    this.api.refreshModels().subscribe({
       next: (r) => {
         this.models.set(r.models);
         if (r.probe_at) this.probeAt.set(new Date(r.probe_at).toLocaleString());

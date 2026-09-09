@@ -421,6 +421,85 @@ func TestModelsCatalog(t *testing.T) {
 	}
 }
 
+// TestRefreshModels 验证批量刷新：并行探测所有有 Key 的 Provider 写快照，
+// 返回目录 + 各 Provider 状态；失败项不阻塞、无 Key 项跳过。
+func TestRefreshModels(t *testing.T) {
+	e := newEnv(t, "ok")
+	defer e.server.Close()
+
+	// ok 上游：/v1/models 返回 mock-model（付费）+ mock-extra（免费）
+	if err := e.store.UpsertProvider(store.Provider{
+		ID: "rf-a", Name: "A", BaseURL: e.okURL + "/v1", APIKey: "sk-tr-a",
+		Models: []string{"mock-model"},
+	}); err != nil {
+		t.Fatalf("upsert a: %v", err)
+	}
+	// 无 Key：应跳过（不参与探测）
+	if err := e.store.UpsertProvider(store.Provider{
+		ID: "rf-b", Name: "B", BaseURL: "http://127.0.0.1:9/v1", APIKey: "",
+		Models: []string{"x"},
+	}); err != nil {
+		t.Fatalf("upsert b: %v", err)
+	}
+	// 坏上游：应失败但不阻塞
+	if err := e.store.UpsertProvider(store.Provider{
+		ID: "rf-c", Name: "C", BaseURL: "http://127.0.0.1:1/v1", APIKey: "sk-c",
+		Models: []string{"y"},
+	}); err != nil {
+		t.Fatalf("upsert c: %v", err)
+	}
+
+	resp := e.do(t, http.MethodPost, "/api/admin/models/refresh", "", e.adminHeaders())
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	var payload struct {
+		ProbeAt  string            `json:"probe_at"`
+		Models   []struct {
+			ID    string `json:"id"`
+			Free  bool   `json:"free"`
+			Ctx   int    `json:"context_length"`
+		} `json:"models"`
+		Providers map[string]string `json:"providers"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if payload.ProbeAt == "" {
+		t.Fatalf("probe_at empty")
+	}
+	if payload.Providers["rf-a"] != "ok" {
+		t.Fatalf("rf-a = %q, want ok", payload.Providers["rf-a"])
+	}
+	if _, ok := payload.Providers["rf-b"]; ok {
+		t.Fatalf("rf-b (no key) should be skipped")
+	}
+	if payload.Providers["rf-c"] == "" || payload.Providers["rf-c"] == "ok" {
+		t.Fatalf("rf-c = %q, want failure message", payload.Providers["rf-c"])
+	}
+	found := false
+	for _, m := range payload.Models {
+		if m.ID == "mock-model" && !m.Free {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("mock-model not in refreshed catalog")
+	}
+	// 快照已写回
+	ps := e.store.ListProviders()
+	var a *store.Provider
+	for i := range ps {
+		if ps[i].ID == "rf-a" {
+			a = &ps[i]
+		}
+	}
+	if a == nil || len(a.ProbeModels) == 0 || a.ProbeAt.IsZero() {
+		t.Fatalf("rf-a snapshot not persisted: %+v", a)
+	}
+}
+
 // TestProviderBalances 验证批量余额查询：带 Key 的 Provider 返回余额，
 // 无 Key 的返回 no_key，失败项不阻塞其余项。
 func TestProviderBalances(t *testing.T) {
@@ -1301,3 +1380,4 @@ func TestProbeProviderModels(t *testing.T) {
 		t.Fatalf("flaky models = %v, want 2 after retry", flakyPayload.Models)
 	}
 }
+

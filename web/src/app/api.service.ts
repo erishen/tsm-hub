@@ -103,6 +103,13 @@ export class ApiService {
       .pipe(catchError(this.handleError));
   }
 
+  /** 重新探测所有已配置 Key 的 Provider，刷新免费/价格快照后返回最新目录。 */
+  refreshModels(): Observable<{ models: CatalogModel[]; probe_at?: string; providers?: Record<string, string> }> {
+    return this.http.post<{ models: CatalogModel[]; probe_at?: string; providers?: Record<string, string> }>(
+      '/api/admin/models/refresh', {}, { headers: this.headers() })
+      .pipe(catchError(this.handleError));
+  }
+
   listRoutes(): Observable<{ routes: Route[] }> {
     return this.http.get<{ routes: Route[] }>('/api/admin/routes', { headers: this.headers() })
       .pipe(catchError(this.handleError));

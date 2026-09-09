@@ -28,6 +28,7 @@ func (s *Server) adminMux() http.Handler {
 	m.HandleFunc("GET /api/admin/providers", s.admin(s.handleListProviders))
 	m.HandleFunc("GET /api/admin/providers/balances", s.admin(s.handleProviderBalances))
 	m.HandleFunc("GET /api/admin/models/catalog", s.admin(s.handleModelsCatalog))
+	m.HandleFunc("POST /api/admin/models/refresh", s.admin(s.handleRefreshModels))
 	m.HandleFunc("POST /api/admin/providers", s.admin(s.handleUpsertProvider))
 	m.HandleFunc("POST /api/admin/providers/probe", s.admin(s.handleProbeModels))
 	m.HandleFunc("DELETE /api/admin/providers/{id}", s.admin(s.handleDeleteProvider))
@@ -422,6 +423,48 @@ func inferModelMeta(id string) modelMeta {
 // handleModelsCatalog 汇总所有 Provider 已配置的模型：合并去重、归类（文本/视觉/图像/视频/音频/嵌入/其他）、
 // 附用途/上下文/免费/定价信息，供「模型目录」页展示。
 func (s *Server) handleModelsCatalog(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, s.buildCatalog())
+}
+
+// handleRefreshModels 并行探测所有已配置 Key 的 Provider（非 mock-local），刷新模型快照后返回目录。
+// 单个 Provider 失败不阻塞；providers 字段返回每个 Provider 的探测结果（ok / 错误摘要）。
+func (s *Server) handleRefreshModels(w http.ResponseWriter, r *http.Request) {
+	providers := s.store.ListProviders()
+	statuses := make(map[string]string, len(providers))
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	for _, p := range providers {
+		if p.ID == "mock-local" || p.APIKey == "" {
+			continue
+		}
+		wg.Add(1)
+		go func(p store.Provider) {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+			defer cancel()
+			out, status, body, err := s.probeModelsOnce(ctx, p.BaseURL, p.ResolvedAPIKey())
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				statuses[p.ID] = "探测失败: " + err.Error()
+				return
+			}
+			if status != 0 {
+				statuses[p.ID] = fmt.Sprintf("上游返回 %d: %s", status, compact(string(body)))
+				return
+			}
+			s.saveProbeSnapshot(p.BaseURL, p.APIKey, out)
+			statuses[p.ID] = "ok"
+		}(p)
+	}
+	wg.Wait()
+	resp := s.buildCatalog()
+	resp["providers"] = statuses
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// buildCatalog 聚合目录（快照优先于静态知识表），返回响应体（含 models 与最近探测时间）。
+func (s *Server) buildCatalog() map[string]any {
 	providers := s.store.ListProviders()
 	type item struct {
 		ID            string   `json:"id"`
@@ -496,7 +539,7 @@ func (s *Server) handleModelsCatalog(w http.ResponseWriter, r *http.Request) {
 	if !latestProbe.IsZero() {
 		resp["probe_at"] = latestProbe.Format(time.RFC3339)
 	}
-	writeJSON(w, http.StatusOK, resp)
+	return resp
 }
 
 // handleProbeModels 用给定的 base_url + API Key 探测上游 /v1/models，返回模型 id 列表（去重排序）。
@@ -521,12 +564,47 @@ func (s *Server) handleProbeModels(w http.ResponseWriter, r *http.Request) {
 	}
 	key := store.Provider{APIKey: req.APIKey}.ResolvedAPIKey()
 
-	// 探测是交互操作，固定 12s 单次超时（不随 default_timeout_ms 漂移）；
-	// 连接类瞬断（unexpected EOF / reset / 超时）与响应体截断自动重试 1 次。
+	out, status, body, err := s.probeModelsOnce(r.Context(), req.BaseURL, key)
+	if err != nil {
+		note := ""
+		if strings.Contains(err.Error(), "EOF") || strings.Contains(err.Error(), "reset") {
+			note = "（上游连接被中断，已自动重试 1 次仍失败；请检查网络或本地代理 127.0.0.1:7897 是否稳定）"
+		}
+		writeError(w, http.StatusBadGateway, "upstream_unavailable", "无法连接上游: "+err.Error()+note)
+		return
+	}
+	if status != 0 {
+		if status == http.StatusUnauthorized {
+			if key == "" {
+				writeError(w, http.StatusBadRequest, "probe_failed",
+					"上游要求鉴权但本次探测未携带 API Key（编辑已有 Provider 时 Key 为脱敏值，需重新输入完整 Key 或 env: 引用）；上游返回: "+compact(string(body)))
+			} else {
+				writeError(w, http.StatusBadRequest, "probe_failed",
+					"上游拒绝了该 API Key（401），请检查 Key 是否完整有效；上游返回: "+compact(string(body)))
+			}
+			return
+		}
+		writeError(w, http.StatusBadRequest, "probe_failed",
+			fmt.Sprintf("上游返回 %d: %s", status, compact(string(body))))
+		return
+	}
+	result := map[string]any{"models": out}
+	if bal := s.probeBalance(r.Context(), req.BaseURL, key); bal != nil {
+		result["balance"] = bal
+	}
+	// 探测成功后把模型快照写回匹配的 Provider（目录页用最新免费/价格/上下文，会随时间变）。
+	s.saveProbeSnapshot(req.BaseURL, req.APIKey, out)
+	writeJSON(w, http.StatusOK, result)
+}
+
+// probeModelsOnce 探测上游 /v1/models（12s 单次超时，连接类瞬断/响应体截断自动重试 1 次），
+// 返回去重排序的模型信息列表（含定价补齐与免费判定）。
+// 返回约定：网络/解析错误 → err；上游非 200 → (nil, statusCode, body, nil)；成功 → (out, 0, nil, nil)。
+func (s *Server) probeModelsOnce(ctx context.Context, baseURL, key string) ([]map[string]any, int, []byte, error) {
 	probeOnce := func() (*http.Response, []byte, error) {
-		ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+		ctx2, cancel := context.WithTimeout(ctx, 12*time.Second)
 		defer cancel()
-		upReq, err := http.NewRequestWithContext(ctx, http.MethodGet, req.BaseURL+"/models", nil)
+		upReq, err := http.NewRequestWithContext(ctx2, http.MethodGet, baseURL+"/models", nil)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -549,43 +627,25 @@ func (s *Server) handleProbeModels(w http.ResponseWriter, r *http.Request) {
 		resp, body, err = probeOnce()
 	}
 	if err != nil {
-		note := ""
-		if strings.Contains(err.Error(), "EOF") || strings.Contains(err.Error(), "reset") {
-			note = "（上游连接被中断，已自动重试 1 次仍失败；请检查网络或本地代理 127.0.0.1:7897 是否稳定）"
-		}
-		writeError(w, http.StatusBadGateway, "upstream_unavailable", "无法连接上游: "+err.Error()+note)
-		return
+		return nil, 0, nil, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		if resp.StatusCode == http.StatusUnauthorized {
-			if key == "" {
-				writeError(w, http.StatusBadRequest, "probe_failed",
-					"上游要求鉴权但本次探测未携带 API Key（编辑已有 Provider 时 Key 为脱敏值，需重新输入完整 Key 或 env: 引用）；上游返回: "+compact(string(body)))
-			} else {
-				writeError(w, http.StatusBadRequest, "probe_failed",
-					"上游拒绝了该 API Key（401），请检查 Key 是否完整有效；上游返回: "+compact(string(body)))
-			}
-			return
-		}
-		writeError(w, http.StatusBadRequest, "probe_failed",
-			fmt.Sprintf("上游返回 %d: %s", resp.StatusCode, compact(string(body))))
-		return
+		return nil, resp.StatusCode, body, nil
 	}
 	var payload struct {
 		Data []struct {
-			ID             string `json:"id"`
-			ContextLength  int64  `json:"context_length"`
-			IsFree         *bool  `json:"is_free"`
-			Free           *bool  `json:"free"`
-			Pricing        *struct {
+			ID            string `json:"id"`
+			ContextLength int64  `json:"context_length"`
+			IsFree        *bool  `json:"is_free"`
+			Free          *bool  `json:"free"`
+			Pricing       *struct {
 				Prompt     string `json:"prompt"`
 				Completion string `json:"completion"`
 			} `json:"pricing"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(body, &payload); err != nil {
-		writeError(w, http.StatusBadGateway, "upstream_read_error", "上游响应不是有效的模型列表: "+err.Error())
-		return
+		return nil, 0, nil, fmt.Errorf("invalid_models: %w", err)
 	}
 	seen := map[string]bool{}
 	out := make([]map[string]any, 0, len(payload.Data))
@@ -636,21 +696,20 @@ func (s *Server) handleProbeModels(w http.ResponseWriter, r *http.Request) {
 		}
 		return out[i]["id"].(string) < out[j]["id"].(string)
 	})
-	result := map[string]any{"models": out}
-	if bal := s.probeBalance(r.Context(), req.BaseURL, key); bal != nil {
-		result["balance"] = bal
-	}
-	// 探测成功后把模型快照写回匹配的 Provider（目录页用最新免费/价格/上下文，会随时间变）。
-	s.saveProbeSnapshot(req.BaseURL, out)
-	writeJSON(w, http.StatusOK, result)
+	return out, 0, nil, nil
 }
 
-// saveProbeSnapshot 将一次成功探测的模型快照写回 base_url 匹配的 Provider（含 ProbeAt），
+// saveProbeSnapshot 将一次成功探测的模型快照写回 base_url 与 Key 都匹配的 Provider（含 ProbeAt），
 // 供模型目录页展示上游最新免费/价格/上下文；无匹配 Provider 时静默跳过。
-func (s *Server) saveProbeSnapshot(baseURL string, models []map[string]any) {
+// 同时匹配 Key：同一 base_url 可能挂多个 Provider（不同 Key），快照必须归属正确那个。
+func (s *Server) saveProbeSnapshot(baseURL, apiKey string, models []map[string]any) {
 	norm := strings.TrimRight(baseURL, "/")
+	probeKey := store.Provider{APIKey: apiKey}.ResolvedAPIKey()
 	for _, p := range s.store.ListProviders() {
 		if strings.TrimRight(p.BaseURL, "/") != norm {
+			continue
+		}
+		if p.ResolvedAPIKey() != probeKey {
 			continue
 		}
 		pm := make([]store.ProbeModel, 0, len(models))
