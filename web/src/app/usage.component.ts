@@ -127,9 +127,9 @@ import { Agg, DailyPoint, UsageRecord, UsageResponse } from './models';
               <ng-container *ngIf="r.model === '*'">* <span class="muted" style="font-size:12px">通配</span></ng-container>
               <ng-container *ngIf="r.model !== '*'">{{ r.model }}</ng-container>
             </td>
-            <td class="mono muted nowrap" style="max-width:230px"
+            <td class="mono muted nowrap" style="max-width:250px"
                 [title]="r.provider_id + (r.upstream_model ? ' → ' + r.upstream_model : '')">
-              {{ r.provider_id }}<span *ngIf="r.upstream_model"> → {{ r.upstream_model }}</span>
+              {{ providerCell(r) }}
             </td>
             <td class="num nowrap">{{ r.total_tokens }}</td>
             <td class="num nowrap" [class.slow]="r.latency_ms >= 3000">{{ r.latency_ms }} ms</td>
@@ -186,6 +186,12 @@ export class UsageComponent implements OnInit {
   /** 错误信息模板层截断：DOM 文本本来就短，绝不撑宽；hover title 看全文。 */
   shortErr(e: string): string {
     return e.length > 32 ? e.slice(0, 32) + '…' : e;
+  }
+
+  /** Provider → 上游模型 模板层截断（26 字符 + …），title 看全。 */
+  providerCell(r: { provider_id: string; upstream_model?: string }): string {
+    const s = r.upstream_model ? `${r.provider_id} → ${r.upstream_model}` : r.provider_id;
+    return s.length > 26 ? s.slice(0, 26) + '…' : s;
   }
 
   trackByTs(_: number, r: UsageRecord): string {
