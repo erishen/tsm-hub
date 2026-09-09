@@ -19,6 +19,7 @@ import (
 	"github.com/erishen/llm-router/internal/proxy"
 	"github.com/erishen/llm-router/internal/quota"
 	"github.com/erishen/llm-router/internal/router"
+	"github.com/erishen/llm-router/internal/skills"
 	"github.com/erishen/llm-router/internal/store"
 )
 
@@ -95,6 +96,7 @@ func run(cfg config.Config) error {
 		Router:  rt,
 		Health:  tracker,
 		Proxy:   px,
+		Skills:  skills.New(settings.SkillsDir),
 		Logger:  logger,
 	})
 

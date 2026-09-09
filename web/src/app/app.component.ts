@@ -39,6 +39,7 @@ import { ApiService } from './api.service';
           <a routerLink="/balances" routerLinkActive="active">额度</a>
           <a routerLink="/models" routerLinkActive="active">模型</a>
           <a routerLink="/usage" routerLinkActive="active">用量</a>
+          <a routerLink="/skills" routerLinkActive="active">技能库</a>
           <a routerLink="/playground" routerLinkActive="active">测试</a>
         </nav>
         <div style="margin-top:24px">

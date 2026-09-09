@@ -10,6 +10,7 @@ import { UsageComponent } from './app/usage.component';
 import { PlaygroundComponent } from './app/playground.component';
 import { BalancesComponent } from './app/balances.component';
 import { ModelsComponent } from './app/models.component';
+import { SkillsComponent } from './app/skills.component';
 
 const routes: Routes = [
   { path: '', component: DashboardComponent },
@@ -19,6 +20,7 @@ const routes: Routes = [
   { path: 'balances', component: BalancesComponent },
   { path: 'models', component: ModelsComponent },
   { path: 'usage', component: UsageComponent },
+  { path: 'skills', component: SkillsComponent },
   { path: 'playground', component: PlaygroundComponent },
   { path: '**', redirectTo: '' },
 ];

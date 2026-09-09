@@ -171,3 +171,21 @@ export interface ProviderBalance {
   balance?: Balance;
   error?: string;
 }
+
+/** 技能库：单个技能的摘要（Agent Skills SKILL.md frontmatter）。 */
+export interface SkillSummary {
+  name: string;
+  description: string;
+  has_scripts: boolean;
+  scripts?: string[];
+  has_refs: boolean;
+  has_assets: boolean;
+}
+
+/** 技能库：单个技能详情（SKILL.md 全文）。 */
+export interface SkillDetail extends SkillSummary {
+  body: string;
+  raw: string;
+  size: number;
+  updated: string;
+}

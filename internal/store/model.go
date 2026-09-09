@@ -39,6 +39,9 @@ type Settings struct {
 	CooldownSec int `json:"cooldown_sec"`
 	// Smart 是 smart 成本智能路由的评分参数；未配置时用代码默认值。
 	Smart SmartScoreCfg `json:"smart,omitempty"`
+	// SkillsDir 指向外部 Agent Skills 技能库目录（如 resolve-skills/skills）。
+	// 空 = 不启用技能库浏览。
+	SkillsDir string `json:"skills_dir,omitempty"`
 }
 
 // SmartScoreCfg 是 smart 策略的可调参数。0 值表示用默认值。

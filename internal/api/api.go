@@ -19,6 +19,7 @@ import (
 	"github.com/erishen/llm-router/internal/proxy"
 	"github.com/erishen/llm-router/internal/quota"
 	"github.com/erishen/llm-router/internal/router"
+	"github.com/erishen/llm-router/internal/skills"
 	"github.com/erishen/llm-router/internal/store"
 	"github.com/erishen/llm-router/internal/web"
 )
@@ -33,6 +34,7 @@ type Server struct {
 	proxy   *proxy.Proxy
 	sess    *auth.Session
 	logger  *slog.Logger
+	skills  *skills.Library
 
 	mu           sync.RWMutex
 	startAt      time.Time
@@ -53,6 +55,7 @@ type Options struct {
 	Router  *router.Router
 	Health  *router.Tracker
 	Proxy   *proxy.Proxy
+	Skills  *skills.Library
 	Logger  *slog.Logger
 }
 
@@ -70,6 +73,7 @@ func New(o Options) *Server {
 		proxy:   o.Proxy,
 		sess:    auth.NewSession(12 * time.Hour),
 		logger:  o.Logger,
+		skills:  o.Skills,
 		startAt:      time.Now(),
 		statusCounts: map[string]int64{},
 		denyCounts:   map[string]int64{},

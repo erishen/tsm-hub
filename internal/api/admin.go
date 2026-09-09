@@ -44,6 +44,8 @@ func (s *Server) adminMux() http.Handler {
 	m.HandleFunc("GET /api/admin/health", s.admin(s.handleAdminHealth))
 	m.HandleFunc("GET /api/admin/settings", s.admin(s.handleGetSettings))
 	m.HandleFunc("POST /api/admin/settings", s.admin(s.handleUpdateSettings))
+	m.HandleFunc("GET /api/admin/skills", s.admin(s.handleListSkills))
+	m.HandleFunc("GET /api/admin/skills/{name}", s.admin(s.handleGetSkill))
 	return m
 }
 
@@ -1190,10 +1192,36 @@ func (s *Server) handleAdminHealth(w http.ResponseWriter, r *http.Request) {
 
 // ---------- settings ----------
 
+// ---------- skills ----------
+
+func (s *Server) handleListSkills(w http.ResponseWriter, r *http.Request) {
+	if s.skills == nil || s.skills.Dir() == "" {
+		writeJSON(w, http.StatusOK, map[string]any{"dir": "", "skills": []any{}})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"dir":    s.skills.Dir(),
+		"skills": s.skills.List(),
+	})
+}
+
+func (s *Server) handleGetSkill(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if s.skills == nil {
+		writeError(w, http.StatusNotFound, "not_found", "skills library not configured")
+		return
+	}
+	d, ok := s.skills.Get(name)
+	if !ok {
+		writeError(w, http.StatusNotFound, "not_found", "skill not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, d)
+}
+
 func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	st := s.store.Settings()
-	writeJSON(w, http.StatusOK, map[string]any{
-		"listen":             st.Listen,
+	writeJSON(w, http.StatusOK, map[string]any{		"listen":             st.Listen,
 		"default_timeout_ms": st.DefaultTimeoutMS,
 		"max_body_bytes":     st.MaxBodyBytes,
 		"fail_threshold":     st.FailThreshold,

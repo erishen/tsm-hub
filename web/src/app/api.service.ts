@@ -3,7 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { Observable, of, forkJoin, throwError } from 'rxjs';
 import { catchError, map, mergeMap, tap } from 'rxjs/operators';
 import {
-  Agg, ApiKey, Balance, CatalogModel, Overview, ProbeModel, Provider, ProviderBalance, ProviderHealth, Quota, Route, UsageResponse,
+  Agg, ApiKey, Balance, CatalogModel, Overview, ProbeModel, Provider, ProviderBalance, ProviderHealth, Quota, Route, SkillDetail, SkillSummary, UsageResponse,
 } from './models';
 
 const SESSION_KEY = 'llm-router.session';
@@ -141,6 +141,16 @@ export class ApiService {
   deleteRoute(model: string): Observable<unknown> {
     const m = model || '_default'; // 通配兜底路由（空 model）用 _default 哨兵
     return this.http.delete(`/api/admin/routes/${encodeURIComponent(m)}`, { headers: this.headers() })
+      .pipe(catchError(this.handleError));
+  }
+
+  listSkills(): Observable<{ dir: string; skills: SkillSummary[] }> {
+    return this.http.get<{ dir: string; skills: SkillSummary[] }>('/api/admin/skills', { headers: this.headers() })
+      .pipe(catchError(this.handleError));
+  }
+
+  getSkill(name: string): Observable<SkillDetail> {
+    return this.http.get<SkillDetail>(`/api/admin/skills/${encodeURIComponent(name)}`, { headers: this.headers() })
       .pipe(catchError(this.handleError));
   }
 
