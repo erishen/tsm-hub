@@ -178,6 +178,12 @@ button:disabled { opacity: .55; cursor: not-allowed; }
               0 24px 60px -12px rgba(15, 23, 42, .35);
   animation: m-panel-in .24s cubic-bezier(.2, .8, .2, 1) both;
   overflow: hidden;
+  /* 弹窗高度限制在遮罩内容区内（max-height:100% 相对 backdrop），
+     backdrop 的 padding 区（上下 15vh）始终留白可点击 → 点遮罩即关闭；
+     内容超高时由 .modal-body 内部滚动。 */
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
 }
 .modal-head {
   display: flex; align-items: center; gap: 12px;
@@ -192,7 +198,7 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .modal-titles { flex: 1; min-width: 0; }
 .modal-titles h2 { font-size: 16px; margin: 0; font-weight: 600; letter-spacing: .2px; }
 .modal-titles .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
-.modal-body { padding: 20px; }
+.modal-body { padding: 20px; overflow-y: auto; min-height: 0; }
 .modal-foot {
   display: flex; gap: 8px; justify-content: flex-end;
   padding: 14px 20px; border-top: 1px solid var(--border);
