@@ -30,6 +30,10 @@ const CATEGORY_LABEL: Record<string, string> = {
       <input [(ngModel)]="q" placeholder="搜索模型 id / 用途 / Provider…" style="min-width:280px" />
       <span class="muted small">共 {{ models().length }} 个模型 · {{ freeCount() }} 个免费</span>
     </div>
+    <div class="muted" style="margin-bottom:8px">
+      <ng-container *ngIf="probeAt()">免费/价格状态基于最近一次探测（{{ probeAt() }}），上游会动态调整，重新探测可刷新</ng-container>
+      <ng-container *ngIf="!probeAt()">尚未探测过，免费/价格来自静态知识表（可能过时）；去 Providers 按 Key 查询可刷新</ng-container>
+    </div>
     <div class="banner error" *ngIf="error()">{{ error() }}</div>
 
     <ng-container *ngFor="let cat of categories()">
@@ -48,7 +52,7 @@ const CATEGORY_LABEL: Record<string, string> = {
               <td>
                 <span class="badge ok" *ngFor="let p of m.providers" style="margin-right:4px">{{ p }}</span>
               </td>
-              <td class="muted">{{ m.context || '—' }}</td>
+              <td class="muted">{{ ctx(m) }}</td>
               <td>
                 <span class="badge free" *ngIf="m.free">FREE</span>
                 <span class="muted small" *ngIf="!m.free && m.pricing">$ {{ m.pricing.prompt }}/{{ m.pricing.completion }}M</span>
@@ -68,9 +72,21 @@ export class ModelsComponent implements OnInit {
   readonly models = signal<CatalogModel[]>([]);
   readonly loading = signal(false);
   readonly error = signal('');
+  readonly probeAt = signal('');
   q = '';
 
   readonly CATEGORY_LABEL = CATEGORY_LABEL;
+
+  /** 上下文：最近一次探测的实时值优先，静态知识表兜底。 */
+  ctx(m: CatalogModel): string {
+    if (m.context_length) {
+      const n = m.context_length;
+      if (n >= 1048576) return `${Math.round(n / 1048576)}M`;
+      if (n >= 1024) return `${Math.round(n / 1024)}K`;
+      return `${n}`;
+    }
+    return m.context || '—';
+  }
 
   /** 过滤后的模型 */
   readonly filtered = computed(() => {
@@ -111,6 +127,7 @@ export class ModelsComponent implements OnInit {
     this.api.modelsCatalog().subscribe({
       next: (r) => {
         this.models.set(r.models);
+        if (r.probe_at) this.probeAt.set(new Date(r.probe_at).toLocaleString());
         this.loading.set(false);
       },
       error: (e: Error) => {

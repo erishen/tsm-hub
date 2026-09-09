@@ -114,6 +114,8 @@ export interface CatalogModel {
   category: string;
   purpose: string;
   context?: string;
+  /** 最近一次探测的上游实时上下文窗口（token 数），优先于静态 context。 */
+  context_length?: number;
   free: boolean;
   pricing?: { prompt: string; completion: string };
 }

@@ -424,22 +424,32 @@ func inferModelMeta(id string) modelMeta {
 func (s *Server) handleModelsCatalog(w http.ResponseWriter, r *http.Request) {
 	providers := s.store.ListProviders()
 	type item struct {
-		ID        string   `json:"id"`
-		Providers []string `json:"providers"`
-		Category  string   `json:"category"`
-		Purpose   string   `json:"purpose"`
-		Ctx       string   `json:"context,omitempty"`
-		Free      bool     `json:"free"`
-		Pricing   *struct {
+		ID            string   `json:"id"`
+		Providers     []string `json:"providers"`
+		Category      string   `json:"category"`
+		Purpose       string   `json:"purpose"`
+		Ctx           string   `json:"context,omitempty"`
+		ContextLength int      `json:"context_length,omitempty"`
+		Free          bool     `json:"free"`
+		Pricing       *struct {
 			Prompt     string `json:"prompt"`
 			Completion string `json:"completion"`
 		} `json:"pricing,omitempty"`
 	}
 	merged := map[string]*item{}
 	order := []string{}
+	var latestProbe time.Time
 	for _, p := range providers {
 		if p.ID == "mock-local" {
 			continue // 本地联调 mock 不进目录
+		}
+		// 该 Provider 最近一次探测快照（免费/价格/上下文以上游实时返回为准，会随时间变）。
+		probeByID := map[string]store.ProbeModel{}
+		for _, pm := range p.ProbeModels {
+			probeByID[pm.ID] = pm
+		}
+		if p.ProbeAt.After(latestProbe) {
+			latestProbe = p.ProbeAt
 		}
 		for _, id := range p.Models {
 			if id == "" {
@@ -452,7 +462,17 @@ func (s *Server) handleModelsCatalog(w http.ResponseWriter, r *http.Request) {
 					meta = inferModelMeta(id)
 				}
 				it = &item{ID: id, Category: meta.Category, Purpose: meta.Purpose, Ctx: meta.Ctx}
-				if pr, ok2 := agnesPricing[id]; ok2 {
+				// 快照覆盖：上游最近一次探测的 context_length/free/pricing 优先于静态表。
+				if pm, ok2 := probeByID[id]; ok2 {
+					it.ContextLength = pm.ContextLength
+					it.Free = pm.Free
+					if pm.Pricing != nil {
+						it.Pricing = &struct {
+							Prompt     string `json:"prompt"`
+							Completion string `json:"completion"`
+						}{pm.Pricing.Prompt, pm.Pricing.Completion}
+					}
+				} else if pr, ok2 := agnesPricing[id]; ok2 {
 					it.Pricing = &struct {
 						Prompt     string `json:"prompt"`
 						Completion string `json:"completion"`
@@ -472,7 +492,11 @@ func (s *Server) handleModelsCatalog(w http.ResponseWriter, r *http.Request) {
 	for _, id := range order {
 		out = append(out, merged[id])
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"models": out})
+	resp := map[string]any{"models": out}
+	if !latestProbe.IsZero() {
+		resp["probe_at"] = latestProbe.Format(time.RFC3339)
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // handleProbeModels 用给定的 base_url + API Key 探测上游 /v1/models，返回模型 id 列表（去重排序）。
@@ -616,7 +640,36 @@ func (s *Server) handleProbeModels(w http.ResponseWriter, r *http.Request) {
 	if bal := s.probeBalance(r.Context(), req.BaseURL, key); bal != nil {
 		result["balance"] = bal
 	}
+	// 探测成功后把模型快照写回匹配的 Provider（目录页用最新免费/价格/上下文，会随时间变）。
+	s.saveProbeSnapshot(req.BaseURL, out)
 	writeJSON(w, http.StatusOK, result)
+}
+
+// saveProbeSnapshot 将一次成功探测的模型快照写回 base_url 匹配的 Provider（含 ProbeAt），
+// 供模型目录页展示上游最新免费/价格/上下文；无匹配 Provider 时静默跳过。
+func (s *Server) saveProbeSnapshot(baseURL string, models []map[string]any) {
+	norm := strings.TrimRight(baseURL, "/")
+	for _, p := range s.store.ListProviders() {
+		if strings.TrimRight(p.BaseURL, "/") != norm {
+			continue
+		}
+		pm := make([]store.ProbeModel, 0, len(models))
+		for _, m := range models {
+			item := store.ProbeModel{ID: m["id"].(string)}
+			if v, ok := m["context_length"].(int64); ok {
+				item.ContextLength = int(v)
+			}
+			item.Free, _ = m["free"].(bool)
+			if pr, ok := m["pricing"].(map[string]string); ok {
+				item.Pricing = &store.Pricing{Prompt: pr["prompt"], Completion: pr["completion"]}
+			}
+			pm = append(pm, item)
+		}
+		p.ProbeAt = time.Now()
+		p.ProbeModels = pm
+		_ = s.store.UpsertProvider(p) // 快照失败不阻塞探测响应
+		return
+	}
 }
 
 // probeBalance 尝试用同一 Key 查询上游账户余额/额度（token 可使用总量），

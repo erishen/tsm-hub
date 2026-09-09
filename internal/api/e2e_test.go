@@ -328,20 +328,35 @@ func TestModelsCatalog(t *testing.T) {
 	upsert("cat-kimi", "http://k/v1", "kimi-k2.7-code", "agnes-2.0-flash") // 重复模型 → 合并 providers
 	upsert("cat-or", "http://o/v1", "nex-agi/nex-n2.5-mini:free", "brand-new-video-gen")
 
+	// 探测快照覆盖：模拟 cat-agnes 最近一次探测，上游把 agnes-2.0-flash 改成收费（$0.01/$0.02）且上下文 200K。
+	if err := e.store.UpsertProvider(store.Provider{
+		ID: "cat-agnes", Name: "cat-agnes", BaseURL: "http://a/v1", APIKey: "sk-x",
+		Models: []string{"agnes-2.0-flash", "agnes-video-v2.0"},
+		ProbeAt: time.Now(),
+		ProbeModels: []store.ProbeModel{
+			{ID: "agnes-2.0-flash", ContextLength: 200000, Free: false,
+				Pricing: &store.Pricing{Prompt: "0.01", Completion: "0.02"}},
+		},
+	}); err != nil {
+		t.Fatalf("upsert snapshot: %v", err)
+	}
+
 	resp := e.do(t, http.MethodGet, "/api/admin/models/catalog", "", e.adminHeaders())
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d", resp.StatusCode)
 	}
 	var payload struct {
-		Models []struct {
-			ID        string   `json:"id"`
-			Providers []string `json:"providers"`
-			Category  string   `json:"category"`
-			Purpose   string   `json:"purpose"`
-			Ctx       string   `json:"context"`
-			Free      bool     `json:"free"`
-			Pricing   *struct {
+		ProbeAt string `json:"probe_at"`
+		Models  []struct {
+			ID            string   `json:"id"`
+			Providers     []string `json:"providers"`
+			Category      string   `json:"category"`
+			Purpose       string   `json:"purpose"`
+			Ctx           string   `json:"context"`
+			ContextLength int      `json:"context_length"`
+			Free          bool     `json:"free"`
+			Pricing       *struct {
 				Prompt     string `json:"prompt"`
 				Completion string `json:"completion"`
 			} `json:"pricing"`
@@ -351,34 +366,40 @@ func TestModelsCatalog(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 	byID := map[string]struct {
-		Providers []string
-		Category  string
-		Ctx       string
-		Free      bool
-		Pricing   *struct {
+		Providers     []string
+		Category      string
+		Ctx           string
+		ContextLength int
+		Free          bool
+		Pricing       *struct {
 			Prompt     string `json:"prompt"`
 			Completion string `json:"completion"`
 		}
 	}{}
 	for _, m := range payload.Models {
 		byID[m.ID] = struct {
-			Providers []string
-			Category  string
-			Ctx       string
-			Free      bool
-			Pricing   *struct {
+			Providers     []string
+			Category      string
+			Ctx           string
+			ContextLength int
+			Free          bool
+			Pricing       *struct {
 				Prompt     string `json:"prompt"`
 				Completion string `json:"completion"`
 			}
-		}{m.Providers, m.Category, m.Ctx, m.Free, m.Pricing}
+		}{m.Providers, m.Category, m.Ctx, m.ContextLength, m.Free, m.Pricing}
 	}
 	a := byID["agnes-2.0-flash"]
 	if len(a.Providers) != 2 || !slices.Contains(a.Providers, "cat-agnes") || !slices.Contains(a.Providers, "cat-kimi") {
 		t.Fatalf("agnes-2.0-flash providers = %v, want merged [cat-agnes cat-kimi]", a.Providers)
 	}
-	if a.Category != "text" || a.Ctx != "256K" || !a.Free || a.Pricing == nil ||
-		a.Pricing.Prompt != "0" || a.Pricing.Completion != "0" {
-		t.Fatalf("agnes-2.0-flash = %+v, want text/256K/free/$0-$0", a)
+	// 快照优先：静态表本是 256K/FREE/$0，探测快照改为 200K/收费/$0.01-$0.02 → 目录跟随快照。
+	if a.ContextLength != 200000 || a.Free || a.Pricing == nil ||
+		a.Pricing.Prompt != "0.01" || a.Pricing.Completion != "0.02" {
+		t.Fatalf("agnes-2.0-flash = %+v, want snapshot 200K/paid/$0.01-$0.02 overrides static", a)
+	}
+	if payload.ProbeAt == "" {
+		t.Fatalf("probe_at empty, want latest probe timestamp")
 	}
 	k := byID["kimi-k2.7-code"]
 	if k.Category != "text" || k.Ctx != "256K" {

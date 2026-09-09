@@ -40,6 +40,23 @@ type Settings struct {
 }
 
 // Provider 是一个上游 LLM 服务（OpenAI / DeepSeek / 通义 / 本地 Ollama ...）。
+// ProbeModel 是一次按 Key 探测 /v1/models 时上游返回的模型元信息快照。
+// 免费/价格/上下文会随上游调整（OpenRouter :free 列表、agnes 促销免费等），
+// 目录页优先用最近一次探测的快照，静态知识表兜底。
+type ProbeModel struct {
+	ID            string  `json:"id"`
+	ContextLength int     `json:"context_length,omitempty"`
+	Free          bool    `json:"free,omitempty"`
+	Pricing       *Pricing `json:"pricing,omitempty"`
+}
+
+// Pricing 是模型单价（$/1M tokens，输入/输出）。
+type Pricing struct {
+	Prompt     string `json:"prompt"`
+	Completion string `json:"completion"`
+}
+
+// Provider 是上游服务商配置。
 type Provider struct {
 	ID        string            `json:"id"`
 	Name      string            `json:"name"`
@@ -53,6 +70,9 @@ type Provider struct {
 	TimeoutMS int               `json:"timeout_ms"`
 	CreatedAt time.Time         `json:"created_at"`
 	UpdatedAt time.Time         `json:"updated_at"`
+	// ProbeAt 是最近一次探测成功的时间；ProbeModels 是那次探测的模型快照。
+	ProbeAt     time.Time     `json:"probe_at,omitempty"`
+	ProbeModels []ProbeModel  `json:"probe_models,omitempty"`
 }
 
 // ResolvedAPIKey 返回实际用于上游鉴权的 Key：

@@ -97,9 +97,9 @@ export class ApiService {
       .pipe(catchError(this.handleError));
   }
 
-  /** 模型目录：所有 Provider 已配置模型的归类/用途/免费/定价聚合。 */
-  modelsCatalog(): Observable<{ models: CatalogModel[] }> {
-    return this.http.get<{ models: CatalogModel[] }>('/api/admin/models/catalog', { headers: this.headers() })
+  /** 模型目录：所有 Provider 已配置模型的归类/用途/免费/定价聚合；probe_at=最近探测时间。 */
+  modelsCatalog(): Observable<{ models: CatalogModel[]; probe_at?: string }> {
+    return this.http.get<{ models: CatalogModel[]; probe_at?: string }>('/api/admin/models/catalog', { headers: this.headers() })
       .pipe(catchError(this.handleError));
   }
 
