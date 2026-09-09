@@ -514,6 +514,27 @@ func (s *Server) handleModelsCatalog(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.buildCatalog())
 }
 
+// baiFreeModels 是 B.AI 免费阵容（官方 2026-08-29 公布：GLM-5.3-Flash、DeepSeek-V4-Flash、
+// DeepSeek-V4-Flash-Vision-Exp、Hy3、MiMo-V2.5、Qwen3.8-Flash 六大旗舰免费开放）。
+// B.AI 的 /v1/models 不带 is_free/pricing 字段，探测无法自动识别；免费名单有时效，以官方公告为准。
+var baiFreeModels = map[string]bool{
+	"glm-5.3-flash": true, "deepseek-v4-flash": true, "deepseek-v4-flash-vision-exp": true,
+	"hy3": true, "mimo-v2.5": true, "qwen3.8-flash": true,
+}
+
+// markFreeByProvider 按 Provider 免费名单修正探测结果（仅 bai 需要：上游不带免费字段）。
+func markFreeByProvider(providerID string, models []map[string]any) []map[string]any {
+	if providerID != "bai" {
+		return models
+	}
+	for _, m := range models {
+		if id, _ := m["id"].(string); baiFreeModels[id] {
+			m["free"] = true
+		}
+	}
+	return models
+}
+
 // handleRefreshModels 并行探测所有已配置 Key 的 Provider（非 mock-local），刷新模型快照后返回目录。
 // 单个 Provider 失败不阻塞；providers 字段返回每个 Provider 的探测结果（ok / 错误摘要）。
 func (s *Server) handleRefreshModels(w http.ResponseWriter, r *http.Request) {
@@ -541,6 +562,7 @@ func (s *Server) handleRefreshModels(w http.ResponseWriter, r *http.Request) {
 				statuses[p.ID] = fmt.Sprintf("上游返回 %d: %s", status, compact(string(body)))
 				return
 			}
+			out = markFreeByProvider(p.ID, out)
 			s.saveProbeSnapshot(p.BaseURL, p.APIKey, out)
 			statuses[p.ID] = "ok"
 		}(p)
@@ -619,6 +641,9 @@ func (s *Server) buildCatalog() map[string]any {
 				}
 			} else if p.ID == "sensenova" {
 				// SenseNova Token Plan 免费公测：其全部模型免费（自研 1500 次/5h、DeepSeek V4 Flash 500 次/5h）。
+				it.Free = true
+			} else if p.ID == "bai" && baiFreeModels[id] {
+				// B.AI 免费阵容（探测无 is_free 字段时的静态兜底）。
 				it.Free = true
 			} else if strings.HasSuffix(id, ":free") {
 				// OpenRouter :free 后缀约定（id 层面即表示免费）。
