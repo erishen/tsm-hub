@@ -140,6 +140,30 @@ func (t *Tracker) Snapshot() []ProviderHealth {
 	return out
 }
 
+// Health 返回单个 provider 的当前状态；尚无任何请求记录时返回健康默认值，
+// 供管理台完整展示所有 provider。
+func (t *Tracker) Health(id string) ProviderHealth {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	now := time.Now()
+	s, ok := t.states[id]
+	if !ok {
+		return ProviderHealth{ProviderID: id, Healthy: true}
+	}
+	return ProviderHealth{
+		ProviderID: id,
+		Healthy:    s.availableLocked(now) && s.failures < t.failMax,
+		Failures:   s.failures,
+		LastError:  s.lastErr,
+		LastOKAt:   s.lastOK,
+		LastFailAt: s.lastFail,
+		DownUntil:  s.downUntil,
+		LatencyMS:  s.latencyMS,
+		Requests:   s.requests,
+		Errors:     s.errors,
+	}
+}
+
 // Failures 返回 provider 当前的连续失败次数，用于判断是否处于半开探测。
 func (t *Tracker) Failures(id string) int {
 	t.mu.RLock()

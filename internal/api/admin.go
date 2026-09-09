@@ -18,6 +18,7 @@ import (
 
 	"github.com/erishen/llm-router/internal/auth"
 	"github.com/erishen/llm-router/internal/quota"
+	"github.com/erishen/llm-router/internal/router"
 	"github.com/erishen/llm-router/internal/store"
 )
 
@@ -1164,7 +1165,13 @@ func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
 // ---------- health ----------
 
 func (s *Server) handleAdminHealth(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"providers": s.health.Snapshot()})
+	// 遍历全部 provider：无请求记录的也展示（默认健康），不依赖 Tracker 快照。
+	providers := s.store.ListProviders()
+	out := make([]router.ProviderHealth, 0, len(providers))
+	for _, p := range providers {
+		out = append(out, s.health.Health(p.ID))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"providers": out})
 }
 
 // ---------- settings ----------
