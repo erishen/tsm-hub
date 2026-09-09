@@ -27,6 +27,7 @@ func (s *Server) adminMux() http.Handler {
 	m.HandleFunc("GET /api/admin/overview", s.admin(s.handleOverview))
 	m.HandleFunc("GET /api/admin/providers", s.admin(s.handleListProviders))
 	m.HandleFunc("GET /api/admin/providers/balances", s.admin(s.handleProviderBalances))
+	m.HandleFunc("GET /api/admin/models/catalog", s.admin(s.handleModelsCatalog))
 	m.HandleFunc("POST /api/admin/providers", s.admin(s.handleUpsertProvider))
 	m.HandleFunc("POST /api/admin/providers/probe", s.admin(s.handleProbeModels))
 	m.HandleFunc("DELETE /api/admin/providers/{id}", s.admin(s.handleDeleteProvider))
@@ -336,6 +337,142 @@ var agnesPricing = map[string][2]string{
 	"agnes-2.5-pro":       {"0.45", "0.90"},
 	"agnes-2.5-pro-alpha": {"0.45", "0.90"},
 	"agnes-2.5-pro-beta":  {"0.10", "0.30"},
+}
+
+// modelMeta 描述一个模型的类别与用途（模型目录页展示）。
+// Category: text（文本对话/编码）| vision（图像理解）| image（图像生成）| video | audio | embedding | other。
+// 用途说明来自各模型官方/OpenRouter 目录（2026-09-09 整理）；新模型缺条目时按 id 关键词推断。
+type modelMeta struct {
+	Category string
+	Purpose  string
+	Ctx      string // 上下文窗口，未披露为空
+}
+
+// modelCatalog 静态模型知识表：id → 类别/用途/上下文。
+// 来源：各平台官方文档 + OpenRouter 模型目录（2026-09-09 核验）。
+var modelCatalog = map[string]modelMeta{
+	// agnes（官方定价页 + FAQ）
+	"agnes-2.0-flash":     {"text", "通用问答/客服/知识库/轻量编码，官方无限期免费", "256K"},
+	"agnes-2.5-flash":     {"text", "免费通用增强版，编码/Agent 能力强（SWE 出色）", "512K"},
+	"agnes-2.5-pro":       {"text", "复杂推理/深度编码/长任务，付费旗舰（$0.45/$0.90）", ""},
+	"agnes-2.5-pro-alpha": {"text", "复杂推理（预览线，同 pro 定价）", ""},
+	"agnes-2.5-pro-beta":  {"text", "复杂推理（beta 低价线 $0.10/$0.30）", ""},
+	"agnes-3.0-flash":     {"text", "新一代 flash 模型（官方定价页暂未收录，用途待确认）", ""},
+	"agnes-image-2.0-flash":  {"image", "图像生成（官方免费）", ""},
+	"agnes-image-2.1-flash":  {"image", "图像生成增强版（官方免费）", ""},
+	"agnes-image-2.5-flash":  {"image", "图像生成（新版本）", ""},
+	"agnes-video-v2.0":       {"video", "视频生成（官方免费）", ""},
+	"agnes-video-2.5":        {"video", "高清视频生成（按秒计费 $0.025/s 起）", ""},
+	"agnes-video-2.5-flash":  {"video", "视频生成（同 2.5 公式，限时免费）", ""},
+	// kimi / Moonshot
+	"kimi-k2.7-code":  {"text", "编程/代码库理解/Agent 编程，支持图文视频输入（官方主打 Coding）", "256K"},
+	"kimi-k2.6":       {"text", "通用对话/编码/推理（K2 系列）", "256K"},
+	// DeepSeek
+	"deepseek-v4-flash":            {"text", "通用文本/编码（V4 快速高性价比线）", "1M"},
+	"deepseek-v4-flash-vision-exp": {"vision", "图像理解/OCR/图表分析，多模态 Agent（实验版，按文本价计费）", "1M"},
+	// OpenRouter 免费层（用户配置）
+	"inclusionai/ling-3.0-flash-fin:free":    {"text", "日常对话/起草（Ling 3.0 flash 免费线）", ""},
+	"inclusionai/ling-3.0-flash-sante:free":  {"text", "日常对话/起草（Ling 3.0 flash 免费线）", ""},
+	"liquid/lfm-2.5-2.6b:free":               {"text", "小型推理：Agent 工作流/数据抽取/RAG/长文本（官方不建议用于编码）", ""},
+	"nex-agi/nex-n2.5-mini:free":             {"text", "通用对话/推理（免费 mini 线）", ""},
+	"nex-agi/nex-n2.5-pro:free":              {"text", "通用对话/推理（免费 pro 线）", ""},
+	"nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free": {"text", "轻量多模态推理（omni 系列 nano）", ""},
+	"nvidia/nemotron-3-super-120b-a12b:free": {"text", "综合最强的免费模型之一：数学/推理强、速度快、长上下文", "1M"},
+	"nvidia/nemotron-3-ultra-550b-a55b:free": {"text", "编码 Agent/深度研究/复杂推理/规划（免费旗舰）", "1M"},
+	"nvidia/nemotron-3.5-content-safety:free": {"other", "内容安全分类/审核专用", ""},
+	"nvidia/nemotron-3.5-lightning:free":      {"text", "快速响应/轻量任务（3.5 lightning）", ""},
+	"openrouter/free":                         {"text", "OpenRouter 自动路由：把请求分发到可用免费模型", ""},
+	"poolside/laguna-xs-2.1:free":             {"text", "软件工程 Agent 编码（小号）", ""},
+	"poolside/laguna-s-2.1:free":              {"text", "软件工程 Agent 编码（标准）", ""},
+	"cohere/north-mini-code:free":             {"text", "轻量编码/代码补全（North Mini Code）", ""},
+	"dots-studio/dots-3-note-preview:free":    {"text", "笔记/长文档整理（Dots 3）", ""},
+	"google/gemma-4-26b-a4b-it:free":          {"text", "通用对话/指令（Google Gemma 4）", ""},
+	"google/gemma-4-31b-it:free":              {"text", "通用对话/指令（Google Gemma 4）", ""},
+	"google/lyria-3-clip-preview":             {"audio", "音频/音乐生成（Lyria 3）", ""},
+	"google/lyria-3-pro-preview":              {"audio", "音频/音乐生成高级版（Lyria 3）", ""},
+	"thinkingmachines/inkling-small:free":     {"text", "通用推理/编码/Agent（975B MoE 小号）", "1M"},
+	"thinkingmachines/inkling:free":           {"text", "通用推理/编码/Agent/多模态（975B MoE，41B 激活）", "1M"},
+}
+
+// inferModelMeta 对知识表未收录的模型按 id 关键词推断类别与用途。
+func inferModelMeta(id string) modelMeta {
+	lower := strings.ToLower(id)
+	switch {
+	case strings.Contains(lower, "image") || strings.Contains(lower, "dall-e") || strings.Contains(lower, "flux"):
+		return modelMeta{"image", "图像生成", ""}
+	case strings.Contains(lower, "video"):
+		return modelMeta{"video", "视频生成", ""}
+	case strings.Contains(lower, "lyria") || strings.Contains(lower, "audio") || strings.Contains(lower, "music") || strings.Contains(lower, "tts"):
+		return modelMeta{"audio", "音频/语音生成", ""}
+	case strings.Contains(lower, "embed"):
+		return modelMeta{"embedding", "向量嵌入/检索", ""}
+	case strings.Contains(lower, "vision") || strings.Contains(lower, "omni") || strings.Contains(lower, "vl"):
+		return modelMeta{"vision", "图像/多模态理解", ""}
+	case strings.Contains(lower, "safety") || strings.Contains(lower, "moder") || strings.Contains(lower, "guard"):
+		return modelMeta{"other", "内容审核/安全分类", ""}
+	case strings.Contains(lower, "reason") || strings.Contains(lower, "think"):
+		return modelMeta{"text", "推理增强模型", ""}
+	case strings.Contains(lower, "code") || strings.Contains(lower, "coder") || strings.Contains(lower, "agent"):
+		return modelMeta{"text", "编码/Agent 方向", ""}
+	default:
+		return modelMeta{"text", "通用对话/生成", ""}
+	}
+}
+
+// handleModelsCatalog 汇总所有 Provider 已配置的模型：合并去重、归类（文本/视觉/图像/视频/音频/嵌入/其他）、
+// 附用途/上下文/免费/定价信息，供「模型目录」页展示。
+func (s *Server) handleModelsCatalog(w http.ResponseWriter, r *http.Request) {
+	providers := s.store.ListProviders()
+	type item struct {
+		ID        string   `json:"id"`
+		Providers []string `json:"providers"`
+		Category  string   `json:"category"`
+		Purpose   string   `json:"purpose"`
+		Ctx       string   `json:"context,omitempty"`
+		Free      bool     `json:"free"`
+		Pricing   *struct {
+			Prompt     string `json:"prompt"`
+			Completion string `json:"completion"`
+		} `json:"pricing,omitempty"`
+	}
+	merged := map[string]*item{}
+	order := []string{}
+	for _, p := range providers {
+		if p.ID == "mock-local" {
+			continue // 本地联调 mock 不进目录
+		}
+		for _, id := range p.Models {
+			if id == "" {
+				continue
+			}
+			it, ok := merged[id]
+			if !ok {
+				meta, has := modelCatalog[id]
+				if !has {
+					meta = inferModelMeta(id)
+				}
+				it = &item{ID: id, Category: meta.Category, Purpose: meta.Purpose, Ctx: meta.Ctx}
+				if pr, ok2 := agnesPricing[id]; ok2 {
+					it.Pricing = &struct {
+						Prompt     string `json:"prompt"`
+						Completion string `json:"completion"`
+					}{pr[0], pr[1]}
+					it.Free = pr[0] == "0" && pr[1] == "0"
+				} else if strings.HasSuffix(id, ":free") {
+					it.Free = true
+				}
+				merged[id] = it
+				order = append(order, id)
+			}
+			it.Providers = append(it.Providers, p.ID)
+		}
+	}
+	sort.Slice(order, func(i, j int) bool { return order[i] < order[j] })
+	out := make([]*item, 0, len(order))
+	for _, id := range order {
+		out = append(out, merged[id])
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"models": out})
 }
 
 // handleProbeModels 用给定的 base_url + API Key 探测上游 /v1/models，返回模型 id 列表（去重排序）。

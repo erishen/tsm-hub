@@ -107,6 +107,17 @@ export interface ProviderHealth {
   errors: number;
 }
 
+/** 模型目录条目（各 Provider 已配置模型聚合）。 */
+export interface CatalogModel {
+  id: string;
+  providers: string[];
+  category: string;
+  purpose: string;
+  context?: string;
+  free: boolean;
+  pricing?: { prompt: string; completion: string };
+}
+
 /** 探测返回的模型元信息：上下文窗口（token 总量）与免费标记。 */
 export interface ProbeModel {
   id: string;

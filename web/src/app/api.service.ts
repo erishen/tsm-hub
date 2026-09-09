@@ -3,7 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { Observable, of, forkJoin, throwError } from 'rxjs';
 import { catchError, map, mergeMap, tap } from 'rxjs/operators';
 import {
-  Agg, ApiKey, Balance, Overview, ProbeModel, Provider, ProviderBalance, ProviderHealth, Quota, Route, UsageResponse,
+  Agg, ApiKey, Balance, CatalogModel, Overview, ProbeModel, Provider, ProviderBalance, ProviderHealth, Quota, Route, UsageResponse,
 } from './models';
 
 const SESSION_KEY = 'llm-router.session';
@@ -94,6 +94,12 @@ export class ApiService {
   /** 用 base_url + API Key 探测上游 /v1/models，返回模型列表（含上下文窗口、免费标记）与账户余额。 */
   probeModels(body: { base_url: string; api_key?: string }): Observable<{ models: ProbeModel[]; balance?: Balance }> {
     return this.http.post<{ models: ProbeModel[]; balance?: Balance }>('/api/admin/providers/probe', body, { headers: this.headers() })
+      .pipe(catchError(this.handleError));
+  }
+
+  /** 模型目录：所有 Provider 已配置模型的归类/用途/免费/定价聚合。 */
+  modelsCatalog(): Observable<{ models: CatalogModel[] }> {
+    return this.http.get<{ models: CatalogModel[] }>('/api/admin/models/catalog', { headers: this.headers() })
       .pipe(catchError(this.handleError));
   }
 

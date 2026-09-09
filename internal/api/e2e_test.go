@@ -1,6 +1,7 @@
 package api
 
 import (
+	"slices"
 	"bufio"
 	"bytes"
 	"encoding/json"
@@ -308,6 +309,94 @@ func TestHealthzReflectsProviderHealth(t *testing.T) {
 	}
 	if byID["backup"] {
 		t.Fatalf("backup should be unhealthy after 3 failures")
+	}
+}
+
+// TestModelsCatalog 验证模型目录：合并去重、知识表归类/用途/免费/定价、未收录模型按 id 推断。
+func TestModelsCatalog(t *testing.T) {
+	e := newEnv(t, "ok")
+	defer e.server.Close()
+
+	upsert := func(id, base string, models ...string) {
+		if err := e.store.UpsertProvider(store.Provider{
+			ID: id, Name: id, BaseURL: base, APIKey: "sk-x", Models: models,
+		}); err != nil {
+			t.Fatalf("upsert %s: %v", id, err)
+		}
+	}
+	upsert("cat-agnes", "http://a/v1", "agnes-2.0-flash", "agnes-video-v2.0")
+	upsert("cat-kimi", "http://k/v1", "kimi-k2.7-code", "agnes-2.0-flash") // 重复模型 → 合并 providers
+	upsert("cat-or", "http://o/v1", "nex-agi/nex-n2.5-mini:free", "brand-new-video-gen")
+
+	resp := e.do(t, http.MethodGet, "/api/admin/models/catalog", "", e.adminHeaders())
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	var payload struct {
+		Models []struct {
+			ID        string   `json:"id"`
+			Providers []string `json:"providers"`
+			Category  string   `json:"category"`
+			Purpose   string   `json:"purpose"`
+			Ctx       string   `json:"context"`
+			Free      bool     `json:"free"`
+			Pricing   *struct {
+				Prompt     string `json:"prompt"`
+				Completion string `json:"completion"`
+			} `json:"pricing"`
+		} `json:"models"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	byID := map[string]struct {
+		Providers []string
+		Category  string
+		Ctx       string
+		Free      bool
+		Pricing   *struct {
+			Prompt     string `json:"prompt"`
+			Completion string `json:"completion"`
+		}
+	}{}
+	for _, m := range payload.Models {
+		byID[m.ID] = struct {
+			Providers []string
+			Category  string
+			Ctx       string
+			Free      bool
+			Pricing   *struct {
+				Prompt     string `json:"prompt"`
+				Completion string `json:"completion"`
+			}
+		}{m.Providers, m.Category, m.Ctx, m.Free, m.Pricing}
+	}
+	a := byID["agnes-2.0-flash"]
+	if len(a.Providers) != 2 || !slices.Contains(a.Providers, "cat-agnes") || !slices.Contains(a.Providers, "cat-kimi") {
+		t.Fatalf("agnes-2.0-flash providers = %v, want merged [cat-agnes cat-kimi]", a.Providers)
+	}
+	if a.Category != "text" || a.Ctx != "256K" || !a.Free || a.Pricing == nil ||
+		a.Pricing.Prompt != "0" || a.Pricing.Completion != "0" {
+		t.Fatalf("agnes-2.0-flash = %+v, want text/256K/free/$0-$0", a)
+	}
+	k := byID["kimi-k2.7-code"]
+	if k.Category != "text" || k.Ctx != "256K" {
+		t.Fatalf("kimi-k2.7-code = %+v, want text/256K", k)
+	}
+	o := byID["nex-agi/nex-n2.5-mini:free"]
+	if o.Category != "text" || !o.Free {
+		t.Fatalf("nex :free = %+v, want text/free", o)
+	}
+	v := byID["brand-new-video-gen"]
+	if v.Category != "video" || v.Pricing != nil {
+		t.Fatalf("brand-new-video-gen = %+v, want inferred video/no pricing", v)
+	}
+	// mock-local 不进目录
+	for _, m := range payload.Models {
+		if m.ID == "mock-model" || m.ID == "mock-extra" {
+			t.Fatalf("mock-local model %s should be excluded", m.ID)
+		}
 	}
 }
 
