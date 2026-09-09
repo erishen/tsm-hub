@@ -128,6 +128,7 @@ llm-router/
 | `keys[]` | 自制 Key，**只存 sha256 哈希** |
 | `settings.skills_dir` | Agent Skills 技能库目录（支持相对路径）；空 = 不启用技能 |
 | `settings.agent.*` | 网关 agent（通用工具 + 服务端执行循环），见下 |
+| `settings.mcps` | 外部 MCP server（stdio），其工具以 `mcp_<server>_<tool>` 注册进网关工具池 |
 
 **网关 agent（内置通用工具）**：客户端请求**不传 `tools`** 时，网关自动附加内置工具池
 并在服务端执行 `tool_calls` 循环，最终返回答案（流式请求同样内部跑完循环后按 SSE 回放）：
@@ -154,6 +155,20 @@ llm-router/
 
 请求级开关：`X-Llm-Router-Agent: off` 请求头可对本请求关闭 agent；客户端自带
 `tools` 时网关始终尊重客户端（纯透传，不注入、不执行）。
+
+**MCP server（stdio）**：`settings.mcps` 配置后，网关启动/首请求时连接该 server，
+完成 MCP 握手并拉取工具列表，工具以 `mcp_<server>_<tool>` 命名加入 agent 工具池，
+由网关在服务端执行（懒连接 + 失败自动重建）：
+
+```json
+"mcps": {
+  "fetch": {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-fetch"]},
+  "fs":    {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]}
+}
+```
+
+工具的能力边界由你配置的 MCP server 决定（如 filesystem 可读写配置的目录）；
+当前支持 stdio 传输，SSE/streamable-HTTP 传输暂未实现。
 
 **上游 Key 不写进配置文件**：`api_key` 支持 `env:OPENAI_API_KEY` 这种引用形式，
 启动前把真实 Key 放到环境变量里即可（管理台回显会保留引用本身，不含密钥）。

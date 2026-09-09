@@ -32,6 +32,7 @@ type Proxy struct {
 	rec    *quota.Recorder
 	client *http.Client
 	skills *skills.Library
+	mcps   *mcpManager
 }
 
 // New 创建转发器。
@@ -42,6 +43,7 @@ func New(s *store.Store, rt *router.Router, h *router.Tracker, rec *quota.Record
 		health: h,
 		rec:    rec,
 		skills: sk,
+		mcps:   newMCPManager(),
 		client: &http.Client{
 			// 不用全局 Transport，避免被别的库改动；超时交给 context 控制。
 			Transport: &http.Transport{

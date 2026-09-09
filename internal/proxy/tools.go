@@ -80,18 +80,26 @@ func (p *Proxy) execTool(keyID, name string, args toolArgs) string {
 		}
 		return v
 	}
+	if strings.HasPrefix(name, "mcp_") {
+		server, tool := splitMCPToolName(name)
+		if tool == "" {
+			return fmt.Sprintf("error: bad mcp tool name %q", name)
+		}
+		return p.mcpExec(server, tool, args)
+	}
 	return fmt.Sprintf("error: unknown tool %q", name)
 }
 
-// toolSchemas 返回 OpenAI tools 参数（内置工具 + 按配置启用的条件工具）。
+// toolSchemas 返回 OpenAI tools 参数（内置工具 + 按配置启用的条件工具 + MCP 工具）。
 func (p *Proxy) toolSchemas() []map[string]any {
-	out := make([]map[string]any, 0, len(builtinTools)+1)
+	out := make([]map[string]any, 0, len(builtinTools)+2)
 	for _, n := range builtinTools {
 		out = append(out, toolSchema(n, toolDef(n)))
 	}
 	if p.store.Settings().Agent.ReadRoot != "" {
 		out = append(out, toolSchema("read_file", "读取本地文件内容（仅限白名单根目录内；目录返回其内容列表）。"))
 	}
+	out = append(out, p.mcpToolSchemas()...)
 	return out
 }
 

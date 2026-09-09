@@ -44,6 +44,16 @@ type Settings struct {
 	SkillsDir string `json:"skills_dir,omitempty"`
 	// Agent 是网关 agent 能力（内置通用工具 + 服务端执行循环）的配置。
 	Agent AgentCfg `json:"agent,omitempty"`
+	// Mcps 是外部 MCP server 配置：name → {command, args, env}（stdio 传输）。
+	// 连接后其工具以 mcp_<server>_<tool> 注册进网关工具池，由网关执行。
+	Mcps map[string]MCPServer `json:"mcps,omitempty"`
+}
+
+// MCPServer 描述一个 stdio 型 MCP server。
+type MCPServer struct {
+	Command string            `json:"command"`
+	Args    []string          `json:"args,omitempty"`
+	Env     map[string]string `json:"env,omitempty"`
 }
 
 // AgentCfg 配置网关 agent：客户端不传 tools 时，网关自动附加内置工具池
