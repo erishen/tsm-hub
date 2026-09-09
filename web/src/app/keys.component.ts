@@ -22,33 +22,53 @@ import { ApiKey, Quota } from './models';
     <!-- 外部接入说明 -->
     <div class="card">
       <h2>外部怎么连</h2>
-      <div class="form-row">
-        <div style="flex:0 0 420px">
-          <label>Base URL（OpenAI 兼容端点，网关实际地址）</label>
-          <input [(ngModel)]="baseUrl" (blur)="saveBaseUrl()" placeholder="http://localhost:9070/v1" />
-        </div>
+
+      <div class="step">
+        <div class="step-num">1</div>
         <div style="flex:1">
-          <label>认证方式</label>
-          <div class="muted" style="padding:8px 0">请求头加 <code>Authorization: Bearer &lt;你的Key&gt;</code>（<code>sk-tr-</code> 开头），与 OpenAI 完全兼容。</div>
+          <label>Base URL（OpenAI 兼容端点，网关实际地址）</label>
+          <input [(ngModel)]="baseUrl" (blur)="saveBaseUrl()" placeholder="http://localhost:9070/v1" style="max-width:520px" />
+          <div class="muted small" style="margin-top:4px">网关监听 <span class="mono">:9070</span>；本机联调默认已填好，部署到服务器时改成对外可达地址（如 <span class="mono">https://llm.example.com/v1</span>）。</div>
         </div>
       </div>
-      <div style="margin-top:10px">
-        <label>curl 示例</label>
-        <div class="code-block">
-          <button class="small" style="float:right" (click)="copy(curlExample)">{{ copied() === 'curl' ? '已复制 ✓' : '复制' }}</button>
-          <pre>{{ curlExample }}</pre>
+
+      <div class="step">
+        <div class="step-num">2</div>
+        <div style="flex:1">
+          <label>请求头认证</label>
+          <div class="code-block" style="max-width:520px">
+            <button class="small" style="float:right" (click)="copy('Authorization: Bearer <你的Key>', 'auth')">{{ copied() === 'auth' ? '已复制 ✓' : '复制' }}</button>
+            <pre>Authorization: Bearer &lt;你的Key&gt;</pre>
+          </div>
+          <div class="muted small" style="margin-top:4px">Key 以 <span class="mono">sk-tr-</span> 开头，本页签发；服务端只保存哈希。与 OpenAI 客户端完全兼容（SDK 里传 <span class="mono">api_key</span> 即可）。</div>
         </div>
       </div>
-      <div style="margin-top:10px">
-        <label>OpenAI SDK 接入</label>
-        <div class="code-block">
-          <button class="small" style="float:right" (click)="copy(pyExample)">{{ copied() === 'py' ? '已复制 ✓' : '复制' }}</button>
-          <pre>{{ pyExample }}</pre>
+
+      <div class="step">
+        <div class="step-num">3</div>
+        <div style="flex:1">
+          <label>直接复制示例跑通</label>
+          <div style="display:flex;gap:12px;flex-wrap:wrap">
+            <div style="flex:1;min-width:320px">
+              <label class="small muted" style="margin-bottom:6px">curl</label>
+              <div class="code-block">
+                <button class="small" style="float:right" (click)="copy(curlExample, 'curl')">{{ copied() === 'curl' ? '已复制 ✓' : '复制' }}</button>
+                <pre>{{ curlExample }}</pre>
+              </div>
+            </div>
+            <div style="flex:1;min-width:320px">
+              <label class="small muted" style="margin-bottom:6px">Python（OpenAI SDK）</label>
+              <div class="code-block">
+                <button class="small" style="float:right" (click)="copy(pyExample, 'py')">{{ copied() === 'py' ? '已复制 ✓' : '复制' }}</button>
+                <pre>{{ pyExample }}</pre>
+              </div>
+            </div>
+          </div>
+          <div class="muted small" style="margin-top:8px">
+            模型名填 <b>playground 候选</b>（路由别名或 Provider 模型 id）；网关自动智能分流到免费/低价家。
+            配额、禁用、过期等都在本页控制。
+          </div>
         </div>
-      </div>
-      <div class="muted small" style="margin-top:8px">
-        模型名填 <b>playground 候选</b>（路由别名或 Provider 模型 id）；网关会自动智能分流到免费/低价家。
-        配额、禁用、过期等都在本页控制。
       </div>
     </div>
 

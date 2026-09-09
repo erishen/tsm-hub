@@ -83,6 +83,25 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-sp
 td.nowrap { white-space: nowrap; }
 
 /* ---------- code block ---------- */
+.step {
+  display: flex;
+  gap: 12px;
+  margin-top: 14px;
+  align-items: flex-start;
+}
+.step-num {
+  flex: 0 0 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--accent, #4f6ef7);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 1px;
+}
 .code-block {
   position: relative;
   background: #0d1117;
