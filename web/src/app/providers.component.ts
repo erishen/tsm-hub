@@ -36,7 +36,9 @@ import { Balance, Provider, ProbeModel } from './models';
               <div class="muted">{{ p.name }}</div>
             </td>
             <td class="mono nowrap" style="max-width:300px" [title]="p.base_url">{{ shortUrl(p.base_url) }}</td>
-            <td class="nowrap" style="max-width:240px" [title]="(p.models || []).join(', ')">{{ modelsPreview(p.models) }}</td>
+            <td style="max-width:240px">
+              <div class="model-cell" [title]="(p.models || []).join(', ')">{{ modelsPreview(p.models) }}</div>
+            </td>
             <td class="num">{{ p.weight }}</td>
             <td class="num">{{ p.priority }}</td>
             <td>
@@ -205,11 +207,13 @@ export class ProvidersComponent implements OnInit {
     return u.length > 44 ? u.slice(0, 44) + '…' : u;
   }
 
-  /** 模型列表模板层截断：显示前 3 个 + “+N”，hover title 看全。 */
+  /** 模型列表模板层截断：单个模型名 >26 字符截断 + 显示前 3 个 + “+N”，hover title 看全。 */
   modelsPreview(models: string[] | undefined): string {
     const ms = models || [];
     if (!ms.length) return '—';
-    return ms.length > 3 ? ms.slice(0, 3).join(', ') + ` +${ms.length - 3}` : ms.join(', ');
+    const shown = ms.length > 3 ? ms.slice(0, 3) : ms;
+    const parts = shown.map((m) => (m.length > 26 ? m.slice(0, 26) + '…' : m));
+    return parts.join(', ') + (ms.length > 3 ? ` +${ms.length - 3}` : '');
   }
 
   startNew(): void {

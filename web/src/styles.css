@@ -313,3 +313,13 @@ button.primary:hover {
   transform: translateY(-1px);
   box-shadow: 0 6px 16px -6px rgba(37, 99, 235, .6);
 }
+
+/* Providers 模型列：最多 2 行，超出隐藏（hover title 看全） */
+.model-cell {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+  line-height: 1.45;
+}
