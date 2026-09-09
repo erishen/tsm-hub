@@ -93,10 +93,18 @@ func (p *Proxy) Handle(w http.ResponseWriter, r *http.Request, key store.APIKey,
 	if len(body) > 0 {
 		_ = json.Unmarshal(body, &req)
 	}
+	// auto：外部无脑调用——model 不传或传 "auto" 时，由网关按请求内容自动选择场景路由。
+	// 响应头 X-Llm-Router-Scene 返回实际命中的场景与信号（如 "code:写个"），便于观测。
+	if req.Model == "" || req.Model == "auto" {
+		scene, rule := router.ClassifyScene(body)
+		req.Model = scene
+		w.Header().Set("X-Llm-Router-Scene", rule)
+	}
 	if req.Model == "" {
 		return p.fail(w, started, key, req.Model, http.StatusBadRequest, "model is required")
 	}
-	if len(key.Models) > 0 && !allowsModel(key.Models, req.Model) {
+	// key 模型白名单只约束具体模型；场景路由（chat/fast/reason/code 等显式路由）对所有 key 放行。
+	if len(key.Models) > 0 && !allowsModel(key.Models, req.Model) && !p.router.HasRoute(req.Model) {
 		return p.fail(w, started, key, req.Model, http.StatusForbidden,
 			fmt.Sprintf("key is not allowed to use model %q", req.Model))
 	}

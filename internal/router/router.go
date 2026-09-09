@@ -112,8 +112,18 @@ func (r *Router) Pick(model string) ([]Candidate, error) {
 
 // resolveTargets 先查显式路由表（精确 model），再查通配兜底路由，
 // 最后回退到「provider 声明支持该模型」的隐式路由。
-func (r *Router) resolveTargets(model string) ([]store.RouteTarget, string) {
+// HasRoute 报告 model 是否命中显式路由（含通配路由之外的具名路由）。
+// 场景路由（chat/fast/reason/code）对所有 key 放行，不参与 key 模型白名单约束。
+func (r *Router) HasRoute(model string) bool {
 	for _, rt := range r.store.ListRoutes() {
+		if rt.Model == model && len(rt.Targets) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *Router) resolveTargets(model string) ([]store.RouteTarget, string) {	for _, rt := range r.store.ListRoutes() {
 		if rt.Model == model && len(rt.Targets) > 0 {
 			return rt.Targets, rt.Strategy
 		}
