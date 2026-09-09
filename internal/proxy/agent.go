@@ -396,15 +396,15 @@ func (p *Proxy) writeSSEReplay(w http.ResponseWriter, res agentResult, result Re
 		}
 	}
 
-	// 按小块回放文本，客户端逐 token 渲染。
+	// 按小块回放文本，客户端逐 token 渲染。按 rune 切，避免切碎 UTF-8 多字节字符。
 	const step = 24
-	text := res.answer
-	for i := 0; i < len(text); i += step {
+	runes := []rune(res.answer)
+	for i := 0; i < len(runes); i += step {
 		end := i + step
-		if end > len(text) {
-			end = len(text)
+		if end > len(runes) {
+			end = len(runes)
 		}
-		chunk(text[i:end], "")
+		chunk(string(runes[i:end]), "")
 	}
 	chunk("", "stop")
 	fmt.Fprintf(w, "data: [DONE]\n\n")

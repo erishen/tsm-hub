@@ -193,8 +193,6 @@ const DRAFT_KEY = 'llm-router.playground.draft';
       border-radius: 10px;
       font-size: 13px;
       line-height: 1.65;
-      max-height: 60vh;
-      overflow: auto;
       word-break: break-word;
     }
     .pg-md h1, .pg-md h2, .pg-md h3 { color: #f0f6fc; margin: 12px 0 6px; line-height: 1.3; }
