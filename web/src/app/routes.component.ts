@@ -40,6 +40,7 @@ import { Provider, Route, RouteTarget } from './models';
                 <select [(ngModel)]="form.strategy">
                   <option value="failover">failover（优先降级）</option>
                   <option value="weighted">weighted（加权分流）</option>
+                  <option value="smart">smart（成本智能）</option>
                 </select>
               </div>
             </div>

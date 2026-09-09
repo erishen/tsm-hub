@@ -40,7 +40,7 @@ export interface RouteTarget {
 
 export interface Route {
   model: string;
-  strategy: 'weighted' | 'failover';
+  strategy: 'weighted' | 'failover' | 'smart';
   targets: RouteTarget[];
   /** 备注（如「百炼免费额度优先，用完可删」等临时策略说明） */
   remark?: string;

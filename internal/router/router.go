@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/rand"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -126,7 +127,8 @@ func (r *Router) resolveTargets(model string) ([]store.RouteTarget, string) {
 			})
 		}
 	}
-	return implicit, "weighted"
+	// 隐式路由默认 smart：成本智能分流（免费/低价优先），无需为每个模型显式建路由。
+	return implicit, "smart"
 }
 
 func supportsModel(p store.Provider, model string) bool {
@@ -138,7 +140,8 @@ func supportsModel(p store.Provider, model string) bool {
 	return false
 }
 
-// order 按策略排序候选：failover 严格按 priority 升序；weighted 按延迟加权打散。
+// order 按策略排序候选：failover 严格按 priority 升序；weighted 按延迟加权打散；
+// smart 按成本智能打分（免费优先、单价低优先），健康/429 降权由健康过滤与 HalfOpen 承担。
 func (r *Router) order(cands []Candidate, strategy string) []Candidate {
 	out := append([]Candidate(nil), cands...)
 
@@ -162,12 +165,63 @@ func (r *Router) order(cands []Candidate, strategy string) []Candidate {
 		return result
 	}
 
+	if strategy == "smart" {
+		// 稳定排序：分数高的靠前；同分按 priority 升序，再按原顺序保持确定性。
+		sort.SliceStable(out, func(i, j int) bool {
+			si, sj := smartScore(out[i]), smartScore(out[j])
+			if si != sj {
+				return si > sj
+			}
+			return priorityOf(out[i]) < priorityOf(out[j])
+		})
+		return out
+	}
+
 	// weighted：所有候选同池，按「配置权重 × 延迟因子」加权随机排序。
 	pool := make([]Candidate, 0, len(out))
 	for _, prio := range priorities {
 		pool = append(pool, byPrio[prio]...)
 	}
 	return r.weightedShuffle(pool)
+}
+
+// smartScore 给候选打成本分：免费 +100（主信号），单价低加分，半开降权。
+// 定价优先取探测快照（如 OpenRouter），探测缺失时按 id 后缀规则判免费。
+func smartScore(c Candidate) int {
+	score := 0
+	var pm *store.ProbeModel
+	for i := range c.Provider.ProbeModels {
+		if c.Provider.ProbeModels[i].ID == c.UpstreamModel {
+			pm = &c.Provider.ProbeModels[i]
+			break
+		}
+	}
+	if pm == nil {
+		if strings.Contains(c.UpstreamModel, ":free") || strings.HasSuffix(c.UpstreamModel, "-free") {
+			score += 100
+		}
+	} else if pm.Free {
+		score += 100
+	}
+	if pm != nil && pm.Pricing != nil {
+		p, err := strconv.ParseFloat(pm.Pricing.Prompt, 64)
+		if err == nil {
+			switch {
+			case p <= 0:
+				score += 60
+			case p < 0.5:
+				score += 40
+			case p < 2:
+				score += 20
+			case p < 10:
+				score += 5
+			}
+		}
+	}
+	if c.HalfOpen {
+		score -= 30
+	}
+	return score
 }
 
 func priorityOf(c Candidate) int {

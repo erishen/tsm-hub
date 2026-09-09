@@ -266,3 +266,40 @@ func TestTrackerSnapshot(t *testing.T) {
 		t.Fatalf("last error = %q", byID["b"].LastError)
 	}
 }
+
+func TestPickSmartPrefersFreeAndCheap(t *testing.T) {
+	// 隐式路由（无路由表）默认 smart：免费优先，其次低价。
+	paid := p("paid", 1, 100, "m")
+	paid.ProbeModels = []store.ProbeModel{{ID: "m", Free: false, Pricing: &store.Pricing{Prompt: "5", Completion: "10"}}}
+	free := p("free", 1, 100, "m")
+	free.ProbeModels = []store.ProbeModel{{ID: "m", Free: true, Pricing: &store.Pricing{Prompt: "0", Completion: "0"}}}
+	st := newStore(t, []store.Provider{paid, free}, nil)
+	rt := New(st, NewTracker(3, 60))
+
+	cands, err := rt.Pick("m")
+	if err != nil {
+		t.Fatalf("pick: %v", err)
+	}
+	if len(cands) != 2 || cands[0].ProviderID != "free" {
+		t.Fatalf("expected free first, got %+v", cands)
+	}
+}
+
+func TestPickSmartFreeOverridesLowerPrice(t *testing.T) {
+	// 免费（探测未标记）但 id 带 :free 后缀 → 仍按免费优先于便宜付费家。
+	cheap := p("cheap", 1, 100, "other:free")
+	cheap.ProbeModels = []store.ProbeModel{{ID: "other:free", Free: false, Pricing: &store.Pricing{Prompt: "0.1", Completion: "0.2"}}}
+	// 两个 provider 声明支持 "other:free"：一个免费标记、一个 id 后缀免费
+	marked := p("marked", 1, 100, "other:free")
+	marked.ProbeModels = []store.ProbeModel{{ID: "other:free", Free: true}}
+	st := newStore(t, []store.Provider{cheap, marked}, nil)
+	rt := New(st, NewTracker(3, 60))
+
+	cands, err := rt.Pick("other:free")
+	if err != nil {
+		t.Fatalf("pick: %v", err)
+	}
+	if len(cands) != 2 || cands[0].ProviderID != "marked" {
+		t.Fatalf("expected marked (free) first, got %+v", cands)
+	}
+}
