@@ -256,10 +256,71 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 // ---------- OpenAI 兼容入口 ----------
 
+// handleClientSkills 实现 GET /v1/skills（清单）与 GET /v1/skills/{name}（全文），
+// 使用与 chat 相同的自制 key 鉴权。技能库未配置时返回空列表/404。
+func (s *Server) handleClientSkills(w http.ResponseWriter, r *http.Request, key store.APIKey) {
+	rest := strings.TrimPrefix(r.URL.Path, "/v1/skills")
+	rest = strings.Trim(rest, "/")
+	if rest == "" {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"object":  "list",
+			"dir":     s.skillsDir(),
+			"skills":  s.skillsList(),
+		})
+		return
+	}
+	if strings.Contains(rest, "/") {
+		writeError(w, http.StatusNotFound, "not_found", "skill not found")
+		return
+	}
+	if s.skills == nil {
+		writeError(w, http.StatusNotFound, "not_found", "skills library not configured")
+		return
+	}
+	d, ok := s.skills.Get(rest)
+	if !ok {
+		writeError(w, http.StatusNotFound, "not_found", "skill not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"object":      "skill",
+		"name":        d.Name,
+		"description": d.Description,
+		"has_scripts": d.HasScripts,
+		"scripts":     d.Scripts,
+		"body":        d.Body,
+		"raw":         d.Raw,
+		"updated":     d.Updated,
+	})
+}
+
+func (s *Server) skillsDir() string {
+	if s.skills == nil {
+		return ""
+	}
+	return s.skills.Dir()
+}
+
+func (s *Server) skillsList() []skills.Summary {
+	if s.skills == nil {
+		return nil
+	}
+	return s.skills.List()
+}
+
 func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/v1/models" && r.Method == http.MethodGet {
 		s.requireKey(w, r, func(w http.ResponseWriter, r *http.Request, key store.APIKey) {
 			s.handleModels(w, r, key)
+		})
+		return
+	}
+	// 客户端技能库：任意自制 key 可 GET 网关挂载的技能清单/单个技能全文。
+	// 这是"网关有技能"的可编程入口——使用方无需在本地扫描技能目录，
+	// 直接问网关要技能（与注入 system prompt 互补：注入给模型，这里给程序）。
+	if strings.HasPrefix(r.URL.Path, "/v1/skills") && r.Method == http.MethodGet {
+		s.requireKey(w, r, func(w http.ResponseWriter, r *http.Request, key store.APIKey) {
+			s.handleClientSkills(w, r, key)
 		})
 		return
 	}
