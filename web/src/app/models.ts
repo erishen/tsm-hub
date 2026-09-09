@@ -7,6 +7,14 @@ export interface Agg {
   total_tokens: number;
   cost_usd: number;
   errors: number;
+  failovers: number;
+  latency_sum_ms: number;
+}
+
+/** Agg + 派生指标（后端 toAggView 输出）。 */
+export interface AggView extends Agg {
+  avg_latency_ms: number;
+  error_rate: number;
 }
 
 export interface Quota {
@@ -96,6 +104,21 @@ export interface UsageRecord {
   stream: boolean;
   status: number;
   error?: string;
+  /** 智能分流命中的场景（chat/reason/code/fast；非 auto 为空）。 */
+  scene?: string;
+  /** 确定性快路径命中标记（方法名/plugin:xx/codegen）。 */
+  fastpath?: string;
+  /** 实际尝试的第几个候选（>1 表示发生过 failover）。 */
+  attempt?: number;
+}
+
+export interface ObservabilityResponse {
+  today: AggView;
+  week: AggView;
+  month: AggView;
+  providers: { id: string; name: string; usage: AggView }[];
+  scenes: { scene: string; usage: AggView }[];
+  trend: DailyPoint[];
 }
 
 export interface ProviderHealth {

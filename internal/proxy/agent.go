@@ -72,7 +72,7 @@ type agentResult struct {
 }
 
 // agentRun 执行工具循环。返回 true 表示已由 agent 处理（写了 w）。
-func (p *Proxy) agentRun(w http.ResponseWriter, r *http.Request, key store.APIKey, path string, body []byte, req chatRequest) (bool, Result) {
+func (p *Proxy) agentRun(w http.ResponseWriter, r *http.Request, key store.APIKey, path string, body []byte, req chatRequest, scene string) (bool, Result) {
 	started := time.Now()
 	res := agentResult{id: newID("chatcmpl")}
 
@@ -115,7 +115,12 @@ func (p *Proxy) agentRun(w http.ResponseWriter, r *http.Request, key store.APIKe
 			Status:        http.StatusOK,
 			Stream:        req.Stream,
 			Latency:       time.Since(started),
+			FastPath:      method,
+			Attempt:       1,
 		}
+		// fastpath 命中也记一笔流水（零 token 零成本），便于统计快路径命中率。
+		result.Scene = scene
+		p.account(key, req.Model, result)
 		if req.Stream {
 			p.writeSSEReplay(w, res, result)
 		} else {
@@ -157,6 +162,7 @@ func (p *Proxy) agentRun(w http.ResponseWriter, r *http.Request, key store.APIKe
 				if !req.Stream {
 					writeError(w, upStatus, "upstream_error", upRes)
 				}
+				result.Scene = scene
 				p.account(key, req.Model, result)
 				return true, result
 			}
@@ -229,11 +235,13 @@ func (p *Proxy) agentRun(w http.ResponseWriter, r *http.Request, key store.APIKe
 		result.Err = res.err
 		result.ProviderFault = true
 		p.health.ReportFailure(res.provider, res.err)
+		result.Scene = scene
 		p.account(key, req.Model, result)
 		writeError(w, http.StatusBadGateway, "upstream_unavailable", res.err)
 		return true, result
 	}
 	p.health.ReportSuccess(res.provider, time.Since(started))
+	result.Scene = scene
 	p.account(key, req.Model, result)
 
 	if req.Stream {

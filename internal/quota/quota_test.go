@@ -190,3 +190,47 @@ func TestCheckWarn(t *testing.T) {
 		t.Fatal("warn below threshold")
 	}
 }
+
+func TestRecorderObservabilityDims(t *testing.T) {
+	r := rec(t)
+	now := time.Now()
+	mk := func(providerID, scene string, status int, latencyMS int64, attempt int, errMsg string) store.UsageRecord {
+		u := recOf(now, "k1", "chat", 100, errMsg)
+		u.ProviderID = providerID
+		u.Scene = scene
+		u.LatencyMS = latencyMS
+		u.Attempt = attempt
+		u.Status = status
+		return u
+	}
+	_ = r.Record(mk("agnes", "chat", 200, 120, 1, ""))
+	_ = r.Record(mk("agnes", "chat", 200, 80, 1, ""))
+	_ = r.Record(mk("kimi", "chat", 200, 400, 2, "")) // failover 命中
+	_ = r.Record(mk("kimi", "reason", 502, 900, 3, "upstream 502"))
+
+	agn := r.Provider("agnes")
+	if agn.Requests != 2 || agn.Errors != 0 {
+		t.Fatalf("agnes agg = %+v", agn)
+	}
+	if agn.AvgLatency() != 100 {
+		t.Fatalf("agnes avg latency = %d, want 100", agn.AvgLatency())
+	}
+	kim := r.Provider("kimi")
+	if kim.Requests != 2 || kim.Errors != 1 || kim.Failovers != 2 {
+		t.Fatalf("kimi agg = %+v", kim)
+	}
+	if kim.ErrorRate() != 0.5 {
+		t.Fatalf("kimi error rate = %v, want 0.5", kim.ErrorRate())
+	}
+	chat := r.Scene("chat")
+	if chat.Requests != 3 || chat.Failovers != 1 {
+		t.Fatalf("chat scene agg = %+v", chat)
+	}
+	reason := r.Scene("reason")
+	if reason.Requests != 1 || reason.Errors != 1 {
+		t.Fatalf("reason scene agg = %+v", reason)
+	}
+	if len(r.Providers()) != 2 || len(r.Scenes()) != 2 {
+		t.Fatalf("providers=%d scenes=%d, want 2/2", len(r.Providers()), len(r.Scenes()))
+	}
+}

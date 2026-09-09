@@ -42,6 +42,7 @@ func (s *Server) adminMux() http.Handler {
 	m.HandleFunc("PATCH /api/admin/keys/{id}", s.admin(s.handleUpdateKey))
 	m.HandleFunc("DELETE /api/admin/keys/{id}", s.admin(s.handleDeleteKey))
 	m.HandleFunc("GET /api/admin/usage", s.admin(s.handleUsage))
+	m.HandleFunc("GET /api/admin/observability/overview", s.admin(s.handleObservability))
 	m.HandleFunc("GET /api/admin/health", s.admin(s.handleAdminHealth))
 	m.HandleFunc("GET /api/admin/settings", s.admin(s.handleGetSettings))
 	m.HandleFunc("POST /api/admin/settings", s.admin(s.handleUpdateSettings))
@@ -1235,6 +1236,77 @@ func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
 		"models": models,
 		"keys":   keys,
 		"recent": s.rec.Recent(limit),
+	})
+}
+
+// ---------- observability ----------
+
+// aggView 是带派生指标的用量聚合视图（平均延迟、错误率）。
+type aggView struct {
+	quota.Agg
+	AvgLatencyMS int64   `json:"avg_latency_ms"`
+	ErrorRate    float64 `json:"error_rate"`
+}
+
+func toAggView(a quota.Agg) aggView {
+	return aggView{Agg: a, AvgLatencyMS: a.AvgLatency(), ErrorRate: a.ErrorRate()}
+}
+
+// handleObservability 返回可观测性总览：总览卡片、provider 维度、场景维度、趋势。
+// 数据全部来自内存聚合（启动时回放，运行中增量），不触发任何上游查询。
+func (s *Server) handleObservability(w http.ResponseWriter, r *http.Request) {
+	days := 14
+	if v := r.URL.Query().Get("days"); v != "" {
+		if _, err := fmt.Sscanf(v, "%d", &days); err != nil || days <= 0 {
+			days = 14
+		}
+		if days > 90 {
+			days = 90
+		}
+	}
+	nameByID := map[string]string{}
+	for _, p := range s.store.ListProviders() {
+		nameByID[p.ID] = p.Name
+	}
+
+	var today, week, month quota.Agg
+	for _, dp := range s.rec.Daily(days) {
+		month = month.Add(dp.Agg)
+	}
+	for _, dp := range s.rec.Daily(7) {
+		week = week.Add(dp.Agg)
+	}
+	for _, dp := range s.rec.Daily(1) {
+		today = today.Add(dp.Agg)
+	}
+
+	provs := make([]map[string]any, 0)
+	for id, a := range s.rec.Providers() {
+		name := nameByID[id]
+		if name == "" {
+			name = id
+		}
+		provs = append(provs, map[string]any{"id": id, "name": name, "usage": toAggView(a)})
+	}
+	sort.Slice(provs, func(i, j int) bool {
+		return provs[i]["usage"].(aggView).Requests > provs[j]["usage"].(aggView).Requests
+	})
+
+	scenes := make([]map[string]any, 0)
+	for sc, a := range s.rec.Scenes() {
+		scenes = append(scenes, map[string]any{"scene": sc, "usage": toAggView(a)})
+	}
+	sort.Slice(scenes, func(i, j int) bool {
+		return scenes[i]["usage"].(aggView).Requests > scenes[j]["usage"].(aggView).Requests
+	})
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"today":     toAggView(today),
+		"week":      toAggView(week),
+		"month":     toAggView(month),
+		"providers": provs,
+		"scenes":    scenes,
+		"trend":     s.rec.Daily(days),
 	})
 }
 

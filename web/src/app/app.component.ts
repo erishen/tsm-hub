@@ -39,6 +39,7 @@ import { ApiService } from './api.service';
           <a routerLink="/balances" routerLinkActive="active">额度</a>
           <a routerLink="/models" routerLinkActive="active">模型</a>
           <a routerLink="/usage" routerLinkActive="active">用量</a>
+          <a routerLink="/observability" routerLinkActive="active">监控</a>
           <a routerLink="/skills" routerLinkActive="active">技能库</a>
           <a routerLink="/mcps" routerLinkActive="active">MCP · 工具</a>
           <a routerLink="/fastpath" routerLinkActive="active">快路径</a>

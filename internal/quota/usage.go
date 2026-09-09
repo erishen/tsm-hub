@@ -26,6 +26,10 @@ type Agg struct {
 	TotalTokens     int64   `json:"total_tokens"`
 	CostUSD         float64 `json:"cost_usd"`
 	Errors          int     `json:"errors"`
+	// Failovers 是发生过 failover（attempt>1）的请求数。
+	Failovers int `json:"failovers"`
+	// LatencySumMS 是延迟累加，平均延迟 = LatencySumMS / Requests。
+	LatencySumMS int64 `json:"latency_sum_ms"`
 }
 
 func (a *Agg) add(r store.UsageRecord) {
@@ -34,9 +38,29 @@ func (a *Agg) add(r store.UsageRecord) {
 	a.CompletionToken += int64(r.CompletionToken)
 	a.TotalTokens += int64(r.TotalTokens)
 	a.CostUSD += r.CostUSD
+	a.LatencySumMS += r.LatencyMS
+	if r.Attempt > 1 {
+		a.Failovers++
+	}
 	if r.Error != "" || r.Status >= 400 {
 		a.Errors++
 	}
+}
+
+// AvgLatency 返回平均延迟（毫秒）；无请求时返回 0。
+func (a Agg) AvgLatency() int64 {
+	if a.Requests == 0 {
+		return 0
+	}
+	return a.LatencySumMS / int64(a.Requests)
+}
+
+// ErrorRate 返回错误率（0..1）；无请求时返回 0。
+func (a Agg) ErrorRate() float64 {
+	if a.Requests == 0 {
+		return 0
+	}
+	return float64(a.Errors) / float64(a.Requests)
 }
 
 func (a Agg) Add(o Agg) Agg {
@@ -47,6 +71,8 @@ func (a Agg) Add(o Agg) Agg {
 		TotalTokens:     a.TotalTokens + o.TotalTokens,
 		CostUSD:         a.CostUSD + o.CostUSD,
 		Errors:          a.Errors + o.Errors,
+		Failovers:       a.Failovers + o.Failovers,
+		LatencySumMS:    a.LatencySumMS + o.LatencySumMS,
 	}
 }
 
@@ -59,9 +85,11 @@ type Recorder struct {
 	day    string
 	writer *bufio.Writer
 
-	totals map[string]*Agg            // keyID -> 累计
-	daily  map[string]map[string]*Agg // YYYY-MM-DD -> keyID -> 累计
-	models map[string]*Agg            // model -> 累计
+	totals    map[string]*Agg            // keyID -> 累计
+	daily     map[string]map[string]*Agg // YYYY-MM-DD -> keyID -> 累计
+	models    map[string]*Agg            // model -> 累计
+	providers map[string]*Agg            // providerID -> 累计
+	scenes    map[string]*Agg            // scene -> 累计
 }
 
 // NewRecorder 打开用量目录并回放历史（默认最近 90 天）。
@@ -70,10 +98,12 @@ func NewRecorder(dir string) (*Recorder, error) {
 		return nil, fmt.Errorf("create usage dir: %w", err)
 	}
 	r := &Recorder{
-		dir:    dir,
-		totals: map[string]*Agg{},
-		daily:  map[string]map[string]*Agg{},
-		models: map[string]*Agg{},
+		dir:       dir,
+		totals:    map[string]*Agg{},
+		daily:     map[string]map[string]*Agg{},
+		models:    map[string]*Agg{},
+		providers: map[string]*Agg{},
+		scenes:    map[string]*Agg{},
 	}
 	if err := r.replay(90); err != nil {
 		return nil, err
@@ -160,6 +190,65 @@ func (r *Recorder) accumulate(rec store.UsageRecord) {
 		r.models[rec.Model] = m
 	}
 	m.add(rec)
+
+	if rec.ProviderID != "" {
+		pr := r.providers[rec.ProviderID]
+		if pr == nil {
+			pr = &Agg{}
+			r.providers[rec.ProviderID] = pr
+		}
+		pr.add(rec)
+	}
+	if rec.Scene != "" {
+		sc := r.scenes[rec.Scene]
+		if sc == nil {
+			sc = &Agg{}
+			r.scenes[rec.Scene] = sc
+		}
+		sc.add(rec)
+	}
+}
+
+// Provider 返回某 provider 的累计用量。
+func (r *Recorder) Provider(providerID string) Agg {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if a, ok := r.providers[providerID]; ok {
+		return *a
+	}
+	return Agg{}
+}
+
+// Providers 返回全部 provider 维度的用量聚合（providerID -> Agg）。
+func (r *Recorder) Providers() map[string]Agg {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make(map[string]Agg, len(r.providers))
+	for k, v := range r.providers {
+		out[k] = *v
+	}
+	return out
+}
+
+// Scene 返回某场景的累计用量。
+func (r *Recorder) Scene(scene string) Agg {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if a, ok := r.scenes[scene]; ok {
+		return *a
+	}
+	return Agg{}
+}
+
+// Scenes 返回全部场景维度的用量聚合（scene -> Agg）。
+func (r *Recorder) Scenes() map[string]Agg {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make(map[string]Agg, len(r.scenes))
+	for k, v := range r.scenes {
+		out[k] = *v
+	}
+	return out
 }
 
 // Record 追加一条用量（先更新内存再落盘，落盘失败不影响内存态）。

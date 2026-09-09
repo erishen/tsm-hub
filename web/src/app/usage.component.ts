@@ -115,7 +115,7 @@ import { Agg, DailyPoint, UsageRecord, UsageResponse } from './models';
         <thead>
           <tr>
             <th>时间</th><th>Key</th><th>模型</th><th>Provider</th>
-            <th class="num">Tokens</th><th class="num">延迟</th><th>流式</th><th>状态</th>
+            <th class="num">Tokens</th><th class="num">延迟</th><th>流式</th><th>状态</th><th>归因</th>
           </tr>
         </thead>
         <tbody>
@@ -140,6 +140,12 @@ import { Agg, DailyPoint, UsageRecord, UsageResponse } from './models';
               </span>
               <span class="muted" style="font-size:12px;margin-left:8px;vertical-align:middle"
                     [title]="r.error" *ngIf="r.error">{{ shortErr(r.error) }}</span>
+            </td>
+            <td class="nowrap" style="max-width:240px">
+              <span class="badge ok" *ngIf="r.fastpath" title="确定性快路径">⚡ {{ r.fastpath }}</span>
+              <span class="badge" *ngIf="r.scene" [title]="'场景: ' + r.scene">{{ r.scene }}</span>
+              <span class="muted" *ngIf="r.attempt && r.attempt > 1" style="font-size:12px"
+                    [title]="'发生过 failover，实际第 ' + r.attempt + ' 个候选命中'">↻{{ r.attempt }}</span>
             </td>
           </tr>
         </tbody>
@@ -178,8 +184,10 @@ export class UsageComponent implements OnInit {
         total_tokens: acc.total_tokens + d.total_tokens,
         cost_usd: acc.cost_usd + d.cost_usd,
         errors: acc.errors + d.errors,
+        failovers: acc.failovers + d.failovers,
+        latency_sum_ms: acc.latency_sum_ms + d.latency_sum_ms,
       }),
-      { requests: 0, prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, cost_usd: 0, errors: 0 },
+      { requests: 0, prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, cost_usd: 0, errors: 0, failovers: 0, latency_sum_ms: 0 },
     );
   }
 

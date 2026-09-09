@@ -73,6 +73,12 @@ type Result struct {
 	// ModelFault 表示失败源于「该上游上模型不存在」（404 model not found）：
 	// 计入模型级不可用（路由跳过该 provider×模型），但不计入 provider 健康熔断。
 	ModelFault bool
+	// Scene 是智能分流命中的场景（chat/reason/code/fast；非 auto 为空）。
+	Scene string
+	// FastPath 是确定性快路径命中标记（方法名/plugin:xx/codegen；未命中为空）。
+	FastPath string
+	// Attempt 是本请求实际尝试的第几个候选（1=首次命中；>1 表示发生过 failover）。
+	Attempt int
 }
 
 type usageObj struct {
@@ -96,22 +102,25 @@ func (p *Proxy) Handle(w http.ResponseWriter, r *http.Request, key store.APIKey,
 	}
 	// auto：外部无脑调用——model 不传或传 "auto" 时，由网关按请求内容自动选择场景路由。
 	// 响应头 X-Llm-Router-Scene 返回实际命中的场景与信号（如 "code:写个"），便于观测。
+	scene := ""
 	if req.Model == "" || req.Model == "auto" {
-		scene, rule := router.ClassifyScene(body)
+		var rule string
+		scene, rule = router.ClassifyScene(body)
 		req.Model = scene
 		w.Header().Set("X-Llm-Router-Scene", rule)
 	}
 	if req.Model == "" {
-		return p.fail(w, started, key, req.Model, http.StatusBadRequest, "model is required")
+		return p.fail(w, started, key, req.Model, http.StatusBadRequest, "model is required", scene)
 	}
 	// key 模型白名单只约束具体模型；场景路由（chat/fast/reason/code 等显式路由）对所有 key 放行。
 	if len(key.Models) > 0 && !allowsModel(key.Models, req.Model) && !p.router.HasRoute(req.Model) {
 		return p.fail(w, started, key, req.Model, http.StatusForbidden,
-			fmt.Sprintf("key is not allowed to use model %q", req.Model))
+			fmt.Sprintf("key is not allowed to use model %q", req.Model), scene)
 	}
 	// 网关 agent：客户端不传 tools 时，自动附加内置工具并在服务端执行循环。
 	if p.agentChat(body, r) {
-		if handled, res := p.agentRun(w, r, key, path, body, req); handled {
+		if handled, res := p.agentRun(w, r, key, path, body, req, scene); handled {
+			res.Scene = scene
 			return res
 		}
 	}
@@ -119,12 +128,14 @@ func (p *Proxy) Handle(w http.ResponseWriter, r *http.Request, key store.APIKey,
 
 	cands, err := p.router.Pick(req.Model)
 	if err != nil {
-		return p.fail(w, started, key, req.Model, http.StatusBadGateway, err.Error())
+		return p.fail(w, started, key, req.Model, http.StatusBadGateway, err.Error(), scene)
 	}
 
 	var lastErr string
-	for _, c := range cands {
+	for i, c := range cands {
 		res, retryable := p.attempt(w, r, c, path, body, req)
+		res.Scene = scene
+		res.Attempt = i + 1
 		if retryable {
 			lastErr = res.Err
 			// 模型不存在是模型级问题（failover 换其他家即可），不计入 provider 健康熔断。
@@ -149,6 +160,8 @@ func (p *Proxy) Handle(w http.ResponseWriter, r *http.Request, key store.APIKey,
 		Stream:     req.Stream,
 		Latency:    time.Since(started),
 		Err:        lastErr,
+		Scene:      scene,
+		Attempt:    len(cands),
 	}
 	p.account(key, req.Model, res)
 	writeError(w, res.Status, "upstream_unavailable", orDefault(lastErr, "all upstream providers failed"))
@@ -530,12 +543,15 @@ func (p *Proxy) account(key store.APIKey, model string, res Result) {
 		Stream:          res.Stream,
 		Status:          res.Status,
 		Error:           res.Err,
+		Scene:           res.Scene,
+		FastPath:        res.FastPath,
+		Attempt:         res.Attempt,
 	})
 }
 
 // fail 写错误响应并记账。
-func (p *Proxy) fail(w http.ResponseWriter, started time.Time, key store.APIKey, model string, status int, msg string) Result {
-	res := Result{Status: status, Latency: time.Since(started), Err: msg}
+func (p *Proxy) fail(w http.ResponseWriter, started time.Time, key store.APIKey, model string, status int, msg string, scene string) Result {
+	res := Result{Status: status, Latency: time.Since(started), Err: msg, Scene: scene}
 	p.account(key, model, res)
 	writeError(w, status, httpStatusSlug(status), msg)
 	return res

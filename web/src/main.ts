@@ -13,6 +13,7 @@ import { ModelsComponent } from './app/models.component';
 import { SkillsComponent } from './app/skills.component';
 import { McpsComponent } from './app/mcps.component';
 import { FastpathComponent } from './app/fastpath.component';
+import { ObservabilityComponent } from './app/observability.component';
 
 const routes: Routes = [
   { path: '', component: DashboardComponent },
@@ -22,6 +23,7 @@ const routes: Routes = [
   { path: 'balances', component: BalancesComponent },
   { path: 'models', component: ModelsComponent },
   { path: 'usage', component: UsageComponent },
+  { path: 'observability', component: ObservabilityComponent },
   { path: 'skills', component: SkillsComponent },
   { path: 'mcps', component: McpsComponent },
   { path: 'fastpath', component: FastpathComponent },

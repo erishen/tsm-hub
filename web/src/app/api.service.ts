@@ -3,7 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { Observable, of, forkJoin, throwError } from 'rxjs';
 import { catchError, map, mergeMap, tap } from 'rxjs/operators';
 import {
-  Agg, ApiKey, Balance, CatalogModel, McpServer, Overview, ProbeModel, Provider, ProviderBalance, ProviderHealth, Quota, Route, SkillDetail, SkillSummary, ToolInfo, UsageResponse,
+  Agg, ApiKey, Balance, CatalogModel, McpServer, ObservabilityResponse, Overview, ProbeModel, Provider, ProviderBalance, ProviderHealth, Quota, Route, SkillDetail, SkillSummary, ToolInfo, UsageResponse,
 } from './models';
 
 const SESSION_KEY = 'llm-router.session';
@@ -235,6 +235,11 @@ export class ApiService {
       .pipe(catchError(this.handleError));
   }
 
+  observability(days = 14): Observable<ObservabilityResponse> {
+    return this.http.get<ObservabilityResponse>(`/api/admin/observability/overview?days=${days}`, { headers: this.headers() })
+      .pipe(catchError(this.handleError));
+  }
+
   /**
    * 一键联调：确保存在指向本机 mockupstream（:8799）的 provider，并提供一个调试用 Key。
    * 幂等：已存在的 mock-debug Key 一律先删除再新建，保证同时只有一个，且每次都能拿到明文。
@@ -303,5 +308,6 @@ export function emptyAgg(): Agg {
   return {
     requests: 0, prompt_tokens: 0, completion_tokens: 0,
     total_tokens: 0, cost_usd: 0, errors: 0,
+    failovers: 0, latency_sum_ms: 0,
   };
 }

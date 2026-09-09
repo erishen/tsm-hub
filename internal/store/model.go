@@ -260,4 +260,10 @@ type UsageRecord struct {
 	Stream          bool      `json:"stream"`
 	Status          int       `json:"status"`
 	Error           string    `json:"error,omitempty"`
+	// Scene 是智能分流命中的场景（chat/reason/code/fast；非 auto 请求为空）。
+	Scene string `json:"scene,omitempty"`
+	// FastPath 是确定性快路径命中标记（内置方法名 / plugin:<name> / codegen；未命中为空）。
+	FastPath string `json:"fastpath,omitempty"`
+	// Attempt 是本请求实际尝试的第几个候选（1=首次命中；>1 表示发生过 failover）。
+	Attempt int `json:"attempt,omitempty"`
 }
