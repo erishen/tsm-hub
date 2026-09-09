@@ -134,7 +134,7 @@ const DRAFT_KEY = 'llm-router.playground.draft';
           <span class="muted" *ngIf="m.ttfbMs != null">首字节 {{ m.ttfbMs }} ms</span>
           <span class="muted" *ngIf="m.usage">tokens {{ m.usage.prompt_tokens }}+{{ m.usage.completion_tokens }}={{ m.usage.total_tokens }}</span>
         </div>
-        <pre class="pg-pre" *ngIf="output()">{{ output() }}</pre>
+        <div class="pg-md" *ngIf="output()" [innerHTML]="renderMd(output())"></div>
         <div class="empty" *ngIf="!output() && !busy()">发送后在此显示回复</div>
         <div class="empty" *ngIf="busy()">等待上游…</div>
       </div>
@@ -186,20 +186,44 @@ const DRAFT_KEY = 'llm-router.playground.draft';
     }
     .pg-mock-head > span { font-weight: 600; font-size: 13px; }
     .small { font-size: 12px; }
-    .pg-pre {
-      white-space: pre-wrap;
-      word-break: break-word;
+    .pg-md {
       background: #0d1117;
       color: #e6edf3;
       padding: 14px;
       border-radius: 10px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
       font-size: 13px;
-      line-height: 1.6;
+      line-height: 1.65;
       max-height: 60vh;
       overflow: auto;
-      margin: 0;
+      word-break: break-word;
     }
+    .pg-md h1, .pg-md h2, .pg-md h3 { color: #f0f6fc; margin: 12px 0 6px; line-height: 1.3; }
+    .pg-md h1 { font-size: 18px; }
+    .pg-md h2 { font-size: 16px; }
+    .pg-md h3 { font-size: 14px; }
+    .pg-md p { margin: 6px 0; }
+    .pg-md code {
+      background: #1f2937; color: #f472b6; padding: 1px 5px; border-radius: 4px;
+      font-size: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .pg-md pre {
+      background: #161b22; border: 1px solid #30363d; border-radius: 8px;
+      padding: 10px 12px; overflow: auto; margin: 8px 0;
+    }
+    .pg-md pre code { background: transparent; padding: 0; color: #e6edf3; font-size: 12px; }
+    .pg-md a { color: #58a6ff; text-decoration: none; }
+    .pg-md a:hover { text-decoration: underline; }
+    .pg-md ul, .pg-md ol { margin: 6px 0; padding-left: 22px; }
+    .pg-md li { margin: 2px 0; }
+    .pg-md blockquote {
+      margin: 8px 0; padding: 4px 12px; border-left: 3px solid #30363d;
+      color: #8b949e; background: rgba(255,255,255,0.03);
+    }
+    .pg-md table { border-collapse: collapse; margin: 8px 0; width: 100%; display: block; overflow-x: auto; }
+    .pg-md th, .pg-md td { border: 1px solid #30363d; padding: 5px 10px; text-align: left; }
+    .pg-md th { background: #161b22; }
+    .pg-md hr { border: none; border-top: 1px solid #30363d; margin: 12px 0; }
+    .pg-md strong { color: #f0f6fc; }
     .pg-meta {
       display: flex;
       flex-wrap: wrap;
@@ -341,6 +365,133 @@ export class PlaygroundComponent implements OnInit {
       this.temperature = d.temperature ?? '';
       this.maxTokens = d.maxTokens ?? '';
     } catch {}
+  }
+
+  private esc(s: string): string {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  /** 行内 markdown：`code` → **bold** → *italic* → [link](url)（仅 http/https）。 */
+  private inlineMd(s: string): string {
+    const esc = this.esc(s);
+    return esc
+      .replace(/`([^`]+)`/g, '<code>$1</code>')
+      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+      .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  }
+
+  /** 轻量 Markdown 渲染（零依赖）。先整体 HTML 转义，再解析；原始 HTML 一律不可执行。 */
+  renderMd(text: string): string {
+    if (!text) return '';
+    const lines = text.replace(/\r\n/g, '\n').split('\n');
+    const out: string[] = [];
+    let i = 0;
+    let codeBuf: string[] = [];
+    let codeLang = '';
+    const flushCode = (): void => {
+      if (!codeBuf.length) return;
+      const lang = codeLang ? ' class="lang-' + this.esc(codeLang) + '"' : '';
+      out.push('<pre><code' + lang + '>' + this.esc(codeBuf.join('\n')) + '</code></pre>');
+      codeBuf = [];
+      codeLang = '';
+    };
+
+    while (i < lines.length) {
+      const line = lines[i];
+
+      // 代码块 ```lang ... ```
+      if (/^```/.test(line)) {
+        flushCode();
+        if (!codeBuf.length) {
+          codeLang = line.slice(3).trim();
+          codeBuf = [];
+          i++;
+          while (i < lines.length && !/^```/.test(lines[i])) { codeBuf.push(lines[i]); i++; }
+          i++; // 跳过闭合 ```
+          flushCode();
+        }
+        continue;
+      }
+
+      // 标题
+      const h = line.match(/^(#{1,6})\s+(.*)$/);
+      if (h) {
+        out.push('<h' + h[1].length + '>' + this.inlineMd(h[2]) + '</h' + h[1].length + '>');
+        i++;
+        continue;
+      }
+
+      // 分割线
+      if (/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) {
+        out.push('<hr>');
+        i++;
+        continue;
+      }
+
+      // 引用块
+      if (/^>\s?/.test(line)) {
+        const q: string[] = [];
+        while (i < lines.length && /^>\s?/.test(lines[i])) { q.push(lines[i].replace(/^>\s?/, '')); i++; }
+        out.push('<blockquote>' + q.map((x) => this.inlineMd(x)).join('<br>') + '</blockquote>');
+        continue;
+      }
+
+      // 表格：表头行 + 分隔行（|---|---|）
+      if (line.includes('|') && i + 1 < lines.length && /^\s*\|?[\s:|-]+\|[\s:|-]*$/.test(lines[i + 1].trim()) && lines[i + 1].includes('-')) {
+        const splitRow = (r: string): string[] =>
+          r.trim().replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
+        const heads = splitRow(line);
+        i += 2;
+        const rows: string[][] = [];
+        while (i < lines.length && lines[i].includes('|')) { rows.push(splitRow(lines[i])); i++; }
+        let t = '<table><thead><tr>';
+        heads.forEach((c) => { t += '<th>' + this.inlineMd(c) + '</th>'; });
+        t += '</tr></thead><tbody>';
+        rows.forEach((r) => {
+          t += '<tr>';
+          heads.forEach((_, k) => { t += '<td>' + this.inlineMd(r[k] ?? '') + '</td>'; });
+          t += '</tr>';
+        });
+        t += '</tbody></table>';
+        out.push(t);
+        continue;
+      }
+
+      // 无序列表
+      const ul = line.match(/^\s*[-*+]\s+(.*)$/);
+      if (ul) {
+        const items: string[] = [ul[1]];
+        i++;
+        while (i < lines.length && /^\s*[-*+]\s+/.test(lines[i])) { items.push(lines[i].replace(/^\s*[-*+]\s+/, '')); i++; }
+        out.push('<ul>' + items.map((x) => '<li>' + this.inlineMd(x) + '</li>').join('') + '</ul>');
+        continue;
+      }
+
+      // 有序列表
+      const ol = line.match(/^\s*\d+[.)]\s+(.*)$/);
+      if (ol) {
+        const items: string[] = [ol[1]];
+        i++;
+        while (i < lines.length && /^\s*\d+[.)]\s+/.test(lines[i])) { items.push(lines[i].replace(/^\s*\d+[.)]\s+/, '')); i++; }
+        out.push('<ol>' + items.map((x) => '<li>' + this.inlineMd(x) + '</li>').join('') + '</ol>');
+        continue;
+      }
+
+      // 空行
+      if (!line.trim()) { i++; continue; }
+
+      // 普通段落（连续非空行合并）
+      const para: string[] = [line];
+      i++;
+      while (i < lines.length && lines[i].trim() && !/^(#{1,6})\s|^```|^>\s?|^\s*[-*+]\s|^\s*\d+[.)]\s/.test(lines[i]) && !(lines[i].includes('|') && i + 1 < lines.length && /^\s*\|?[\s:|-]+\|[\s:|-]*$/.test(lines[i + 1].trim()) && lines[i + 1].includes('-'))) {
+        para.push(lines[i]);
+        i++;
+      }
+      out.push('<p>' + para.map((x) => this.inlineMd(x)).join('<br>') + '</p>');
+    }
+    flushCode();
+    return out.join('\n');
   }
 
   clearDraft(): void {
