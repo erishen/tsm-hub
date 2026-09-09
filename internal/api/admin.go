@@ -429,7 +429,15 @@ func (s *Server) handleProbeModels(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, info)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i]["id"].(string) < out[j]["id"].(string) })
+	// 排序：FREE 模型在前，其余按 id 字典序（免费模型更常用，置顶便于选择）。
+	sort.Slice(out, func(i, j int) bool {
+		fi, _ := out[i]["free"].(bool)
+		fj, _ := out[j]["free"].(bool)
+		if fi != fj {
+			return fi
+		}
+		return out[i]["id"].(string) < out[j]["id"].(string)
+	})
 	result := map[string]any{"models": out}
 	if bal := s.probeBalance(r.Context(), req.BaseURL, key); bal != nil {
 		result["balance"] = bal
