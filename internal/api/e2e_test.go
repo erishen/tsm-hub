@@ -964,6 +964,74 @@ func errorMessage(t *testing.T, r io.Reader) string {
 	return payload.Error.Message
 }
 
+// TestAgnesPricingFallback 验证 agnes 官方定价表回退：上游 models 不带 pricing 时，
+// 按模型 id 从静态定价表补齐（免费模型标 free）。
+func TestAgnesPricingFallback(t *testing.T) {
+	e := newEnv(t, "ok")
+	defer e.server.Close()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/models" {
+			writeMockJSON(w, map[string]any{"object": "list", "data": []any{
+				map[string]any{"id": "agnes-2.0-flash"},
+				map[string]any{"id": "agnes-2.5-pro"},
+				map[string]any{"id": "unknown-model"},
+			}})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+
+	resp := e.do(t, http.MethodPost, "/api/admin/providers/probe",
+		fmt.Sprintf(`{"base_url":%q,"api_key":"sk-x"}`, srv.URL+"/v1"), e.adminHeaders())
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	var payload struct {
+		Models []struct {
+			ID      string `json:"id"`
+			Free    bool   `json:"free"`
+			Pricing *struct {
+				Prompt     string `json:"prompt"`
+				Completion string `json:"completion"`
+			} `json:"pricing"`
+		} `json:"models"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	byID := map[string]struct {
+		Free    bool
+		Pricing *struct {
+			Prompt     string `json:"prompt"`
+			Completion string `json:"completion"`
+		}
+	}{}
+	for _, m := range payload.Models {
+		byID[m.ID] = struct {
+			Free    bool
+			Pricing *struct {
+				Prompt     string `json:"prompt"`
+				Completion string `json:"completion"`
+			}
+		}{m.Free, m.Pricing}
+	}
+	if f, ok := byID["agnes-2.0-flash"]; !ok || !f.Free || f.Pricing == nil ||
+		f.Pricing.Prompt != "0" || f.Pricing.Completion != "0" {
+		t.Fatalf("agnes-2.0-flash = %+v, want free with $0/$0", byID["agnes-2.0-flash"])
+	}
+	if p, ok := byID["agnes-2.5-pro"]; !ok || p.Pricing == nil ||
+		p.Pricing.Prompt != "0.45" || p.Pricing.Completion != "0.90" || p.Free {
+		t.Fatalf("agnes-2.5-pro = %+v, want $0.45/$0.90 not free", byID["agnes-2.5-pro"])
+	}
+	if m, ok := byID["unknown-model"]; !ok || m.Pricing != nil {
+		t.Fatalf("unknown-model = %+v, want no pricing", byID["unknown-model"])
+	}
+}
+
+// TestProbeProviderModels 验证探测上游 /v1/models：
 func TestProbeProviderModels(t *testing.T) {
 	e := newEnv(t, "ok")
 	defer e.server.Close()

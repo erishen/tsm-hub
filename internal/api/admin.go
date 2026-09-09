@@ -289,6 +289,18 @@ func isProbeRetryable(err error) bool {
 	return false
 }
 
+// agnesPricing 是 agnes 官方文本模型单价（$/1M tokens，输入/输出）。
+// 来源：https://wiki.agnes-ai.com/en/docs/pricing（官方定价页，2026-09-09 抓取）。
+// agnes 的 /v1/models 不返回价格字段，探测时按模型 id 补齐；价格变动需随官方页更新。
+// 图像/视频模型按张/秒计费，非 token 计费，不在此表。
+var agnesPricing = map[string][2]string{
+	"agnes-2.0-flash":     {"0", "0"},
+	"agnes-2.5-flash":     {"0", "0"},
+	"agnes-2.5-pro":       {"0.45", "0.90"},
+	"agnes-2.5-pro-alpha": {"0.45", "0.90"},
+	"agnes-2.5-pro-beta":  {"0.10", "0.30"},
+}
+
 // handleProbeModels 用给定的 base_url + API Key 探测上游 /v1/models，返回模型 id 列表（去重排序）。
 // 用于管理台「按 Key 查询模型」：Key 支持 env: 引用，脱敏回显值（含省略号）不参与探测。
 func (s *Server) handleProbeModels(w http.ResponseWriter, r *http.Request) {
@@ -312,22 +324,31 @@ func (s *Server) handleProbeModels(w http.ResponseWriter, r *http.Request) {
 	key := store.Provider{APIKey: req.APIKey}.ResolvedAPIKey()
 
 	// 探测是交互操作，固定 12s 单次超时（不随 default_timeout_ms 漂移）；
-	// 连接类瞬断（unexpected EOF / reset / 超时）自动重试 1 次。
-	probeOnce := func() (*http.Response, error) {
+	// 连接类瞬断（unexpected EOF / reset / 超时）与响应体截断自动重试 1 次。
+	probeOnce := func() (*http.Response, []byte, error) {
 		ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
 		defer cancel()
 		upReq, err := http.NewRequestWithContext(ctx, http.MethodGet, req.BaseURL+"/models", nil)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if key != "" {
 			upReq.Header.Set("Authorization", "Bearer "+key)
 		}
-		return http.DefaultClient.Do(upReq)
+		resp, err := http.DefaultClient.Do(upReq)
+		if err != nil {
+			return nil, nil, err
+		}
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		resp.Body.Close()
+		if readErr != nil {
+			return nil, nil, readErr
+		}
+		return resp, body, nil
 	}
-	resp, err := probeOnce()
+	resp, body, err := probeOnce()
 	if err != nil && isProbeRetryable(err) {
-		resp, err = probeOnce()
+		resp, body, err = probeOnce()
 	}
 	if err != nil {
 		note := ""
@@ -337,8 +358,6 @@ func (s *Server) handleProbeModels(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "upstream_unavailable", "无法连接上游: "+err.Error()+note)
 		return
 	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode != http.StatusOK {
 		if resp.StatusCode == http.StatusUnauthorized {
 			if key == "" {
@@ -382,11 +401,17 @@ func (s *Server) handleProbeModels(w http.ResponseWriter, r *http.Request) {
 		if m.ContextLength > 0 {
 			info["context_length"] = m.ContextLength
 		}
-		// 单价（$/1M tokens）：OpenRouter 类平台在 models 响应带 pricing 字段
+		// 单价（$/1M tokens）：OpenRouter 类平台在 models 响应带 pricing 字段；
+		// agnes 等平台不返回，则用官方定价表按模型 id 补齐（免费模型同时标 free）。
 		if m.Pricing != nil {
 			info["pricing"] = map[string]string{
 				"prompt":     m.Pricing.Prompt,
 				"completion": m.Pricing.Completion,
+			}
+		} else if pr, ok := agnesPricing[id]; ok {
+			info["pricing"] = map[string]string{"prompt": pr[0], "completion": pr[1]}
+			if pr[0] == "0" && pr[1] == "0" {
+				info["free"] = true
 			}
 		}
 		// 免费判定：显式 is_free/free 字段，或 pricing 全 0。
