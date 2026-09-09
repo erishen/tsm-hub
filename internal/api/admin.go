@@ -51,6 +51,7 @@ func (s *Server) adminMux() http.Handler {
 	m.HandleFunc("POST /api/admin/mcps/{name}", s.admin(s.handleUpsertMcp))
 	m.HandleFunc("DELETE /api/admin/mcps/{name}", s.admin(s.handleDeleteMcp))
 	m.HandleFunc("GET /api/admin/tools", s.admin(s.handleListTools))
+	m.HandleFunc("POST /api/admin/tools/invoke", s.admin(s.handleInvokeTool))
 	return m
 }
 
@@ -1328,6 +1329,27 @@ func (s *Server) handleDeleteMcp(w http.ResponseWriter, r *http.Request) {
 // handleListTools 返回网关工具池目录（内置 + 条件 + MCP）。
 func (s *Server) handleListTools(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"tools": s.proxy.ToolCatalog()})
+}
+
+// handleInvokeTool 一键测试工具：执行内置或 MCP 工具并返回结果文本。
+func (s *Server) handleInvokeTool(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name string         `json:"name"`
+		Args map[string]any `json:"args"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid json: "+err.Error())
+		return
+	}
+	if req.Name == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", "tool name required")
+		return
+	}
+	if req.Args == nil {
+		req.Args = map[string]any{}
+	}
+	result := s.proxy.InvokeTool(req.Name, req.Args)
+	writeJSON(w, http.StatusOK, map[string]any{"result": result})
 }
 
 func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {

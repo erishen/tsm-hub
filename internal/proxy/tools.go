@@ -36,19 +36,27 @@ var builtinTools = []string{"calc", "echo", "fetch_url", "get_time", "recall", "
 
 // ToolInfo 是工具池目录项（管理台 /mcps 页展示）。
 type ToolInfo struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Source      string `json:"source"` // builtin / builtin-conditional / mcp:<server>
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Source      string         `json:"source"` // builtin / builtin-conditional / mcp:<server>
+	// Parameters 是 OpenAI function parameters schema（管理台一键测试动态表单用）。
+	Parameters map[string]any `json:"parameters"`
 }
 
 // ToolCatalog 返回当前工具池目录（内置 + 条件 + MCP，MCP 触发连接）。
 func (p *Proxy) ToolCatalog() []ToolInfo {
 	out := make([]ToolInfo, 0, len(builtinTools)+4)
 	for _, n := range builtinTools {
-		out = append(out, ToolInfo{Name: n, Description: toolDef(n), Source: "builtin"})
+		s := toolSchema(n, toolDef(n))
+		fn, _ := s["function"].(map[string]any)
+		params, _ := fn["parameters"].(map[string]any)
+		out = append(out, ToolInfo{Name: n, Description: toolDef(n), Source: "builtin", Parameters: params})
 	}
 	if p.store.Settings().Agent.ReadRoot != "" {
-		out = append(out, ToolInfo{Name: "read_file", Description: "读取本地文件内容（白名单根目录内）", Source: "builtin-conditional"})
+		s := toolSchema("read_file", "读取本地文件内容（白名单根目录内）")
+		fn, _ := s["function"].(map[string]any)
+		params, _ := fn["parameters"].(map[string]any)
+		out = append(out, ToolInfo{Name: "read_file", Description: "读取本地文件内容（白名单根目录内）", Source: "builtin-conditional", Parameters: params})
 	}
 	cfg := p.store.Settings().Mcps
 	names := make([]string, 0, len(cfg))
@@ -63,10 +71,20 @@ func (p *Proxy) ToolCatalog() []ToolInfo {
 			continue
 		}
 		for _, t := range s.tools {
-			out = append(out, ToolInfo{Name: mcpToolName(name, t.Name), Description: t.Description, Source: "mcp:" + name})
+			out = append(out, ToolInfo{
+				Name:        mcpToolName(name, t.Name),
+				Description: t.Description,
+				Source:      "mcp:" + name,
+				Parameters:  cleanSchema(t.InputSchema),
+			})
 		}
 	}
 	return out
+}
+
+// InvokeTool 手动调用一个工具（管理台一键测试用，keyID 用 admin 命名空间）。
+func (p *Proxy) InvokeTool(name string, args map[string]any) string {
+	return p.execTool("admin", name, toolArgs(args))
 }
 
 // execTool 执行工具（keyID 用于 remember/recall 的隔离命名空间）。

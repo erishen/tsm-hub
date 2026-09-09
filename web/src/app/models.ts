@@ -207,4 +207,11 @@ export interface ToolInfo {
   name: string;
   description: string;
   source: string; // builtin | builtin-conditional | mcp:<server>
+  parameters?: { type?: string; properties?: Record<string, ToolParam>; required?: string[] };
+}
+
+export interface ToolParam {
+  type?: string;
+  description?: string;
+  enum?: string[];
 }

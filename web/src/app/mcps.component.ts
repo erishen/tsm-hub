@@ -74,11 +74,45 @@ import { McpServer, ToolInfo } from './models';
           <div class="tool-name">
             <span class="mono">{{ t.name }}</span>
             <span class="badge" [class.ok]="t.source.startsWith('mcp:')">{{ srcLabel(t.source) }}</span>
+            <button class="small" style="margin-left:auto" (click)="openTest(t)" *ngIf="!t.source.startsWith('mcp:') || t.parameters">测试</button>
           </div>
           <div class="muted tool-desc">{{ t.description || '（无描述）' }}</div>
         </div>
       </div>
       <ng-template #noTools><div class="empty">工具池为空</div></ng-template>
+    </div>
+
+    <!-- 测试工具弹窗 -->
+    <div class="modal-mask" *ngIf="testing()" (click)="closeTest()">
+      <div class="modal" (click)="$event.stopPropagation()">
+        <h2>测试工具 <span class="mono">{{ testing()!.name }}</span></h2>
+        <div class="sub">{{ testing()!.description }}</div>
+
+        <div *ngIf="!paramFields().length" class="muted" style="margin-top:8px">该工具无需参数。</div>
+        <ng-container *ngFor="let f of paramFields()">
+          <label>
+            {{ f.key }}<span class="req" *ngIf="f.required"> *</span>
+            <span class="muted small" *ngIf="f.desc"> — {{ f.desc }}</span>
+          </label>
+          <select *ngIf="f.enum && f.enum.length" [(ngModel)]="testArgs[f.key]">
+            <option *ngFor="let e of f.enum" [value]="e">{{ e }}</option>
+          </select>
+          <input *ngIf="!f.enum || !f.enum.length" [(ngModel)]="testArgs[f.key]"
+                 [type]="f.type === 'number' ? 'number' : 'text'"
+                 [placeholder]="f.type === 'boolean' ? 'true / false' : ''" />
+        </ng-container>
+
+        <div class="test-result" *ngIf="testResult() !== null">
+          <div class="muted small" style="margin-bottom:4px">返回结果：</div>
+          <pre>{{ testResult() }}</pre>
+        </div>
+        <div class="banner error" *ngIf="testError()">{{ testError() }}</div>
+
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+          <button (click)="closeTest()">关闭</button>
+          <button class="primary" (click)="runTest()" [disabled]="testRunning()">{{ testRunning() ? '调用中…' : '运行' }}</button>
+        </div>
+      </div>
     </div>
 
     <!-- 编辑弹窗 -->
@@ -117,6 +151,8 @@ import { McpServer, ToolInfo } from './models';
     .modal label { display:block; margin:12px 0 4px; font-size:13px; font-weight:600; }
     .modal input, .modal textarea { width:100%; box-sizing:border-box; }
     .req { color:#d33; }
+    .test-result { margin-top:12px; }
+    .test-result pre { background:#f6f5f1; border:1px solid var(--border,#e4e3dd); border-radius:8px; padding:10px; font-size:12px; white-space:pre-wrap; word-break:break-all; max-height:220px; overflow:auto; margin:0; }
   `],
 })
 export class McpsComponent implements OnInit {
@@ -125,6 +161,11 @@ export class McpsComponent implements OnInit {
   error = signal('');
   saved = signal('');
   editing = signal<{ mode: 'add' | 'edit'; server?: McpServer } | null>(null);
+  testing = signal<ToolInfo | null>(null);
+  testArgs: Record<string, string> = {};
+  testResult = signal<string | null>(null);
+  testError = signal('');
+  testRunning = signal(false);
   saving = signal(false);
   form = { name: '', command: '', argsText: '', envText: '' };
 
@@ -206,6 +247,59 @@ export class McpsComponent implements OnInit {
       error: (e) => {
         this.saving.set(false);
         this.error.set(e.error?.error?.message || '保存失败');
+      },
+    });
+  }
+
+  openTest(t: ToolInfo): void {
+    this.testError.set('');
+    this.testResult.set(null);
+    this.testing.set(t);
+    this.testArgs = {};
+    const props = t.parameters?.properties || {};
+    for (const k of Object.keys(props)) {
+      this.testArgs[k] = '';
+    }
+  }
+
+  closeTest(): void {
+    this.testing.set(null);
+  }
+
+  paramFields(): { key: string; type: string; required: boolean; desc: string; enum?: string[] }[] {
+    const t = this.testing();
+    if (!t?.parameters?.properties) return [];
+    const props = t.parameters.properties;
+    const req = new Set(t.parameters.required || []);
+    return Object.keys(props).map((k) => ({
+      key: k,
+      type: props[k].type || 'string',
+      required: req.has(k),
+      desc: props[k].description || '',
+      enum: props[k].enum,
+    }));
+  }
+
+  runTest(): void {
+    const t = this.testing();
+    if (!t) return;
+    const args: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(this.testArgs)) {
+      if (v === '') continue;
+      const f = this.paramFields().find((x) => x.key === k);
+      args[k] = f?.type === 'number' ? Number(v) : f?.type === 'boolean' ? v === 'true' : v;
+    }
+    this.testRunning.set(true);
+    this.testError.set('');
+    this.testResult.set(null);
+    this.api.invokeTool(t.name, args).subscribe({
+      next: (r) => {
+        this.testRunning.set(false);
+        this.testResult.set(r.result);
+      },
+      error: (e) => {
+        this.testRunning.set(false);
+        this.testError.set(e.error?.error?.message || '调用失败');
       },
     });
   }

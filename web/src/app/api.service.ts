@@ -174,6 +174,11 @@ export class ApiService {
       .pipe(catchError(this.handleError));
   }
 
+  invokeTool(name: string, args: Record<string, unknown>): Observable<{ result: string }> {
+    return this.http.post<{ result: string }>('/api/admin/tools/invoke', { name, args }, { headers: this.headers() })
+      .pipe(catchError(this.handleError));
+  }
+
   listKeys(): Observable<{ keys: ApiKey[] }> {
     return this.http.get<{ keys: ApiKey[] }>('/api/admin/keys', { headers: this.headers() })
       .pipe(catchError(this.handleError));
