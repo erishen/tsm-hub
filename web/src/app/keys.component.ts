@@ -35,7 +35,7 @@ import { ApiKey, Quota } from './models';
     </div>
 
     <!-- 签发弹窗 -->
-    <div class="modal-backdrop" *ngIf="creating()" (click)="cancel()">
+    <div class="modal-backdrop" *ngIf="creating()">
       <div class="modal" (click)="$event.stopPropagation()">
         <div class="modal-head">
           <div class="modal-icon">+</div>

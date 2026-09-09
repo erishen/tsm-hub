@@ -56,7 +56,7 @@ import { Balance, Provider, ProbeModel } from './models';
     </div>
 
     <!-- 编辑弹窗 -->
-    <div class="modal-backdrop" *ngIf="editing()" (click)="cancel()">
+    <div class="modal-backdrop" *ngIf="editing()">
       <div class="modal" (click)="$event.stopPropagation()">
         <div class="modal-head">
           <div class="modal-icon">{{ form.id ? '✎' : '+' }}</div>

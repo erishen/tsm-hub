@@ -20,7 +20,7 @@ import { Provider, Route, RouteTarget } from './models';
     <div class="banner error" *ngIf="error()">{{ error() }}</div>
 
     <!-- 编辑弹窗 -->
-    <div class="modal-backdrop" *ngIf="editing()" (click)="cancel()">
+    <div class="modal-backdrop" *ngIf="editing()">
       <div class="modal" (click)="$event.stopPropagation()">
         <div class="modal-head">
           <div class="modal-icon">{{ editingModel ? '✎' : '+' }}</div>
