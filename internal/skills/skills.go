@@ -4,6 +4,7 @@
 package skills
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -143,6 +144,52 @@ func (l *Library) loadSummary(name string) (Summary, bool) {
 		sum.HasAssets = true
 	}
 	return sum, true
+}
+
+// Render 构造注入 system prompt 的技能文本。mode 取值：
+//   "list" —— 技能清单（名称 + 描述），轻量，适合"你有什么技能"类问答；
+//   "all"  —— 全部技能的 SKILL.md 全文；
+//   其他   —— 单个技能名，注入该技能的 SKILL.md 全文。
+// 技能库为空、技能不存在或 mode 为空时返回 ""（调用方不注入）。
+func (l *Library) Render(mode string) string {
+	if l.dir == "" || mode == "" {
+		return ""
+	}
+	switch mode {
+	case "list":
+		list := l.List()
+		if len(list) == 0 {
+			return ""
+		}
+		var b strings.Builder
+		b.WriteString("[llm-router 技能库] 本网关挂载了以下 Agent Skills（技能名: 用途）：\n")
+		for _, s := range list {
+			fmt.Fprintf(&b, "- %s: %s\n", s.Name, s.Description)
+		}
+		b.WriteString("\n当用户要求执行某个技能时，按对应 SKILL.md 的说明执行；不确定用哪个技能时先列出清单询问。")
+		return b.String()
+	case "all":
+		list := l.List()
+		if len(list) == 0 {
+			return ""
+		}
+		var b strings.Builder
+		b.WriteString("[llm-router 技能库] 以下是网关挂载的全部技能（SKILL.md 全文，按技能执行）：\n")
+		for _, s := range list {
+			d, ok := l.Get(s.Name)
+			if !ok {
+				continue
+			}
+			fmt.Fprintf(&b, "\n===== 技能 %s =====\n%s\n", d.Name, d.Raw)
+		}
+		return b.String()
+	default:
+		d, ok := l.Get(mode)
+		if !ok {
+			return ""
+		}
+		return fmt.Sprintf("[llm-router 技能库] 技能 %s 的 SKILL.md（按此执行）：\n%s", d.Name, d.Raw)
+	}
 }
 
 // parseFrontmatter 解析 YAML frontmatter 的 name/description（Agent Skills 标准最小集）。

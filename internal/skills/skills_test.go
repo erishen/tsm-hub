@@ -96,3 +96,50 @@ func indexOf(s, sub string) int {
 	}
 	return -1
 }
+
+func TestRenderList(t *testing.T) {
+	dir := t.TempDir()
+	writeSkill(t, dir, "code-review", "---\nname: code-review\ndescription: 审查代码\n---\n\nBody.\n", "")
+	writeSkill(t, dir, "rust-review", "---\nname: rust-review\ndescription: Rust 审查\n---\n\nBody2.\n", "")
+	l := New(dir)
+	out := l.Render("list")
+	if !contains(out, "code-review: 审查代码") || !contains(out, "rust-review: Rust 审查") {
+		t.Fatalf("list render = %q", out)
+	}
+	if contains(out, "Body.") {
+		t.Fatal("list 不应包含正文")
+	}
+}
+
+func TestRenderSingle(t *testing.T) {
+	dir := t.TempDir()
+	writeSkill(t, dir, "code-review", "---\nname: code-review\ndescription: 审查代码\n---\n\n# Body\nStep 1.\n", "")
+	l := New(dir)
+	out := l.Render("code-review")
+	if !contains(out, "Step 1.") || !contains(out, "code-review") {
+		t.Fatalf("single render = %q", out)
+	}
+	if out = l.Render("no-such-skill"); out != "" {
+		t.Fatalf("unknown skill should be empty, got %q", out)
+	}
+}
+
+func TestRenderAll(t *testing.T) {
+	dir := t.TempDir()
+	writeSkill(t, dir, "a-skill", "---\nname: a-skill\ndescription: A\n---\n\nBody A.\n", "")
+	l := New(dir)
+	out := l.Render("all")
+	if !contains(out, "===== 技能 a-skill =====") || !contains(out, "Body A.") {
+		t.Fatalf("all render = %q", out)
+	}
+}
+
+func TestRenderEmpty(t *testing.T) {
+	l := New("")
+	if out := l.Render("list"); out != "" {
+		t.Fatalf("expected empty, got %q", out)
+	}
+	if out := l.Render(""); out != "" {
+		t.Fatalf("expected empty mode, got %q", out)
+	}
+}

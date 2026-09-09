@@ -161,6 +161,7 @@ export class ApiService {
 
   createKey(body: {
     name: string; models?: string[]; quota?: Partial<Quota>; expires_in_seconds?: number;
+    inject_skills?: string;
   }): Observable<{ id: string; key: string; prefix: string; warning: string }> {
     return this.http.post<{ id: string; key: string; prefix: string; warning: string }>(
       '/api/admin/keys', body, { headers: this.headers() },

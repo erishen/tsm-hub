@@ -1078,10 +1078,11 @@ func (s *Server) handleListKeys(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleCreateKey(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name      string      `json:"name"`
-		Models    []string    `json:"models"`
-		Quota     store.Quota `json:"quota"`
-		ExpiresIn int64       `json:"expires_in_seconds"`
+		Name         string      `json:"name"`
+		Models       []string    `json:"models"`
+		Quota        store.Quota `json:"quota"`
+		ExpiresIn    int64       `json:"expires_in_seconds"`
+		InjectSkills string      `json:"inject_skills"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid json: "+err.Error())
@@ -1093,14 +1094,15 @@ func (s *Server) handleCreateKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	k := store.APIKey{
-		ID:        newID(),
-		Name:      req.Name,
-		Prefix:    display,
-		Hash:      hash,
-		Enabled:   true,
-		Models:    req.Models,
-		Quota:     req.Quota,
-		CreatedAt: time.Now(),
+		ID:           newID(),
+		Name:         req.Name,
+		Prefix:       display,
+		Hash:         hash,
+		Enabled:      true,
+		Models:       req.Models,
+		Quota:        req.Quota,
+		CreatedAt:    time.Now(),
+		InjectSkills: req.InjectSkills,
 	}
 	if req.ExpiresIn > 0 {
 		k.ExpiresAt = time.Now().Add(time.Duration(req.ExpiresIn) * time.Second)

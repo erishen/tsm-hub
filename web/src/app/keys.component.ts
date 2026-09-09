@@ -2,7 +2,7 @@ import { Component, OnInit, signal, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ApiService, compact, usd } from './api.service';
-import { ApiKey, Quota } from './models';
+import { ApiKey, Quota, SkillSummary } from './models';
 
 @Component({
   selector: 'app-keys',
@@ -112,6 +112,23 @@ import { ApiKey, Quota } from './models';
               <div><label>名称</label><input [(ngModel)]="form.name" placeholder="生产环境 A" /></div>
               <div><label>允许模型（逗号分隔，留空=全部）</label><input [(ngModel)]="modelsText" placeholder="smart,fast" /></div>
             </div>
+            <div class="form-row">
+              <div>
+                <label>技能注入（可选）</label>
+                <select [(ngModel)]="injectSkills">
+                  <option value="">不注入</option>
+                  <option value="list">技能清单（轻量，用于"有啥技能"）</option>
+                  <option value="all">全部技能全文</option>
+                  <option value="__name__">指定技能</option>
+                </select>
+              </div>
+              <div *ngIf="injectSkills === '__name__'">
+                <label>选择技能</label>
+                <select [(ngModel)]="injectSkillName">
+                  <option *ngFor="let s of skillOptions()" [value]="s.name">{{ s.name }}</option>
+                </select>
+              </div>
+            </div>
           </div>
           <div class="form-section">
             <h3>配额（0 = 不限）</h3>
@@ -138,7 +155,7 @@ import { ApiKey, Quota } from './models';
       <table *ngIf="keys().length; else none">
         <thead>
           <tr>
-            <th>名称 / Prefix</th><th>状态</th><th>模型</th>
+            <th>名称 / Prefix</th><th>状态</th><th>模型</th><th>技能注入</th>
             <th class="num">用量 Tokens</th><th class="num">成本</th>
             <th class="num">RPM</th><th>剩余 / 配额</th><th>操作</th>
           </tr>
@@ -158,6 +175,10 @@ import { ApiKey, Quota } from './models';
               </div>
             </td>
             <td>{{ (k.models && k.models.length) ? k.models.join(', ') : '全部' }}</td>
+            <td>
+              <span class="muted" style="font-size:12px" *ngIf="!k.inject_skills">—</span>
+              <span *ngIf="k.inject_skills" title="技能注入：该 Key 的请求会自动携带技能上下文">{{ injectLabel(k.inject_skills) }}</span>
+            </td>
             <td class="num">{{ compact(k.usage?.total_tokens ?? 0) }}</td>
             <td class="num">{{ usd(k.usage?.cost_usd ?? 0) }}</td>
             <td class="num">{{ k.rpm_current }}/{{ k.quota.rpm || '∞' }}</td>
@@ -188,6 +209,10 @@ export class KeysComponent implements OnInit {
   modelsText = '';
   expireDays = 0;
   form: { name: string; quota: Quota } = { name: '', quota: this.blankQuota() };
+  /** 技能注入：''=不注入 | list | all | __name__(指定技能) */
+  injectSkills = '';
+  injectSkillName = '';
+  readonly skillOptions = signal<SkillSummary[]>([]);
 
   /** 对外 Base URL（OpenAI 兼容端点），默认按当前 host 推断 :9070，可改并记忆。 */
   baseUrl = '';
@@ -200,6 +225,16 @@ export class KeysComponent implements OnInit {
     const saved = localStorage.getItem(KeysComponent.BASE_URL_KEY);
     this.baseUrl = saved || `http://${window.location.hostname}:9070/v1`;
     this.load();
+    this.api.listSkills().subscribe({
+      next: (r) => this.skillOptions.set(r.skills ?? []),
+      error: () => this.skillOptions.set([]),
+    });
+  }
+
+  injectLabel(v: string): string {
+    if (v === 'list') return '技能清单';
+    if (v === 'all') return '全部技能';
+    return v;
   }
 
   saveBaseUrl(): void {
@@ -263,6 +298,8 @@ export class KeysComponent implements OnInit {
     this.form = { name: '', quota: this.blankQuota() };
     this.modelsText = '';
     this.expireDays = 0;
+    this.injectSkills = '';
+    this.injectSkillName = '';
     this.creating.set(true);
   }
 
@@ -273,11 +310,13 @@ export class KeysComponent implements OnInit {
   create(): void {
     this.saving.set(true);
     const models = this.modelsText.split(',').map((s) => s.trim()).filter(Boolean);
+    const inject = this.injectSkills === '__name__' ? this.injectSkillName : this.injectSkills;
     this.api.createKey({
       name: this.form.name,
       models: models.length ? models : undefined,
       quota: this.form.quota,
       expires_in_seconds: this.expireDays > 0 ? this.expireDays * 86400 : undefined,
+      inject_skills: inject || undefined,
     }).subscribe({
       next: (res) => {
         this.saving.set(false);
@@ -285,6 +324,8 @@ export class KeysComponent implements OnInit {
         this.creating.set(false);
         this.form = { name: '', quota: this.blankQuota() };
         this.modelsText = '';
+        this.injectSkills = '';
+        this.injectSkillName = '';
         this.load();
       },
       error: (e: Error) => {

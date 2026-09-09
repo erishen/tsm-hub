@@ -312,7 +312,45 @@ func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 	if path == "/v1" {
 		path = "/v1/chat/completions"
 	}
+	// 技能注入：key 配置了 inject_skills 时，把技能库文本注入 chat 请求的
+	// system prompt（只对 chat/completions 生效）。llm-router 由此成为
+	// "带技能的路由网关"——任意 OpenAI 兼容客户端走这里都能感知技能库。
+	if key.InjectSkills != "" && path == "/v1/chat/completions" && s.skills != nil {
+		if inj := s.skills.Render(key.InjectSkills); inj != "" {
+			if b2, err := injectSystemMessage(body, inj); err == nil {
+				body = b2
+			}
+		}
+	}
 	s.proxy.Handle(w, r, key, path, body)
+}
+
+// injectSystemMessage 把 content 作为 system 消息插入 chat body 的 messages 头部。
+// 非 JSON / 无 messages 时原样返回（不注入，交给上游报错）。
+func injectSystemMessage(body []byte, content string) ([]byte, error) {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(body, &m); err != nil {
+		return nil, err
+	}
+	raw, has := m["messages"]
+	if !has {
+		return body, nil
+	}
+	var msgs []json.RawMessage
+	if err := json.Unmarshal(raw, &msgs); err != nil {
+		return nil, err
+	}
+	sys, err := json.Marshal(map[string]string{"role": "system", "content": content})
+	if err != nil {
+		return nil, err
+	}
+	msgs = append([]json.RawMessage{sys}, msgs...)
+	enc, err := json.Marshal(msgs)
+	if err != nil {
+		return nil, err
+	}
+	m["messages"] = enc
+	return json.Marshal(m)
 }
 
 // authenticate 校验自制 Key，成功返回 Key 记录。

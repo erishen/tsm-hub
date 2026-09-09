@@ -167,6 +167,9 @@ type APIKey struct {
 	Quota     Quota     `json:"quota"`
 	CreatedAt time.Time `json:"created_at"`
 	ExpiresAt time.Time `json:"expires_at,omitempty"`
+	// InjectSkills 技能注入模式：""=不注入；"list"=技能清单；
+	// "all"=全部技能全文；其他值=单个技能名。转发 chat 请求时注入 system prompt。
+	InjectSkills string `json:"inject_skills,omitempty"`
 }
 
 // Config 是 data/config.json 的整体结构。
