@@ -26,6 +26,9 @@
 ```bash
 cd work/golang/llm-router
 
+# 0) 拉取技能库子模块（resolve-skills，管理台「技能库」页用）
+git submodule update --init --recursive
+
 # 1) 编译（含 mock 上游，用于本地联调）
 make build mock
 

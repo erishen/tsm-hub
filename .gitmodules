@@ -1,0 +1,3 @@
+[submodule "skills/resolve-skills"]
+	path = skills/resolve-skills
+	url = https://github.com/erishen/resolve-skills.git
