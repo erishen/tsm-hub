@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -91,6 +92,7 @@ func (p *Proxy) Handle(w http.ResponseWriter, r *http.Request, key store.APIKey,
 		return p.fail(w, started, key, req.Model, http.StatusForbidden,
 			fmt.Sprintf("key is not allowed to use model %q", req.Model))
 	}
+	slog.Info("chat request", "model", req.Model, "key", key.ID)
 
 	cands, err := p.router.Pick(req.Model)
 	if err != nil {
@@ -192,6 +194,15 @@ func (p *Proxy) attempt(w http.ResponseWriter, r *http.Request, c router.Candida
 		return Result{ProviderID: c.ProviderID, UpstreamModel: c.UpstreamModel, Status: resp.StatusCode,
 			Stream: req.Stream, Latency: time.Since(started),
 			Err: fmt.Sprintf("upstream %d: %s", resp.StatusCode, compact(string(b))), ProviderFault: true}, true
+	}
+
+	// 上游 4xx 直接透传；记日志便于定位（如上游 "model is not found" 是哪家、哪个模型）。
+	if resp.StatusCode >= 400 {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
+		resp.Body = io.NopCloser(bytes.NewReader(b))
+		slog.Info("upstream 4xx",
+			"provider", c.ProviderID, "model", req.Model, "upstream_model", c.UpstreamModel,
+			"status", resp.StatusCode, "body", compact(string(b)))
 	}
 
 	if req.Stream {
