@@ -248,7 +248,10 @@ export class KeysComponent implements OnInit {
       `curl ${this.baseUrl.trim()}/chat/completions \\`,
       `  -H "Authorization: Bearer <你的Key>" \\`,
       `  -H "Content-Type: application/json" \\`,
-      `  -d '{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"你好"}]}'`,
+      `  -d '{"messages":[{"role":"user","content":"你好"}]}'`,
+      ``,
+      `# 无脑调用：不传 model（或传 "auto"），网关按内容自动分流`,
+      `# chat / fast / reason / code 等场景由 llm-router 内部决策，外部无需关心`,
     ].join('\n');
   }
 
@@ -261,8 +264,9 @@ export class KeysComponent implements OnInit {
       `    api_key="<你的Key>",                # sk-tr- 开头`,
       `)`,
       ``,
+      `# 无脑调用：model 可省略或传 "auto"，网关按内容自动分流`,
       `resp = client.chat.completions.create(`,
-      `    model="deepseek-v4-flash",`,
+      `    model="auto",`,
       `    messages=[{"role": "user", "content": "你好"}],`,
       `)`,
       `print(resp.choices[0].message.content)`,

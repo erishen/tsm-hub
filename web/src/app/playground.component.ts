@@ -283,7 +283,8 @@ export class PlaygroundComponent implements OnInit {
     let pending = 3;
     const done = () => {
       if (--pending !== 0) return;
-      const arr = [...all];
+      // auto：外部无脑调用入口，恒置顶并作为默认选中（网关按内容自动分流）。
+      const arr = ['auto', ...[...all].filter((x) => x !== 'auto')];
       this.models.set(arr);
       if (!this.model && arr.length) this.model = arr[0];
     };
@@ -320,13 +321,17 @@ export class PlaygroundComponent implements OnInit {
     return (this.unavailById.get(m) ?? 0) > 0 && !this.availIds.has(m);
   }
 
-  /** 下拉候选：已配置模型 + 当前值（当前值若不在候选中则保留显示，避免选择框空白）。
+  /** 下拉候选：auto 恒置顶；已配置模型 + 当前值（当前值若不在候选中则保留显示，避免选择框空白）。
    *  全不可用的模型排除；免费模型排前面，其余保持原有顺序。 */
   selectModels(): string[] {
     const ms = this.models();
     const keep = ms.filter((m) => !this.isUnavailable(m));
     const arr = this.model && !keep.includes(this.model) ? [this.model, ...keep] : keep;
-    return [...arr].sort((a, b) => Number(this.isFree(b)) - Number(this.isFree(a)));
+    return [...arr].sort((a, b) => {
+      if (a === 'auto') return -1;
+      if (b === 'auto') return 1;
+      return Number(this.isFree(b)) - Number(this.isFree(a));
+    });
   }
 
   /** 记录一次请求结果到「最近请求」列表（最多 10 条）。 */
