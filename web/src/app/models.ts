@@ -120,6 +120,8 @@ export interface CatalogModel {
   context_length?: number;
   free: boolean;
   pricing?: { prompt: string; completion: string };
+  /** 非空表示该 Provider×模型曾被上游 404（model not found），冷却期内路由会跳过。 */
+  unavailable?: string;
 }
 
 /** 探测返回的模型元信息：上下文窗口（token 总量）与免费标记。 */
@@ -164,6 +166,8 @@ export interface Balance {
 export interface ProviderBalance {
   id: string;
   name: string;
+  /** 最近一次模型探测时间（缓存数据的新旧参考）。 */
+  probe_at?: string;
   balance?: Balance;
   error?: string;
 }

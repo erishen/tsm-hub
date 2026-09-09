@@ -58,6 +58,10 @@ func (r *Router) Pick(model string) ([]Candidate, error) {
 		if up == "" {
 			up = model
 		}
+		// 曾被上游 404 判为不存在的模型：冷却期内跳过（到期自动恢复）。
+		if _, unavail := r.store.ModelUnavailable(p.ID, up); unavail {
+			continue
+		}
 		// target 未显式配置优先级时，回落到 provider 自己的优先级。
 		prio := t.Priority
 		if prio == 0 {
@@ -168,7 +172,7 @@ func (r *Router) order(cands []Candidate, strategy string) []Candidate {
 	if strategy == "smart" {
 		// 稳定排序：分数高的靠前；同分按 priority 升序，再按原顺序保持确定性。
 		sort.SliceStable(out, func(i, j int) bool {
-			si, sj := smartScore(out[i]), smartScore(out[j])
+			si, sj := r.smartScore(out[i]), r.smartScore(out[j])
 			if si != sj {
 				return si > sj
 			}
@@ -185,9 +189,20 @@ func (r *Router) order(cands []Candidate, strategy string) []Candidate {
 	return r.weightedShuffle(pool)
 }
 
-// smartScore 给候选打成本分：免费 +100（主信号），单价低加分，半开降权。
+// smartScore 给候选打成本分：免费加分（主信号），单价低加分，半开/429 降权。
+// 权重与价格档位可经 settings.smart 配置；未配置用默认值。
 // 定价优先取探测快照（如 OpenRouter），探测缺失时按 id 后缀规则判免费。
-func smartScore(c Candidate) int {
+func (r *Router) smartScore(c Candidate) int {
+	cfg := r.store.Settings().Smart
+	freeBonus := cfg.FreeBonus
+	if freeBonus == 0 {
+		freeBonus = 100
+	}
+	halfPenalty := cfg.HalfOpenPenalty
+	if halfPenalty == 0 {
+		halfPenalty = 30
+	}
+
 	score := 0
 	var pm *store.ProbeModel
 	for i := range c.Provider.ProbeModels {
@@ -198,28 +213,37 @@ func smartScore(c Candidate) int {
 	}
 	if pm == nil {
 		if strings.Contains(c.UpstreamModel, ":free") || strings.HasSuffix(c.UpstreamModel, "-free") {
-			score += 100
+			score += freeBonus
 		}
 	} else if pm.Free {
-		score += 100
+		score += freeBonus
 	}
 	if pm != nil && pm.Pricing != nil {
 		p, err := strconv.ParseFloat(pm.Pricing.Prompt, 64)
 		if err == nil {
-			switch {
-			case p <= 0:
-				score += 60
-			case p < 0.5:
-				score += 40
-			case p < 2:
-				score += 20
-			case p < 10:
-				score += 5
+			tiers := cfg.PriceTiers
+			if len(tiers) == 0 {
+				tiers = []store.PriceTier{
+					{PromptMax: 0, Score: 60},
+					{PromptMax: 0.5, Score: 40},
+					{PromptMax: 2, Score: 20},
+					{PromptMax: 10, Score: 5},
+				}
+			}
+			for _, tier := range tiers {
+				if p <= tier.PromptMax {
+					score += tier.Score
+					break
+				}
 			}
 		}
 	}
 	if c.HalfOpen {
-		score -= 30
+		score -= halfPenalty
+	}
+	// 刚被 429 限流过的 provider 冷却期内大幅降权，优先其他家。
+	if r.health.Throttled(c.ProviderID) {
+		score -= 1000
 	}
 	return score
 }

@@ -26,6 +26,10 @@ type Store struct {
 	routes    map[string]int // model -> index in cfg.Routes
 	keys      map[string]int // key id -> index in cfg.Keys
 	keyHash   map[string]int // sha256 hex -> index in cfg.Keys
+
+	// unavailable 是「某 provider 上某模型被上游判为不可用」的运行时状态（内存，不落盘，
+	// 重启后自动恢复）。providerID -> model -> 原因+到期。
+	unavailable map[string]map[string]UnavailableModel
 }
 
 // New 打开（必要时创建）指定路径的配置。
@@ -33,7 +37,7 @@ func New(path string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, fmt.Errorf("create data dir: %w", err)
 	}
-	s := &Store{path: path}
+	s := &Store{path: path, unavailable: map[string]map[string]UnavailableModel{}}
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		s.cfg = defaultConfig()
 		if err := s.saveLocked(); err != nil {
@@ -174,6 +178,57 @@ func (s *Store) Update(fn func(c *Config) error) error {
 }
 
 // ---------- Provider ----------
+
+// MarkModelUnavailable 记录某 provider 上某模型被上游判为不可用（如 404 model not found），
+// 有效期 ttl，期间 ModelUnavailable 返回原因。仅内存态，重启后自动恢复。
+func (s *Store) MarkModelUnavailable(providerID, model, reason string, ttl time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	m := s.unavailable[providerID]
+	if m == nil {
+		m = map[string]UnavailableModel{}
+		s.unavailable[providerID] = m
+	}
+	m[model] = UnavailableModel{Reason: reason, Until: time.Now().Add(ttl)}
+}
+
+// ModelUnavailable 判断某 provider 上某模型当前是否被标记为不可用（未过期）。
+// 返回原因与 true；未标记或已过期返回 "" 与 false。
+func (s *Store) ModelUnavailable(providerID, model string) (string, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	m, ok := s.unavailable[providerID]
+	if !ok {
+		return "", false
+	}
+	u, ok := m[model]
+	if !ok || time.Now().After(u.Until) {
+		return "", false
+	}
+	return u.Reason, true
+}
+
+// UnavailableSnapshot 导出当前全部不可用模型（未过期的），供管理台展示/排查。
+func (s *Store) UnavailableSnapshot() []UnavailableModelView {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]UnavailableModelView, 0)
+	for pid, m := range s.unavailable {
+		for model, u := range m {
+			if time.Now().After(u.Until) {
+				continue
+			}
+			out = append(out, UnavailableModelView{ProviderID: pid, Model: model, Reason: u.Reason, Until: u.Until})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].ProviderID != out[j].ProviderID {
+			return out[i].ProviderID < out[j].ProviderID
+		}
+		return out[i].Model < out[j].Model
+	})
+	return out
+}
 
 func (s *Store) ListProviders() []Provider {
 	s.mu.RLock()

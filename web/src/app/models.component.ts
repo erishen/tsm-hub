@@ -50,8 +50,11 @@ const CATEGORY_LABEL: Record<string, string> = {
             <tr><th>模型</th><th>Provider</th><th>上下文</th><th>价格</th><th>用途</th></tr>
           </thead>
           <tbody>
-            <tr *ngFor="let m of byCategory()[cat]">
-              <td class="mono">{{ m.id }}</td>
+            <tr *ngFor="let m of byCategory()[cat]" [style.opacity]="m.unavailable ? 0.55 : 1">
+              <td class="mono">
+                {{ m.id }}
+                <span class="badge bad" *ngIf="m.unavailable" [title]="m.unavailable">不可用</span>
+              </td>
               <td><span class="badge ok">{{ m.provider }}</span></td>
               <td class="muted">{{ ctx(m) }}</td>
               <td>

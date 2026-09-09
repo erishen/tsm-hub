@@ -234,6 +234,7 @@ func (s *Server) handleProviderBalances(w http.ResponseWriter, r *http.Request) 
 	type item struct {
 		ID      string         `json:"id"`
 		Name    string         `json:"name"`
+		ProbeAt string         `json:"probe_at,omitempty"`
 		Balance map[string]any `json:"balance,omitempty"`
 		Error   string         `json:"error,omitempty"`
 	}
@@ -242,7 +243,11 @@ func (s *Server) handleProviderBalances(w http.ResponseWriter, r *http.Request) 
 		if p.ID == "mock-local" {
 			continue
 		}
-		out = append(out, item{ID: p.ID, Name: p.Name})
+		it := item{ID: p.ID, Name: p.Name}
+		if !p.ProbeAt.IsZero() {
+			it.ProbeAt = p.ProbeAt.Format(time.RFC3339)
+		}
+		out = append(out, it)
 	}
 	var wg sync.WaitGroup
 	for i := range out {
@@ -555,6 +560,8 @@ func (s *Server) buildCatalog() map[string]any {
 			Prompt     string `json:"prompt"`
 			Completion string `json:"completion"`
 		} `json:"pricing,omitempty"`
+		// Unavailable 非空表示该模型曾在上游 404（model not found），冷却期内标灰、路由跳过。
+		Unavailable string `json:"unavailable,omitempty"`
 	}
 	out := make([]*item, 0)
 	var latestProbe time.Time
@@ -579,6 +586,10 @@ func (s *Server) buildCatalog() map[string]any {
 				meta = inferModelMeta(id)
 			}
 			it := &item{ID: id, Provider: p.ID, Category: meta.Category, Purpose: meta.Purpose, Ctx: meta.Ctx}
+			// 曾 404 的模型：冷却期内标灰，路由自动跳过。
+			if reason, unavail := s.store.ModelUnavailable(p.ID, id); unavail {
+				it.Unavailable = reason
+			}
 			// 快照覆盖：该 Provider 最近一次探测的 context_length/free/pricing 优先于静态表。
 			if pm, ok2 := probeByID[id]; ok2 {
 				it.ContextLength = pm.ContextLength
@@ -1185,6 +1196,7 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		"fail_threshold":     st.FailThreshold,
 		"cooldown_sec":       st.CooldownSec,
 		"pricing":            st.Pricing,
+		"smart":              st.Smart,
 		"data_file":          s.store.Path(),
 		"admin_token_set":    st.AdminToken != "",
 	})
@@ -1197,6 +1209,7 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		FailThreshold    int                    `json:"fail_threshold"`
 		CooldownSec      int                    `json:"cooldown_sec"`
 		Pricing          map[string]store.Price `json:"pricing"`
+		Smart            *store.SmartScoreCfg   `json:"smart"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid json: "+err.Error())
@@ -1222,6 +1235,9 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 			for k, v := range patch.Pricing {
 				c.Settings.Pricing[k] = v
 			}
+		}
+		if patch.Smart != nil {
+			c.Settings.Smart = *patch.Smart
 		}
 		return nil
 	})

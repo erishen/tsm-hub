@@ -303,3 +303,41 @@ func TestPickSmartFreeOverridesLowerPrice(t *testing.T) {
 		t.Fatalf("expected marked (free) first, got %+v", cands)
 	}
 }
+
+func TestPickSkipsModelMarkedUnavailable(t *testing.T) {
+	// 某 provider 上模型被上游 404 标记不可用后，Pick 应跳过它（冷却期内）。
+	a := p("a", 1, 100, "m")
+	b := p("b", 1, 100, "m")
+	st := newStore(t, []store.Provider{a, b}, nil)
+	rt := New(st, NewTracker(3, 60))
+
+	st.MarkModelUnavailable("a", "m", "upstream 404 model not found", time.Hour)
+	cands, err := rt.Pick("m")
+	if err != nil {
+		t.Fatalf("pick: %v", err)
+	}
+	if len(cands) != 1 || cands[0].ProviderID != "b" {
+		t.Fatalf("expected only b (a unavailable), got %+v", cands)
+	}
+
+	// 到期后自动恢复。
+	st.MarkModelUnavailable("a", "m", "gone", -time.Minute)
+	cands, err = rt.Pick("m")
+	if err != nil {
+		t.Fatalf("pick after expiry: %v", err)
+	}
+	if len(cands) != 2 {
+		t.Fatalf("expected both after expiry, got %+v", cands)
+	}
+}
+
+func TestPickAllMarkedUnavailableErrors(t *testing.T) {
+	a := p("a", 1, 100, "m")
+	st := newStore(t, []store.Provider{a}, nil)
+	rt := New(st, NewTracker(3, 60))
+	st.MarkModelUnavailable("a", "m", "gone", time.Hour)
+
+	if _, err := rt.Pick("m"); err == nil {
+		t.Fatalf("expected error when all candidates unavailable")
+	}
+}

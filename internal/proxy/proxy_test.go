@@ -3,6 +3,9 @@ package proxy
 import (
 	"encoding/json"
 	"testing"
+	"time"
+
+	"github.com/erishen/llm-router/internal/router"
 )
 
 func TestRewriteBodySetsModel(t *testing.T) {
@@ -105,5 +108,44 @@ func TestUpstreamURL(t *testing.T) {
 		if got := upstreamURL(c.base, c.path); got != c.want {
 			t.Fatalf("upstreamURL(%q, %q) = %q, want %q", c.base, c.path, got, c.want)
 		}
+	}
+}
+
+func TestIsModelNotFound(t *testing.T) {
+	cases := []struct {
+		body string
+		want bool
+	}{
+		{`{"error":{"message":"model route not found","type":"not_found_error","code":"5"}}`, true},
+		{`{"error":{"message":"model is not found"}}`, true},
+		{`{"error":{"message":"Model 'x' does not exist"}}`, true},
+		{`{"error":{"message":"未找到模型"}}`, true},
+		{`{"error":{"message":"not found"}}`, false},        // 无 model 上下文
+		{`{"error":{"message":"insufficient permissions"}}`, false},
+		{`{"error":{"message":"the model does not exist"}}`, true},
+		{`{"error":{"message":"route not found"}}`, true},    // 含 route + not found
+	}
+	for _, c := range cases {
+		if got := isModelNotFound(c.body); got != c.want {
+			t.Errorf("isModelNotFound(%q) = %v, want %v", c.body, got, c.want)
+		}
+	}
+}
+
+func TestReportThrottleCoolsProvider(t *testing.T) {
+	h := router.NewTracker(3, 60)
+	h.ReportThrottle("p", "upstream 429", 5*time.Second)
+	if !h.Throttled("p") {
+		t.Fatalf("expected throttled")
+	}
+	if h.Available("p") {
+		t.Fatalf("expected unavailable during throttle cooldown")
+	}
+	h.ReportSuccess("p", 10*time.Millisecond)
+	if h.Throttled("p") {
+		t.Fatalf("expected not throttled after success")
+	}
+	if !h.Available("p") {
+		t.Fatalf("expected available after success")
 	}
 }

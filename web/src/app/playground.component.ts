@@ -13,6 +13,15 @@ interface PgMeta {
   usage: any;
 }
 
+interface PgRecent {
+  time: string;
+  model: string;
+  ok: boolean;
+  status: number;
+  provider: string;
+  latencyMs: number;
+}
+
 interface PgDraft {
   keyText: string;
   model: string;
@@ -130,6 +139,25 @@ const DRAFT_KEY = 'llm-router.playground.draft';
         <div class="empty" *ngIf="busy()">等待上游…</div>
       </div>
     </div>
+
+    <div class="card" style="margin-top:18px">
+      <h2>最近请求</h2>
+      <table *ngIf="recent().length; else noRecent">
+        <thead>
+          <tr><th>时间</th><th>模型</th><th>状态</th><th>Provider</th><th class="num">耗时</th></tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let r of recent()">
+            <td class="muted">{{ r.time }}</td>
+            <td class="mono">{{ r.model }}</td>
+            <td><span class="badge" [class.ok]="r.ok" [class.bad]="!r.ok">HTTP {{ r.status }}</span></td>
+            <td class="mono">{{ r.provider || '—' }}</td>
+            <td class="num">{{ r.latencyMs }} ms</td>
+          </tr>
+        </tbody>
+      </table>
+      <ng-template #noRecent><div class="empty">还没有请求记录</div></ng-template>
+    </div>
   `,
   styles: [`
     .pg-grid {
@@ -195,6 +223,11 @@ export class PlaygroundComponent implements OnInit {
   readonly models = signal<string[]>([]);
   /** 目录探测标记为免费的模型 id（免费优先排序用）。 */
   private freeIds = new Set<string>();
+  /** 目录里被上游 404 标记为不可用的模型 id → 不可用行数；availIds 是有可用行的 id。 */
+  private unavailById = new Map<string, number>();
+  private availIds = new Set<string>();
+  /** 最近请求记录（组件内，最多 10 条）。 */
+  readonly recent = signal<PgRecent[]>([]);
   readonly busy = signal(false);
   readonly output = signal('');
   readonly meta = signal<PgMeta | null>(null);
@@ -223,6 +256,8 @@ export class PlaygroundComponent implements OnInit {
   loadModels(): void {
     const all = new Set<string>();
     this.freeIds.clear();
+    this.unavailById.clear();
+    this.availIds.clear();
     let pending = 3;
     const done = () => {
       if (--pending !== 0) return;
@@ -239,9 +274,16 @@ export class PlaygroundComponent implements OnInit {
       next: (r) => (r.routes || []).forEach((rt: Route) => all.add(rt.model)),
       complete: done, error: done,
     });
-    // 模型目录快照：哪些模型当前免费（探测结果），用于下拉免费优先
+    // 模型目录快照：哪些模型当前免费（探测结果），哪些被上游 404 判为不可用（冷却期内）
     this.api.modelsCatalog().subscribe({
-      next: (r) => (r.models || []).forEach((cm) => { if (cm.free) this.freeIds.add(cm.id); }),
+      next: (r) => (r.models || []).forEach((cm) => {
+        if (cm.free) this.freeIds.add(cm.id);
+        if (cm.unavailable) {
+          this.unavailById.set(cm.id, (this.unavailById.get(cm.id) ?? 0) + 1);
+        } else {
+          this.availIds.add(cm.id);
+        }
+      }),
       complete: done, error: done,
     });
   }
@@ -251,11 +293,31 @@ export class PlaygroundComponent implements OnInit {
     return this.freeIds.has(m) || m.includes(':free');
   }
 
-  /** 下拉候选：已配置模型 + 当前值（当前值若不在候选中则保留显示，避免选择框空白）。免费模型排前面，其余保持原有顺序。 */
+  /** 不可用判定：目录里该模型的所有 provider 行都被 404 标记（至少一行为可用则保留）。 */
+  isUnavailable(m: string): boolean {
+    return (this.unavailById.get(m) ?? 0) > 0 && !this.availIds.has(m);
+  }
+
+  /** 下拉候选：已配置模型 + 当前值（当前值若不在候选中则保留显示，避免选择框空白）。
+   *  全不可用的模型排除；免费模型排前面，其余保持原有顺序。 */
   selectModels(): string[] {
     const ms = this.models();
-    const arr = this.model && !ms.includes(this.model) ? [this.model, ...ms] : ms;
+    const keep = ms.filter((m) => !this.isUnavailable(m));
+    const arr = this.model && !keep.includes(this.model) ? [this.model, ...keep] : keep;
     return [...arr].sort((a, b) => Number(this.isFree(b)) - Number(this.isFree(a)));
+  }
+
+  /** 记录一次请求结果到「最近请求」列表（最多 10 条）。 */
+  private record(status: number, provider: string, latencyMs: number): void {
+    const r: PgRecent = {
+      time: new Date().toLocaleTimeString(),
+      model: this.model || 'smart',
+      ok: status >= 200 && status < 300,
+      status,
+      provider,
+      latencyMs,
+    };
+    this.recent.update((list) => [r, ...list].slice(0, 10));
   }
 
   private saveDraft(): void {
@@ -351,12 +413,15 @@ export class PlaygroundComponent implements OnInit {
         const txt = await res.text();
         let msg = txt;
         try { const j = JSON.parse(txt); if (j?.error?.message) msg = j.error.message; } catch {}
-        this.meta.set({ ok: false, status: res.status, provider, latencyMs: Math.round(performance.now() - t0), ttfbMs: ttfb, usage: null });
+        const latency = Math.round(performance.now() - t0);
+        this.record(res.status, provider, latency);
+        this.meta.set({ ok: false, status: res.status, provider, latencyMs: latency, ttfbMs: ttfb, usage: null });
         this.errorMsg.set('请求失败 (' + res.status + '): ' + msg);
         this.busy.set(false);
         return;
       }
 
+      const latency = Math.round(performance.now() - t0);
       if (this.stream) {
         const reader = res.body!.getReader();
         const dec = new TextDecoder();
@@ -383,16 +448,20 @@ export class PlaygroundComponent implements OnInit {
             }
           }
         }
-        this.meta.set({ ok: true, status: res.status, provider, latencyMs: Math.round(performance.now() - t0), ttfbMs: ttfb, usage: this.lastUsage });
+        this.record(res.status, provider, latency);
+        this.meta.set({ ok: true, status: res.status, provider, latencyMs: latency, ttfbMs: ttfb, usage: this.lastUsage });
       } else {
         const j = await res.json();
         this.output.set(j.choices?.[0]?.message?.content ?? '');
-        this.meta.set({ ok: true, status: res.status, provider, latencyMs: Math.round(performance.now() - t0), ttfbMs: ttfb, usage: j.usage || null });
+        this.record(res.status, provider, latency);
+        this.meta.set({ ok: true, status: res.status, provider, latencyMs: latency, ttfbMs: ttfb, usage: j.usage || null });
       }
       this.saveDraft();
     } catch (e: any) {
+      const latency = Math.round(performance.now() - t0);
+      this.record(0, '', latency);
       this.errorMsg.set('网络错误: ' + (e?.message || e));
-      this.meta.set({ ok: false, status: 0, provider: '', latencyMs: Math.round(performance.now() - t0), ttfbMs: ttfb, usage: null });
+      this.meta.set({ ok: false, status: 0, provider: '', latencyMs: latency, ttfbMs: ttfb, usage: null });
     }
     this.busy.set(false);
   }

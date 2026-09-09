@@ -21,6 +21,7 @@ import { Balance, ProviderBalance } from './models';
     <div class="muted" style="margin-bottom:8px">
       <ng-container *ngIf="refreshedAt()">更新于 {{ refreshedAt() }}（缓存数据，点「刷新」查询最新）</ng-container>
       <ng-container *ngIf="!refreshedAt() && !loading()">尚未查询过，点「刷新」查询各 Provider 额度</ng-container>
+      <ng-container *ngIf="probeAt()"> · 模型/免费状态快照于 {{ probeAt() }}（探测缓存，模型目录页可更新）</ng-container>
     </div>
     <div class="banner error" *ngIf="error()">{{ error() }}</div>
 
@@ -79,6 +80,7 @@ export class BalancesComponent implements OnInit {
   readonly loading = signal(false);
   readonly error = signal('');
   readonly refreshedAt = signal('');
+  readonly probeAt = signal('');
 
   constructor(private api: ApiService) {}
 
@@ -93,6 +95,13 @@ export class BalancesComponent implements OnInit {
       next: (r) => {
         this.balances.set(r.balances);
         this.refreshedAt.set(r.at ? new Date(r.at).toLocaleTimeString() : '');
+        // 探测快照时间取所有 provider 里最新的一个（任一行有即可）。
+        const pa = (r.balances || [])
+          .map((b) => b.probe_at)
+          .filter(Boolean)
+          .sort()
+          .pop();
+        this.probeAt.set(pa ? new Date(pa).toLocaleString() : '');
         this.loading.set(false);
       },
       error: (e: Error) => {

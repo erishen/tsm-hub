@@ -24,14 +24,15 @@ type ProviderHealth struct {
 }
 
 type state struct {
-	failures  int
-	lastErr   string
-	lastOK    time.Time
-	lastFail  time.Time
-	downUntil time.Time
-	latencyMS int64 // EWMA
-	requests  int64
-	errors    int64
+	failures      int
+	lastErr       string
+	lastOK        time.Time
+	lastFail      time.Time
+	downUntil     time.Time
+	throttleUntil time.Time // 429 限流冷却到期时间
+	latencyMS     int64      // EWMA
+	requests      int64
+	errors        int64
 }
 
 // Tracker 记录所有 provider 的健康状态。
@@ -92,6 +93,7 @@ func (t *Tracker) ReportSuccess(id string, latency time.Duration) {
 	s.failures = 0
 	s.lastErr = ""
 	s.downUntil = time.Time{}
+	s.throttleUntil = time.Time{}
 	s.lastOK = time.Now()
 	s.requests++
 	ms := latency.Milliseconds()
@@ -115,6 +117,36 @@ func (t *Tracker) ReportFailure(id, errMsg string) {
 	if s.failures >= t.failMax {
 		s.downUntil = time.Now().Add(t.cool)
 	}
+}
+
+// ReportThrottle 上报一次上游 429（限流/免费额度耗尽）：
+// 立即摘除冷却 cool 秒（不等待失败阈值），期间该 provider 不再被选中，
+// 避免免费家被 429 后每次请求都先白吃一次限流再降级。
+func (t *Tracker) ReportThrottle(id, errMsg string, cool time.Duration) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	s := t.get(id)
+	s.failures++
+	s.lastErr = errMsg
+	s.lastFail = time.Now()
+	s.requests++
+	s.errors++
+	until := time.Now().Add(cool)
+	if until.After(s.downUntil) {
+		s.downUntil = until
+	}
+	s.throttleUntil = until
+}
+
+// Throttled 判断 provider 是否处于 429 冷却期。
+func (t *Tracker) Throttled(id string) bool {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	s, ok := t.states[id]
+	if !ok {
+		return false
+	}
+	return time.Now().Before(s.throttleUntil)
 }
 
 // Snapshot 导出全部健康状态，供管理台展示。

@@ -37,6 +37,45 @@ type Settings struct {
 	FailThreshold int `json:"fail_threshold"`
 	// CooldownSec 不健康 provider 的冷却期，冷却结束后进入半开探测。
 	CooldownSec int `json:"cooldown_sec"`
+	// Smart 是 smart 成本智能路由的评分参数；未配置时用代码默认值。
+	Smart SmartScoreCfg `json:"smart,omitempty"`
+}
+
+// SmartScoreCfg 是 smart 策略的可调参数。0 值表示用默认值。
+type SmartScoreCfg struct {
+	// FreeBonus 免费模型的基础加分（默认 100）。
+	FreeBonus int `json:"free_bonus"`
+	// HalfOpenPenalty 半开（刚过冷却探测期）候选的扣分（默认 30）。
+	HalfOpenPenalty int `json:"half_open_penalty"`
+	// ThrottleSec 上游 429 后的冷却秒数，期间 smart/健康过滤不选该 provider（默认 60）。
+	ThrottleSec int `json:"throttle_sec"`
+	// UnavailableSec 上游 404 模型不存在后的标记时长，期间目录/路由过滤该模型（默认 1800）。
+	UnavailableSec int `json:"unavailable_sec"`
+	// PriceTiers 单价分档加分：prompt 单价 <= PromptMax 的档得分 Score（从高到低匹配，
+	// 未配置时默认 [{0,60},{0.5,40},{2,20},{10,5}]）。
+	PriceTiers []PriceTier `json:"price_tiers,omitempty"`
+}
+
+// PriceTier 是一个单价档位。
+type PriceTier struct {
+	PromptMax float64 `json:"prompt_max"`
+	Score     int     `json:"score"`
+}
+
+// UnavailableModel 记录某个 provider 上某个模型被上游判为不可用（如 404 model not found）。
+type UnavailableModel struct {
+	// Reason 上游返回的原因摘要。
+	Reason string `json:"reason"`
+	// Until 冷却到期时间，之后自动恢复（免费/模型可能恢复上线）。
+	Until time.Time `json:"until"`
+}
+
+// UnavailableModelView 是管理台用的不可用模型视图。
+type UnavailableModelView struct {
+	ProviderID string    `json:"provider_id"`
+	Model      string    `json:"model"`
+	Reason     string    `json:"reason"`
+	Until      time.Time `json:"until"`
 }
 
 // Provider 是一个上游 LLM 服务（OpenAI / DeepSeek / 通义 / 本地 Ollama ...）。

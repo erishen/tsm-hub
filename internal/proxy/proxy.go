@@ -64,6 +64,9 @@ type Result struct {
 	// ProviderFault 表示失败源于上游服务端（网络错误或 5xx），计入健康熔断；
 	// 客户端引发的 4xx 等错误不置位，避免坏请求把健康上游拖下架。
 	ProviderFault bool
+	// ModelFault 表示失败源于「该上游上模型不存在」（404 model not found）：
+	// 计入模型级不可用（路由跳过该 provider×模型），但不计入 provider 健康熔断。
+	ModelFault bool
 }
 
 type usageObj struct {
@@ -104,7 +107,10 @@ func (p *Proxy) Handle(w http.ResponseWriter, r *http.Request, key store.APIKey,
 		res, retryable := p.attempt(w, r, c, path, body, req)
 		if retryable {
 			lastErr = res.Err
-			p.health.ReportFailure(c.ProviderID, res.Err)
+			// 模型不存在是模型级问题（failover 换其他家即可），不计入 provider 健康熔断。
+			if !res.ModelFault {
+				p.health.ReportFailure(c.ProviderID, res.Err)
+			}
 			continue
 		}
 		switch {
@@ -142,6 +148,24 @@ func orDefault(s, def string) string {
 		return def
 	}
 	return s
+}
+
+// isModelNotFound 判断上游 404 响应体是否属于「模型不存在」语义。
+// 保守匹配：必须同时出现 model 与 not found/不存在 类关键词，避免误判
+// 其他 404（如路径错误、key 权限不足等），那些仍按普通 4xx 直接透传。
+func isModelNotFound(body string) bool {
+	lower := strings.ToLower(body)
+	hasModel := strings.Contains(lower, "model") || strings.Contains(lower, "型号") ||
+		strings.Contains(lower, "route") || strings.Contains(lower, "模型")
+	if !hasModel {
+		return false
+	}
+	for _, k := range []string{"not found", "not_found", "does not exist", "not exist", "no such", "不存在", "未找到"} {
+		if strings.Contains(lower, k) {
+			return true
+		}
+	}
+	return false
 }
 
 // attempt 尝试把请求转发给某个候选。
@@ -197,8 +221,15 @@ func (p *Proxy) attempt(w http.ResponseWriter, r *http.Request, c router.Candida
 	}
 
 	// 429（限流 / 免费额度耗尽）同样可重试：换到下一候选（failover 路由会因此自动降级）。
+	// 并立即给该 provider 记 429 冷却（默认 60s），期间不再被 smart/健康过滤选中，
+	// 避免免费家限流后每次请求都先白吃一次 429。
 	if resp.StatusCode == http.StatusTooManyRequests {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
+		throttleSec := p.store.Settings().Smart.ThrottleSec
+		if throttleSec <= 0 {
+			throttleSec = 60
+		}
+		p.health.ReportThrottle(c.ProviderID, compact(string(b)), time.Duration(throttleSec)*time.Second)
 		return Result{ProviderID: c.ProviderID, UpstreamModel: c.UpstreamModel, Status: resp.StatusCode,
 			Stream: req.Stream, Latency: time.Since(started),
 			Err: fmt.Sprintf("upstream 429: %s", compact(string(b))), ProviderFault: true}, true
@@ -211,6 +242,20 @@ func (p *Proxy) attempt(w http.ResponseWriter, r *http.Request, c router.Candida
 		slog.Info("upstream 4xx",
 			"provider", c.ProviderID, "model", req.Model, "upstream_model", c.UpstreamModel,
 			"status", resp.StatusCode, "body", compact(string(b)))
+		// 404 模型不存在（model not found / model route not found 等）：标记该 provider×模型
+		// 不可用（默认 30 分钟），并把本次请求交给下一个候选——同一模型其他家可能可用，
+		// 不用等用户手动排查（如 sensenova 探测到但实际不存在的模型）。
+		if resp.StatusCode == http.StatusNotFound && isModelNotFound(string(b)) {
+			unavailSec := p.store.Settings().Smart.UnavailableSec
+			if unavailSec <= 0 {
+				unavailSec = 1800
+			}
+			p.store.MarkModelUnavailable(c.ProviderID, c.UpstreamModel, compact(string(b)), time.Duration(unavailSec)*time.Second)
+			return Result{ProviderID: c.ProviderID, UpstreamModel: c.UpstreamModel, Status: resp.StatusCode,
+				Stream: req.Stream, Latency: time.Since(started),
+				Err: fmt.Sprintf("upstream %d (model unavailable): %s", resp.StatusCode, compact(string(b))),
+				ProviderFault: true, ModelFault: true}, true
+		}
 	}
 
 	if req.Stream {
