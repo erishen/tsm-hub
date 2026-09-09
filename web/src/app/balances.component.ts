@@ -19,8 +19,8 @@ import { Balance, ProviderBalance } from './models';
     </div>
 
     <div class="muted" style="margin-bottom:8px">
-      <ng-container *ngIf="refreshedAt()">更新于 {{ refreshedAt() }}</ng-container>
-      <ng-container *ngIf="cached()">（5 分钟内缓存，点「刷新」强制更新）</ng-container>
+      <ng-container *ngIf="refreshedAt()">更新于 {{ refreshedAt() }}（缓存数据，点「刷新」查询最新）</ng-container>
+      <ng-container *ngIf="!refreshedAt() && !loading()">尚未查询过，点「刷新」查询各 Provider 额度</ng-container>
     </div>
     <div class="banner error" *ngIf="error()">{{ error() }}</div>
 
@@ -72,7 +72,6 @@ export class BalancesComponent implements OnInit {
   readonly loading = signal(false);
   readonly error = signal('');
   readonly refreshedAt = signal('');
-  readonly cached = signal(false);
 
   constructor(private api: ApiService) {}
 
@@ -86,8 +85,7 @@ export class BalancesComponent implements OnInit {
     this.api.providerBalances(force).subscribe({
       next: (r) => {
         this.balances.set(r.balances);
-        this.refreshedAt.set(new Date(r.at).toLocaleTimeString());
-        this.cached.set(!force);
+        this.refreshedAt.set(r.at ? new Date(r.at).toLocaleTimeString() : '');
         this.loading.set(false);
       },
       error: (e: Error) => {

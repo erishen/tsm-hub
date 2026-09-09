@@ -70,16 +70,34 @@ export class ApiService {
       .pipe(catchError(this.handleError));
   }
 
-  /** 批量余额缓存：5 分钟内命中直接返回，避免每次进入额度页都查询上游。 */
-  private balancesCache: { data: ProviderBalance[]; at: number } | null = null;
-  private static readonly BALANCES_TTL = 5 * 60 * 1000;
+  /** 批量余额缓存（localStorage 持久化，刷新页面后仍生效）：进入页面默认只读缓存，
+   *  不发起查询；点「刷新」才强制查询并更新缓存。 */
+  private static readonly BALANCES_KEY = 'llm-router.balances.cache.v1';
+  private get balancesCache(): { data: ProviderBalance[]; at: number } | null {
+    try {
+      const raw = localStorage.getItem(ApiService.BALANCES_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  }
+  private set balancesCache(v: { data: ProviderBalance[]; at: number } | null) {
+    try {
+      if (v) localStorage.setItem(ApiService.BALANCES_KEY, JSON.stringify(v));
+      else localStorage.removeItem(ApiService.BALANCES_KEY);
+    } catch {
+      /* localStorage 不可用时忽略，仅影响缓存 */
+    }
+  }
 
   /** 批量查询所有 Provider 已存 Key 的账户余额/额度（供额度页使用，无 Key 项标记 no_key）。
-   *  force=true 强制绕过缓存（刷新按钮）；返回 at=数据获取时间戳。 */
+   *  force=false 只读缓存：有缓存返回缓存、无缓存返回空（at=0，不请求上游）；
+   *  force=true 强制查询并更新缓存（刷新按钮）。返回 at=数据获取时间戳。 */
   providerBalances(force = false): Observable<{ balances: ProviderBalance[]; at: number }> {
     const c = this.balancesCache;
-    if (!force && c && Date.now() - c.at < ApiService.BALANCES_TTL) {
-      return of({ balances: c.data, at: c.at });
+    if (!force) {
+      if (c) return of({ balances: c.data, at: c.at });
+      return of({ balances: [], at: 0 });
     }
     return this.http.get<{ balances: ProviderBalance[] }>('/api/admin/providers/balances', { headers: this.headers() })
       .pipe(

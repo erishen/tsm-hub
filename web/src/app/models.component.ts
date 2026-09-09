@@ -34,8 +34,8 @@ const CATEGORY_LABEL: Record<string, string> = {
       <span class="muted small">共 {{ models().length }} 个模型 · {{ freeCount() }} 个免费</span>
     </div>
     <div class="muted" style="margin-bottom:8px">
-      <ng-container *ngIf="probeAt()">免费/价格状态基于最近一次探测（{{ probeAt() }}），上游会动态调整，重新探测可刷新</ng-container>
-      <ng-container *ngIf="!probeAt()">尚未探测过，免费/价格来自静态知识表（可能过时）；去 Providers 按 Key 查询可刷新</ng-container>
+      <ng-container *ngIf="probeAt()">免费/价格状态来自最近一次探测（{{ probeAt() }}，缓存数据），点「重新探测」更新</ng-container>
+      <ng-container *ngIf="!probeAt() && !loading()">尚未探测过，点「重新探测」获取实时免费/价格/上下文</ng-container>
     </div>
     <div class="banner error" *ngIf="error()">{{ error() }}</div>
 
@@ -126,10 +126,21 @@ export class ModelsComponent implements OnInit {
   constructor(private api: ApiService) {}
 
   ngOnInit(): void {
-    this.load();
+    // 默认只读缓存快照，不发起上游探测；点「重新探测」才实时查询。
+    this.api.modelsCatalog().subscribe({
+      next: (r) => {
+        this.models.set(r.models);
+        if (r.probe_at) this.probeAt.set(new Date(r.probe_at).toLocaleString());
+        this.loading.set(false);
+      },
+      error: (e: Error) => {
+        this.loading.set(false);
+        this.error.set(e.message);
+      },
+    });
   }
 
-  /** 进入页面自动重新探测所有 Provider（并行、15s 内完成），失败项不阻塞；点按钮可手动重试。 */
+  /** 手动重新探测所有 Provider（并行、15s 内完成），失败项不阻塞。 */
   load(): void {
     this.loading.set(true);
     this.error.set('');
