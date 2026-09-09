@@ -75,6 +75,7 @@ interface FastPlugin { name: string; trigger: string; source: string; promoted: 
   `,
   styles: [`
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+    .row { display:flex; align-items:center; gap:10px; }
     .tag { display:inline-block; padding:2px 8px; border-radius:10px; background:#f0f0f0; font-size:12px; }
     .tag.green { background:#e6f7e9; color:#2e7d32; }
     .code { background:#1e1e1e; color:#d4d4d4; padding:10px; border-radius:8px; font-size:12px; overflow-x:auto; white-space:pre-wrap; }

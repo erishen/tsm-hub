@@ -83,7 +83,7 @@ import { McpServer, ToolInfo } from './models';
     </div>
 
     <!-- 测试工具弹窗 -->
-    <div class="modal-mask" *ngIf="testing()" (click)="closeTest()">
+    <div class="modal-backdrop" *ngIf="testing()" (click)="closeTest()">
       <div class="modal" (click)="$event.stopPropagation()">
         <h2>测试工具 <span class="mono">{{ testing()!.name }}</span></h2>
         <div class="sub">{{ testing()!.description }}</div>
@@ -116,7 +116,7 @@ import { McpServer, ToolInfo } from './models';
     </div>
 
     <!-- 编辑弹窗 -->
-    <div class="modal-mask" *ngIf="editing()" (click)="closeEdit()">
+    <div class="modal-backdrop" *ngIf="editing()" (click)="closeEdit()">
       <div class="modal" (click)="$event.stopPropagation()">
         <h2>{{ editing()!.mode === 'edit' ? '编辑 MCP Server' : '添加 MCP Server' }}</h2>
         <div class="sub" *ngIf="editing()!.mode === 'edit'">修改后立即重建连接，配置持久化到 settings.mcps</div>
@@ -160,8 +160,7 @@ import { McpServer, ToolInfo } from './models';
     .tool-card { border:1px solid var(--border,#e4e3dd); border-radius:10px; padding:10px 12px; }
     .tool-name { display:flex; align-items:center; gap:8px; font-weight:600; }
     .tool-desc { margin-top:4px; font-size:12px; line-height:1.45; }
-    .modal-mask { position:fixed; inset:0; background:rgba(0,0,0,.35); display:flex; align-items:center; justify-content:center; z-index:100; }
-    .modal { background:#fff; border-radius:14px; padding:20px 22px; width:440px; max-width:92vw; max-height:86vh; overflow:auto; }
+    .modal { overflow-y:auto; }
     .modal label { display:block; margin:12px 0 4px; font-size:13px; font-weight:600; }
     .modal input, .modal textarea { width:100%; box-sizing:border-box; }
     .req { color:#d33; }
