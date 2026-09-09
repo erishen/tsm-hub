@@ -110,7 +110,7 @@ import { Agg, DailyPoint, UsageRecord, UsageResponse } from './models';
     </div>
 
     <div class="card">
-      <h2>最近请求</h2>
+      <h2>最近请求 <span class="muted" style="font-weight:400;font-size:12px">（{{ data()?.recent?.length ?? 0 }} 条，倒序）</span></h2>
       <table *ngIf="data() && data()!.recent.length; else none4">
         <thead>
           <tr>
@@ -119,16 +119,20 @@ import { Agg, DailyPoint, UsageRecord, UsageResponse } from './models';
           </tr>
         </thead>
         <tbody>
-          <tr *ngFor="let r of data()!.recent">
+          <tr *ngFor="let r of data()!.recent"
+              [class.err-row]="r.status >= 400 || !!r.error">
             <td class="mono nowrap">{{ r.ts | date:'MM-dd HH:mm:ss' }}</td>
             <td class="mono nowrap">{{ r.key_id }}</td>
-            <td class="mono nowrap" style="max-width:220px" [title]="r.model">{{ r.model }}</td>
-            <td class="mono muted nowrap" style="max-width:240px"
+            <td class="mono nowrap" style="max-width:200px" [title]="r.model">
+              <ng-container *ngIf="r.model === '*'">* <span class="muted" style="font-size:12px">通配</span></ng-container>
+              <ng-container *ngIf="r.model !== '*'">{{ r.model }}</ng-container>
+            </td>
+            <td class="mono muted nowrap" style="max-width:230px"
                 [title]="r.provider_id + (r.upstream_model ? ' → ' + r.upstream_model : '')">
               {{ r.provider_id }}<span *ngIf="r.upstream_model"> → {{ r.upstream_model }}</span>
             </td>
             <td class="num nowrap">{{ r.total_tokens }}</td>
-            <td class="num nowrap">{{ r.latency_ms }} ms</td>
+            <td class="num nowrap" [class.slow]="r.latency_ms >= 3000">{{ r.latency_ms }} ms</td>
             <td class="nowrap">{{ r.stream ? '是' : '否' }}</td>
             <td class="nowrap">
               <span class="badge" [class.bad]="r.status >= 400 || !!r.error" [class.ok]="r.status < 400 && !r.error">

@@ -81,6 +81,10 @@ th { color: var(--muted); font-weight: 600; font-size: 12px; background: #fafbfc
 tbody tr:hover { background: #fbfcfd; }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 td.nowrap { white-space: nowrap; }
+/* 最近请求：失败行浅红底、慢请求橙字 */
+tbody tr.err-row td { background: #fef4f4; }
+tbody tr.err-row:hover td { background: #fdeaea; }
+td.slow { color: #d97706; font-weight: 600; }
 
 /* ---------- code block ---------- */
 /* 路由弹窗候选行：grid 固定列，行内不换行 */
