@@ -84,7 +84,7 @@ function rateClass(rate: number): string {
           <tr>
             <th>Provider</th><th class="num">请求</th><th class="num">错误率</th>
             <th class="num">平均延迟</th><th class="num">Tokens</th>
-            <th class="num">成本</th><th class="num">failover</th>
+            <th class="num">成本</th><th class="num">failover</th><th class="num">被跳过</th>
           </tr>
         </thead>
         <tbody>
@@ -96,6 +96,10 @@ function rateClass(rate: number): string {
             <td class="num">{{ compact(p.usage.total_tokens) }}</td>
             <td class="num">{{ usd(p.usage.cost_usd) }}</td>
             <td class="num">{{ p.usage.failovers }}</td>
+            <td class="num">
+              <span [class.bad]="p.skipped > 0" *ngIf="p.skipped" class="badge" title="作为 failover 失败候选被跳过的次数（稳定性反向指标）">{{ p.skipped }}</span>
+              <span *ngIf="!p.skipped" class="muted">0</span>
+            </td>
           </tr>
         </tbody>
       </table>

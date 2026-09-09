@@ -1248,6 +1248,23 @@ type aggView struct {
 	ErrorRate    float64 `json:"error_rate"`
 }
 
+// validProviderID 判定 provider id 是否为合法 id（历史 bug 曾把上游错误体写进
+// provider_id，此类记录无法归因，聚合展示时跳过）。
+func validProviderID(id string) bool {
+	if id == "" || len(id) > 64 {
+		return false
+	}
+	for _, c := range id {
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9',
+			c == '-', c == '_', c == '.':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 func toAggView(a quota.Agg) aggView {
 	return aggView{Agg: a, AvgLatencyMS: a.AvgLatency(), ErrorRate: a.ErrorRate()}
 }
@@ -1280,13 +1297,21 @@ func (s *Server) handleObservability(w http.ResponseWriter, r *http.Request) {
 		today = today.Add(dp.Agg)
 	}
 
+	failoverBy := s.rec.FailoverBy()
 	provs := make([]map[string]any, 0)
 	for id, a := range s.rec.Providers() {
+		if !validProviderID(id) {
+			continue // 历史坏数据（错误体被写入 provider_id），无归因价值
+		}
 		name := nameByID[id]
 		if name == "" {
 			name = id
 		}
-		provs = append(provs, map[string]any{"id": id, "name": name, "usage": toAggView(a)})
+		provs = append(provs, map[string]any{
+			"id": id, "name": name, "usage": toAggView(a),
+			// 作为 failover 失败候选被跳过的次数（稳定性反向指标）。
+			"skipped": failoverBy[id],
+		})
 	}
 	sort.Slice(provs, func(i, j int) bool {
 		return provs[i]["usage"].(aggView).Requests > provs[j]["usage"].(aggView).Requests

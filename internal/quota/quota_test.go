@@ -234,3 +234,26 @@ func TestRecorderObservabilityDims(t *testing.T) {
 		t.Fatalf("providers=%d scenes=%d, want 2/2", len(r.Providers()), len(r.Scenes()))
 	}
 }
+
+func TestRecorderFailoverBy(t *testing.T) {
+	r := rec(t)
+	now := time.Now()
+	mk := func(providerID string, attempt int, chain ...string) store.UsageRecord {
+		u := recOf(now, "k1", "chat", 10, "")
+		u.ProviderID = providerID
+		u.Attempt = attempt
+		for _, p := range chain {
+			u.Failover = append(u.Failover, store.FailoverStep{ProviderID: p, Error: "boom"})
+		}
+		return u
+	}
+	// agnes 两次被跳过（首候选失败换 kimi），kimi 一次被跳过（换 sensenova）。
+	_ = r.Record(mk("kimi", 2, "agnes"))
+	_ = r.Record(mk("sensenova", 2, "kimi"))
+	_ = r.Record(mk("agnes", 3, "agnes", "kimi"))
+
+	by := r.FailoverBy()
+	if by["agnes"] != 2 || by["kimi"] != 2 || by["sensenova"] != 0 {
+		t.Fatalf("failoverBy = %+v, want agnes=2 kimi=2 sensenova=0", by)
+	}
+}

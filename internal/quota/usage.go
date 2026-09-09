@@ -90,6 +90,8 @@ type Recorder struct {
 	models    map[string]*Agg            // model -> 累计
 	providers map[string]*Agg            // providerID -> 累计
 	scenes    map[string]*Agg            // scene -> 累计
+	// failoverBy 统计每个 provider 作为 failover 失败候选被跳过的次数（稳定性反向指标）。
+	failoverBy map[string]int
 }
 
 // NewRecorder 打开用量目录并回放历史（默认最近 90 天）。
@@ -98,12 +100,13 @@ func NewRecorder(dir string) (*Recorder, error) {
 		return nil, fmt.Errorf("create usage dir: %w", err)
 	}
 	r := &Recorder{
-		dir:       dir,
-		totals:    map[string]*Agg{},
-		daily:     map[string]map[string]*Agg{},
-		models:    map[string]*Agg{},
-		providers: map[string]*Agg{},
-		scenes:    map[string]*Agg{},
+		dir:        dir,
+		totals:     map[string]*Agg{},
+		daily:      map[string]map[string]*Agg{},
+		models:     map[string]*Agg{},
+		providers:  map[string]*Agg{},
+		scenes:     map[string]*Agg{},
+		failoverBy: map[string]int{},
 	}
 	if err := r.replay(90); err != nil {
 		return nil, err
@@ -207,6 +210,21 @@ func (r *Recorder) accumulate(rec store.UsageRecord) {
 		}
 		sc.add(rec)
 	}
+	// failover 链：被跳过的候选计为该 provider 的稳定性负分。
+	for _, f := range rec.Failover {
+		r.failoverBy[f.ProviderID]++
+	}
+}
+
+// FailoverBy 返回每个 provider 作为 failover 失败候选被跳过的次数。
+func (r *Recorder) FailoverBy() map[string]int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make(map[string]int, len(r.failoverBy))
+	for k, v := range r.failoverBy {
+		out[k] = v
+	}
+	return out
 }
 
 // Provider 返回某 provider 的累计用量。

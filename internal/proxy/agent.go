@@ -151,25 +151,25 @@ func (p *Proxy) agentRun(w http.ResponseWriter, r *http.Request, key store.APIKe
 			res.err = fmt.Sprintf("tool loop exceeded %d rounds", maxRounds)
 			break
 		}
-		upBody, upRes, upStatus, ok := p.agentRound(r, key, path, req.Model, msgs)
+		upBody, upProvider, upErr, upStatus, ok := p.agentRound(r, key, path, req.Model, msgs)
 		if !ok {
 			// 上游 4xx：原样透传给客户端（不 502、不换候选）。
 			if upStatus > 0 {
 				result := Result{
-					ProviderID: upRes, Status: upStatus, Stream: req.Stream,
-					Latency: time.Since(started), Err: "upstream " + upRes,
+					ProviderID: upProvider, Status: upStatus, Stream: req.Stream,
+					Latency: time.Since(started), Err: "upstream " + upErr,
 				}
 				if !req.Stream {
-					writeError(w, upStatus, "upstream_error", upRes)
+					writeError(w, upStatus, "upstream_error", upErr)
 				}
 				result.Scene = scene
 				p.account(key, req.Model, result)
 				return true, result
 			}
-			res.err = upRes
+			res.err = upErr
 			break
 		}
-		res.provider = upRes
+		res.provider = upProvider
 		res.rounds = round
 		// 解析上游响应
 		call, finalText, usage, parseErr := parseAgentResponse(upBody)
@@ -287,24 +287,28 @@ func lastUserText(msgs []chatMessage) string {
 // agentRound 对上游发起一轮非流式请求（带工具 schema），返回上游响应体。
 // ok=false 时 err 非空；status=0 表示可重试（网络/5xx/429），status>0 表示
 // 客户端级错误（4xx），直接透传不换候选。
-func (p *Proxy) agentRound(r *http.Request, key store.APIKey, path, model string, msgs []chatMessage) ([]byte, string, int, bool) {
+// agentRound 走候选链做一轮上游补全。
+// 返回 (body, providerID, errText, status, ok)：ok=true 表示 body 有效；
+// status>0 表示上游 4xx（应原样透传），providerID 为该候选的真实 id；
+// 其他失败时 errText 描述原因。
+func (p *Proxy) agentRound(r *http.Request, key store.APIKey, path, model string, msgs []chatMessage) ([]byte, string, string, int, bool) {
 	cands, err := p.router.Pick(model)
 	if err != nil {
-		return nil, err.Error(), 0, false
+		return nil, "", err.Error(), 0, false
 	}
 	var lastErr string
 	for _, c := range cands {
 		body, errMsg, status := p.agentUpstream(r, c, path, msgs)
 		if status > 0 {
-			return nil, errMsg, status, false
+			return nil, c.ProviderID, errMsg, status, false
 		}
 		if errMsg != "" {
 			lastErr = errMsg
 			continue
 		}
-		return body, c.ProviderID, 0, true
+		return body, c.ProviderID, "", 0, true
 	}
-	return nil, orDefault(lastErr, "all upstream providers failed"), 0, false
+	return nil, "", orDefault(lastErr, "all upstream providers failed"), 0, false
 }
 
 // agentUpstream 构造并发送一轮上游请求（非流式）。

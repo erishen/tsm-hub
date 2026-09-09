@@ -131,7 +131,7 @@ export interface ObservabilityResponse {
   today: AggView;
   week: AggView;
   month: AggView;
-  providers: { id: string; name: string; usage: AggView }[];
+  providers: { id: string; name: string; usage: AggView; skipped: number }[];
   scenes: { scene: string; usage: AggView }[];
   trend: DailyPoint[];
 }
