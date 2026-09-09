@@ -34,37 +34,49 @@ import { Provider, Route, RouteTarget } from './models';
           <div class="form-section">
             <h3>映射</h3>
             <div class="form-row">
-              <div><label>对外模型名（留空 = 通配兜底）</label><input [(ngModel)]="form.model" placeholder="留空：任何未路由的模型都走它" /></div>
               <div>
+                <label>对外模型名 <span class="muted" style="font-weight:400">（留空 = 通配兜底）</span></label>
+                <input [(ngModel)]="form.model" placeholder="留空：任何未路由的模型都走它" />
+              </div>
+              <div style="flex:0 0 220px">
                 <label>策略</label>
                 <select [(ngModel)]="form.strategy">
+                  <option value="smart">smart（成本智能）</option>
                   <option value="failover">failover（优先降级）</option>
                   <option value="weighted">weighted（加权分流）</option>
-                  <option value="smart">smart（成本智能）</option>
                 </select>
               </div>
             </div>
             <div>
-              <label>备注（可选，如「百炼免费额度优先，用完可删」）</label>
-              <input [(ngModel)]="form.remark" placeholder="临时策略说明…" />
+              <label>备注（可选）</label>
+              <input [(ngModel)]="form.remark" placeholder="如：百炼免费额度优先，用完可删" />
             </div>
           </div>
 
           <div class="form-section">
-            <h3>候选</h3>
-            <div class="inline-form" *ngFor="let t of form.targets; let i = index">
-              <div style="flex:2 1 200px">
+            <h3>候选 <span class="muted" style="font-weight:400">（按尝试顺序，免费/低价优先自动靠前）</span></h3>
+            <div class="route-target-row" *ngFor="let t of form.targets; let i = index">
+              <div class="rt-provider">
                 <label>Provider</label>
                 <select [(ngModel)]="t.provider_id">
                   <option *ngFor="let p of providers()" [ngValue]="p.id">{{ p.id }} — {{ p.name }}</option>
                 </select>
               </div>
-              <div><label>上游模型（留空沿用）</label><input [(ngModel)]="t.model" placeholder="gpt-4o" /></div>
-              <div style="flex:0 0 90px"><label>权重</label><input type="number" [(ngModel)]="t.weight" /></div>
-              <div style="flex:0 0 90px"><label>优先级</label><input type="number" [(ngModel)]="t.priority" /></div>
-              <button class="danger" (click)="removeTarget(i)">移除</button>
+              <div class="rt-model">
+                <label>上游模型 <span class="muted" style="font-weight:400">（留空沿用）</span></label>
+                <input [(ngModel)]="t.model" placeholder="同请求模型" />
+              </div>
+              <div class="rt-num">
+                <label>权重</label>
+                <input type="number" [(ngModel)]="t.weight" />
+              </div>
+              <div class="rt-num">
+                <label>优先级</label>
+                <input type="number" [(ngModel)]="t.priority" />
+              </div>
+              <button class="danger rt-del" (click)="removeTarget(i)">移除</button>
             </div>
-            <button class="ghost" style="margin-top:8px" (click)="addTarget()">+ 候选</button>
+            <button class="ghost" style="margin-top:4px" (click)="addTarget()">+ 候选</button>
           </div>
         </div>
         <div class="modal-foot">

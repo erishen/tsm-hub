@@ -83,6 +83,22 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-sp
 td.nowrap { white-space: nowrap; }
 
 /* ---------- code block ---------- */
+/* 路由弹窗候选行：grid 固定列，行内不换行 */
+.route-target-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.5fr) minmax(160px, 1.3fr) 76px 76px 60px;
+  gap: 10px;
+  align-items: end;
+  margin-bottom: 10px;
+}
+.route-target-row .rt-num input { text-align: right; }
+.route-target-row .rt-del { height: 34px; margin: 0; }
+@media (max-width: 640px) {
+  .route-target-row {
+    grid-template-columns: 1fr 1fr;
+    align-items: stretch;
+  }
+}
 .step {
   display: flex;
   gap: 12px;
