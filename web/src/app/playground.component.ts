@@ -70,7 +70,7 @@ const DRAFT_KEY = 'llm-router.playground.draft';
             <div style="display:flex;gap:8px">
               <select [(ngModel)]="model" style="flex:1">
                 <option value="" disabled *ngIf="!model">选择模型…</option>
-                <option *ngFor="let m of selectModels()" [ngValue]="m">{{ m }}</option>
+                <option *ngFor="let m of selectModels()" [ngValue]="m">{{ m }}{{ isFree(m) ? ' (FREE)' : '' }}</option>
               </select>
               <button type="button" class="small" (click)="loadModels()" title="重新拉取 Providers 与路由的模型列表">刷新</button>
             </div>
@@ -193,6 +193,8 @@ export class PlaygroundComponent implements OnInit {
   maxTokens: any = '';
 
   readonly models = signal<string[]>([]);
+  /** 目录探测标记为免费的模型 id（免费优先排序用）。 */
+  private freeIds = new Set<string>();
   readonly busy = signal(false);
   readonly output = signal('');
   readonly meta = signal<PgMeta | null>(null);
@@ -220,7 +222,8 @@ export class PlaygroundComponent implements OnInit {
 
   loadModels(): void {
     const all = new Set<string>();
-    let pending = 2;
+    this.freeIds.clear();
+    let pending = 3;
     const done = () => {
       if (--pending !== 0) return;
       const arr = [...all];
@@ -236,12 +239,23 @@ export class PlaygroundComponent implements OnInit {
       next: (r) => (r.routes || []).forEach((rt: Route) => all.add(rt.model)),
       complete: done, error: done,
     });
+    // 模型目录快照：哪些模型当前免费（探测结果），用于下拉免费优先
+    this.api.modelsCatalog().subscribe({
+      next: (r) => (r.models || []).forEach((cm) => { if (cm.free) this.freeIds.add(cm.id); }),
+      complete: done, error: done,
+    });
   }
 
-  /** 下拉候选：已配置模型 + 当前值（当前值若不在候选中则保留显示，避免选择框空白）。 */
+  /** 免费判定：目录探测标记 free，或模型 id 带 :free 后缀（全局规则）。 */
+  isFree(m: string): boolean {
+    return this.freeIds.has(m) || m.includes(':free');
+  }
+
+  /** 下拉候选：已配置模型 + 当前值（当前值若不在候选中则保留显示，避免选择框空白）。免费模型排前面，其余保持原有顺序。 */
   selectModels(): string[] {
     const ms = this.models();
-    return this.model && !ms.includes(this.model) ? [this.model, ...ms] : ms;
+    const arr = this.model && !ms.includes(this.model) ? [this.model, ...ms] : ms;
+    return [...arr].sort((a, b) => Number(this.isFree(b)) - Number(this.isFree(a)));
   }
 
   private saveDraft(): void {
