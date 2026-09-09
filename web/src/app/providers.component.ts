@@ -1,4 +1,4 @@
-import { Component, OnInit, signal, HostListener } from '@angular/core';
+import { Component, OnInit, signal, computed, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from './api.service';
@@ -104,8 +104,10 @@ import { Balance, Provider, ProbeModel } from './models';
             </div>
             <div *ngIf="probeModels().length" style="margin-top:10px">
               <div class="muted small" style="margin-bottom:6px">上游实际提供的模型（多选，勾选自动写入上方输入框）</div>
+              <input type="search" placeholder="搜索模型（按 id 过滤）…" [(ngModel)]="probeQuery"
+                     style="width:100%;padding:5px 10px;margin-bottom:8px;box-sizing:border-box" />
               <div style="display:flex;flex-wrap:wrap;gap:6px;max-height:150px;overflow-y:auto">
-                <label *ngFor="let m of probeModels()"
+                <label *ngFor="let m of probeFiltered()"
                        style="display:inline-flex;align-items:center;gap:4px;flex-shrink:0;white-space:nowrap;
                               padding:3px 10px;border:1px solid var(--border-color);
                               border-radius:999px;background:rgba(0,0,0,0.025);font-size:12px;cursor:pointer">
@@ -116,6 +118,7 @@ import { Balance, Provider, ProbeModel } from './models';
                   <span class="badge free" *ngIf="m.free">FREE</span>
                 </label>
               </div>
+              <div class="muted small" *ngIf="probeQuery().trim()" style="margin-top:4px">匹配 {{ probeFiltered().length }}/{{ probeModels().length }}</div>
             </div>
             <div class="form-row">
               <div><label>权重</label><input type="number" [(ngModel)]="form.weight" /></div>
@@ -160,6 +163,13 @@ export class ProvidersComponent implements OnInit {
   readonly probeModels = signal<ProbeModel[]>([]);
   readonly probeError = signal('');
   readonly balance = signal<Balance | null>(null);
+  readonly probeQuery = signal('');
+  /** 模型多选列表按 id 过滤（忽略大小写）。 */
+  readonly probeFiltered = computed(() => {
+    const q = this.probeQuery().trim().toLowerCase();
+    if (!q) return this.probeModels();
+    return this.probeModels().filter((m) => m.id.toLowerCase().includes(q));
+  });
 
   form: Provider = this.blank();
   modelsText = '';
