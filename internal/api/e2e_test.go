@@ -202,6 +202,8 @@ func newEnv(t *testing.T, mode string) *env {
 		c.Settings.Pricing = map[string]store.Price{
 			"default": {InputPer1K: 0.001, OutputPer1K: 0.002},
 		}
+		// e2e 测 agent/路由，确定性快路径会拦截算术类消息，先禁用。
+		c.Settings.Fastpath.Enabled = false
 		return nil
 	}); err != nil {
 		t.Fatalf("settings: %v", err)

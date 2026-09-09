@@ -102,6 +102,43 @@ func (p *Proxy) agentRun(w http.ResponseWriter, r *http.Request, key store.APIKe
 		"content": "你是运行在 llm-router 网关上的 agent。你可以调用网关提供的工具来回答问题；工具由网关执行，你不需要向用户解释工具调用过程，直接给出基于工具结果的最终回答。",
 	}}, msgs...)
 
+	// 确定性快路径：纯代码能回答的问题（算术/时间/日期/换算/统计/进制/字数）
+	// 直接返回，零模型调用、零上游消耗。内置匹配器未命中时尝试已生成插件
+	// （plugin:xxx）与 codegen（LLM 生成检测器并持久化复用）。
+	if answer, method := p.FastPathTry(r, key, path, lastUserText(msgs)); answer != "" {
+		res.answer = answer
+		res.model = "fastpath:" + method
+		res.rounds = 1
+		result := Result{
+			ProviderID:    "fastpath",
+			UpstreamModel: res.model,
+			Status:        http.StatusOK,
+			Stream:        req.Stream,
+			Latency:       time.Since(started),
+		}
+		if req.Stream {
+			p.writeSSEReplay(w, res, result)
+		} else {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("X-Llm-Router-Provider", "fastpath")
+			w.Header().Set("X-Llm-Router-Fastpath", method)
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id":      res.id,
+				"object":  "chat.completion",
+				"created": time.Now().Unix(),
+				"model":   res.model,
+				"choices": []map[string]any{{
+					"index":         0,
+					"message":       map[string]any{"role": "assistant", "content": res.answer},
+					"finish_reason": "stop",
+				}},
+				"usage": map[string]any{"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+			})
+		}
+		return true, result
+	}
+
 	round := 0
 	for {
 		round++
@@ -225,6 +262,18 @@ func (p *Proxy) agentRun(w http.ResponseWriter, r *http.Request, key store.APIKe
 		})
 	}
 	return true, result
+}
+
+// lastUserText 取消息列表最后一条 role=user 的文本（fastpath 分类对象）。
+func lastUserText(msgs []chatMessage) string {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i]["role"] == "user" {
+			if s, ok := msgs[i]["content"].(string); ok {
+				return s
+			}
+		}
+	}
+	return ""
 }
 
 // agentRound 对上游发起一轮非流式请求（带工具 schema），返回上游响应体。

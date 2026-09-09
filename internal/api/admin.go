@@ -52,6 +52,10 @@ func (s *Server) adminMux() http.Handler {
 	m.HandleFunc("DELETE /api/admin/mcps/{name}", s.admin(s.handleDeleteMcp))
 	m.HandleFunc("GET /api/admin/tools", s.admin(s.handleListTools))
 	m.HandleFunc("POST /api/admin/tools/invoke", s.admin(s.handleInvokeTool))
+	m.HandleFunc("GET /api/admin/fastpath", s.admin(s.handleListFastpath))
+	m.HandleFunc("POST /api/admin/fastpath/{name}/promote", s.admin(s.handlePromoteFastpath))
+	m.HandleFunc("DELETE /api/admin/fastpath/{name}", s.admin(s.handleDeleteFastpath))
+	m.HandleFunc("POST /api/admin/fastpath/generate", s.admin(s.handleFastpathGenerate))
 	return m
 }
 
@@ -1365,6 +1369,55 @@ func (s *Server) handleDeleteMcp(w http.ResponseWriter, r *http.Request) {
 	}
 	s.proxy.ResetMCP()
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// handleListFastpath 返回快路径状态：内置匹配器 + 晋升/运行时插件。
+func (s *Server) handleListFastpath(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"builtin": s.proxy.FastMatchers(),
+		"plugins": s.proxy.FastPluginList(),
+	})
+}
+
+// handlePromoteFastpath 把插件晋升为正式检测器（移入 promoted 目录）。
+func (s *Server) handlePromoteFastpath(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if err := s.proxy.PromoteFastPlugin(name); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// handleDeleteFastpath 删除插件（promoted 也可删）。
+func (s *Server) handleDeleteFastpath(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if err := s.proxy.DeleteFastPlugin(name); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// handleFastpathGenerate 手动触发 codegen：对 query 生成检测器并立即验证。
+func (s *Server) handleFastpathGenerate(w http.ResponseWriter, r *http.Request) {
+	var c struct {
+		Query string `json:"query"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&c); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid json: "+err.Error())
+		return
+	}
+	if strings.TrimSpace(c.Query) == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", "query required")
+		return
+	}
+	answer, method := s.proxy.FastPathTry(r, store.APIKey{}, "/v1/chat/completions", c.Query)
+	if answer == "" {
+		writeJSON(w, http.StatusOK, map[string]any{"answer": "", "method": ""})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"answer": answer, "method": method})
 }
 
 // handleListTools 返回网关工具池目录（内置 + 条件 + MCP）。

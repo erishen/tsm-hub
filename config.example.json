@@ -53,6 +53,11 @@
    "memory_mb": 512,
    "cpus": 1,
    "max_output_kb": 100
+  },
+  "fastpath": {
+   "enabled": true,
+   "codegen": true,
+   "plugins_dir": ""
   }
  },
  "providers": [

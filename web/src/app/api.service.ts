@@ -174,6 +174,26 @@ export class ApiService {
       .pipe(catchError(this.handleError));
   }
 
+  getFastpath(): Observable<{ builtin: any[]; plugins: any[] }> {
+    return this.http.get<{ builtin: any[]; plugins: any[] }>('/api/admin/fastpath', { headers: this.headers() })
+      .pipe(catchError(this.handleError));
+  }
+
+  promoteFastpath(name: string): Observable<unknown> {
+    return this.http.post(`/api/admin/fastpath/${encodeURIComponent(name)}/promote`, {}, { headers: this.headers() })
+      .pipe(catchError(this.handleError));
+  }
+
+  deleteFastpath(name: string): Observable<unknown> {
+    return this.http.delete(`/api/admin/fastpath/${encodeURIComponent(name)}`, { headers: this.headers() })
+      .pipe(catchError(this.handleError));
+  }
+
+  fastpathGenerate(query: string): Observable<{ answer: string; method: string }> {
+    return this.http.post<{ answer: string; method: string }>('/api/admin/fastpath/generate', { query }, { headers: this.headers() })
+      .pipe(catchError(this.handleError));
+  }
+
   invokeTool(name: string, args: Record<string, unknown>): Observable<{ result: string }> {
     return this.http.post<{ result: string }>('/api/admin/tools/invoke', { name, args }, { headers: this.headers() })
       .pipe(catchError(this.handleError));

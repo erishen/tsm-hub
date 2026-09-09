@@ -50,6 +50,20 @@ type Settings struct {
 	Mcps map[string]MCPServer `json:"mcps,omitempty"`
 	// Sandbox 是 Docker 沙箱（execute_code 工具）配置。
 	Sandbox SandboxCfg `json:"sandbox,omitempty"`
+	// Fastpath 是确定性快路径 + codegen 配置。
+	Fastpath FastpathCfg `json:"fastpath,omitempty"`
+}
+
+// FastpathCfg 配置确定性快路径（零模型回答）与 codegen（LLM 生成检测器）。
+type FastpathCfg struct {
+	// Enabled=true 时启用快路径：内置匹配器（算术/时间/日期/换算/统计/进制/字数）
+	// 直接纯代码回答；false 时全部走 agent/模型。
+	Enabled bool `json:"enabled,omitempty"`
+	// Codegen=true 时内置匹配器未命中会请 LLM 生成 JS 检测器并持久化复用。
+	Codegen bool `json:"codegen,omitempty"`
+	// PluginsDir 检测器插件目录（默认 <data>/fastpath_plugins；晋升目录为
+	// <data>/fastpath_promoted，与插件一起按 mtime 热重载）。
+	PluginsDir string `json:"plugins_dir,omitempty"`
 }
 
 // SandboxCfg 配置 execute_code 的 Docker 沙箱执行环境。

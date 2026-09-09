@@ -100,6 +100,17 @@ func (s *Store) applyDefaults() {
 	if st.Pricing == nil {
 		st.Pricing = map[string]Price{"default": {InputPer1K: 0.001, OutputPer1K: 0.002}}
 	}
+	if !st.Sandbox.Enabled && st.Sandbox.TimeoutSec == 0 && st.Sandbox.MemoryMB == 0 {
+		st.Sandbox.TimeoutSec = 30
+		st.Sandbox.MemoryMB = 512
+		st.Sandbox.CPUs = 1
+		st.Sandbox.MaxOutputKB = 100
+	}
+	if !st.Fastpath.Enabled {
+		// 默认启用：内置快路径零成本，codegen 会消耗一次 LLM，默认也开（复用免费 chat）。
+		st.Fastpath.Enabled = true
+		st.Fastpath.Codegen = true
+	}
 }
 
 func (s *Store) reindex() {

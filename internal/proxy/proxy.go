@@ -33,6 +33,7 @@ type Proxy struct {
 	client *http.Client
 	skills *skills.Library
 	mcps   *mcpManager
+	fastMgr fastPathMgr
 }
 
 // New 创建转发器。

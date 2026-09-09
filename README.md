@@ -189,6 +189,31 @@ javascript / shell / java / go / rust / c / cpp）。沙箱安全边界：禁网
 工具参数：`language`（含 py/js/sh/c++ 等别名）+ `code`（完整源码）+ 可选
 `timeout`。需要联网的任务请用 `fetch_url` 等工具，沙箱内一律不可联网。
 
+**确定性快路径（fastpath）**：算术、当前时间、日期计算、单位换算、数字统计、
+进制转换、字数统计等纯代码可解的问题**直接返回，零模型调用、零上游消耗**，
+响应头带 `X-Llm-Router-Fastpath: <method>`（provider 为 `fastpath`）：
+
+| 匹配器 | 触发示例 |
+|--------|----------|
+| arithmetic | 计算 2+3 / 12×34 / 23 加 45 等于多少（支持中文运算符、幂、括号）|
+| statistics | …的平均值 / 总和 / 最大最小 / 排序（数字列表）|
+| unit_convert | 100 摄氏度是多少华氏度 / 5 公里等于多少英里 |
+| date_math | 明天是几号 / N 天后的日期 / 两个日期相差几天 |
+| base_convert | 255 的十六进制 / 十进制转二进制 |
+| text_stats | 这段文字有多少字 |
+| time | 现在几点 / 当前时间 |
+
+**codegen + 晋升**：内置匹配器未命中时，网关会请 LLM 生成一个 JS 检测器
+（`detect(text) -> string|null`），在 goja 沙箱中校验执行（无宿主 API、无 I/O、
+无网络，3s 硬超时，禁 eval/Function），命中即持久化为插件
+（`<data>/fastpath_plugins/`），后续同类问题**零模型直接命中**。管理台
+「快路径」页可查看内置匹配器、测试任意问题、一键生成检测器、晋升插件为正式
+检测器（移入 `<data>/fastpath_promoted/`，按 mtime 热重载，无需重启）。
+
+```json
+"fastpath": {"enabled": true, "codegen": true, "plugins_dir": ""}
+```
+
 **上游 Key 不写进配置文件**：`api_key` 支持 `env:OPENAI_API_KEY` 这种引用形式，
 启动前把真实 Key 放到环境变量里即可（管理台回显会保留引用本身，不含密钥）。
 
