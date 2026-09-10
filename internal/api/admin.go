@@ -1894,15 +1894,18 @@ func (s *Server) handleSuggestExternalMcp(w http.ResponseWriter, r *http.Request
 	for _, t := range c.Tools {
 		sb.WriteString(fmt.Sprintf("- %s（调用 %d 次）\n", t.Name, t.Calls))
 	}
-	prompt := fmt.Sprintf(`你是 MCP（Model Context Protocol）服务器接入助手。外部调用方在 LLM 网关里声明了以下外部 MCP 工具，但没有提供连接配置。请根据 server 名与工具名推断最可能的接入方式。
+	prompt := fmt.Sprintf(`你是 MCP（Model Context Protocol）服务器接入助手。外部调用方在 LLM 网关里声明了以下外部 MCP 工具，但没有提供连接配置。请根据 server 名与工具名给出可直接落地的接入建议。
 
 server 名: %s
 工具声明:
 %s
 只输出 JSON（不要 markdown 围栏、不要任何解释文字）：
-{"transport":"stdio 或 http","command":"启动命令，如 npx -y @xxx/yyy；不确定则空串","args":["参数数组，可空"],"url":"http 模式的端点 URL；stdio 模式空串","env_hint":"可能需要配置的环境变量或密钥名；没有则空串","notes":"一句中文说明：这是公开知名包 / 自建服务 / 不确定，以及为什么"}
+{"transport":"stdio 或 http","command":"启动命令，如 npx -y @xxx/yyy","args":["参数数组，可空"],"url":"http 模式的端点 URL；stdio 模式空串","env_hint":"可能需要配置的环境变量或密钥名；没有则空串","notes":"一句中文说明：这是公开知名包 / 自建服务 / 不确定，以及为什么"}
 
-规则：优先用公开知名的 npx 包（如 @modelcontextprotocol/*、serena-mcp 等）；如果 server 名明显是自建服务（如内部项目缩写、私有工具名），如实说明并给出通用 stdio 接入建议；不要编造不存在的包名，不确定就明确写“不确定”。`, c.Server, sb.String())
+规则（按优先级）：
+1. server 名对得上公开知名的 npx 包 → 给出确切命令（如 @modelcontextprotocol/*、serena-mcp 等），notes 说明是公开包。
+2. 疑似自建/私有服务（内部项目缩写、私有工具名）→ 也要给出可执行的模板命令：优先 "npx -y <server>"，若名字明显是脚本/进程名则用 "node ./<server>.js"；args 按需；notes 写"按命名惯例推断的模板命令，实际启动方式与所需密钥请向服务提供方核实"。
+3. 绝不允许 command 为空，绝不允许只输出"不确定"；拿不准就按规则 2 给模板并在 notes 里说明这是推断。`, c.Server, sb.String())
 	msgs := []proxy.ChatMessage{{"role": "user", "content": prompt}}
 	body, why := s.proxy.Complete(r, store.APIKey{}, "/v1/chat/completions", msgs)
 	if len(body) == 0 {
