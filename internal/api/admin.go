@@ -42,6 +42,7 @@ func (s *Server) adminMux() http.Handler {
 	m.HandleFunc("PATCH /api/admin/keys/{id}", s.admin(s.handleUpdateKey))
 	m.HandleFunc("DELETE /api/admin/keys/{id}", s.admin(s.handleDeleteKey))
 	m.HandleFunc("GET /api/admin/usage", s.admin(s.handleUsage))
+	m.HandleFunc("POST /api/admin/usage/clear", s.admin(s.handleClearUsage))
 	m.HandleFunc("GET /api/admin/observability/overview", s.admin(s.handleObservability))
 	m.HandleFunc("GET /api/admin/health", s.admin(s.handleAdminHealth))
 	m.HandleFunc("GET /api/admin/settings", s.admin(s.handleGetSettings))
@@ -1261,6 +1262,15 @@ func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
 		"keys":   keys,
 		"recent": s.rec.Recent(limit),
 	})
+}
+
+// handleClearUsage 清空全部用量流水（DELETE 语义用 POST 便于前端一键触发）。
+func (s *Server) handleClearUsage(w http.ResponseWriter, r *http.Request) {
+	if err := s.rec.Clear(); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "cleared": true})
 }
 
 // ---------- observability ----------
