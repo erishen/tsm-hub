@@ -227,6 +227,12 @@ export class McpsComponent implements OnInit {
       desc: '跨会话长期记忆（内置 remember/recall 已有类似能力）',
     },
     {
+      id: 'serena', command: 'uvx',
+      args: ['--from', 'git+https://github.com/oraios/serena', 'serena', 'start-mcp-server'],
+      desc: '代码库语义理解与编辑：符号检索、全文搜索、代码编辑、项目记忆（LSP 级）',
+      needs: 'Python 项目，需本机装 uv（已有）；默认索引网关所在项目，可在参数里加项目路径',
+    },
+    {
       id: 'github', command: 'npx',
       args: ['-y', '@modelcontextprotocol/server-github'],
       env: { GITHUB_TOKEN: '' },
