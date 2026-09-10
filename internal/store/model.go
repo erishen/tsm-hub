@@ -237,12 +237,24 @@ type APIKey struct {
 }
 
 // Config 是 data/config.json 的整体结构。
+// ExternalTool 是从外部调用方"择优录用"的工具：调用方在请求里声明了系统外的自创工具，
+// 高频使用后由管理员录用进系统（模型可感知；可选绑定网关侧实现）。
+type ExternalTool struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	// ImplType: none（仅登记，执行在调用方侧）/ js（JS detect(query) 检测器）/ alias（转发到现有工具）。
+	ImplType   string `json:"impl_type"`
+	ImplSource string `json:"impl_source,omitempty"`
+	AdoptedAt  string `json:"adopted_at"`
+}
+
 type Config struct {
-	Version   int        `json:"version"`
-	Settings  Settings   `json:"settings"`
-	Providers []Provider `json:"providers"`
-	Routes    []Route    `json:"routes"`
-	Keys      []APIKey   `json:"keys"`
+	Version       int            `json:"version"`
+	Settings      Settings       `json:"settings"`
+	Providers     []Provider     `json:"providers"`
+	Routes        []Route        `json:"routes"`
+	Keys          []APIKey       `json:"keys"`
+	ExternalTools []ExternalTool `json:"external_tools,omitempty"`
 }
 
 // UsageRecord 是一条请求用量流水，按天追加写入 JSONL。

@@ -170,6 +170,56 @@ function rateClass(rate: number): string {
       </table>
       <ng-template #none3><div class="empty">暂无数据</div></ng-template>
     </div>
+
+    <!-- 录用外部工具弹窗 -->
+    <div class="modal-backdrop" *ngIf="adoptTarget()">
+      <div class="modal" (click)="$event.stopPropagation()">
+        <div class="modal-head">
+          <span class="modal-icon">＋</span>
+          <div class="modal-titles">
+            <h2>录用外部工具</h2>
+            <div class="sub">{{ adoptTarget()?.name }} · 来自外部调用方声明</div>
+          </div>
+          <button class="icon" (click)="closeAdopt()" aria-label="关闭">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-section">
+            <h3>说明</h3>
+            <div class="form-row">
+              <div><label>描述（模型可见）</label><input [(ngModel)]="adoptForm.description" placeholder="这个工具做什么用" /></div>
+            </div>
+          </div>
+          <div class="form-section">
+            <h3>网关侧实现方式</h3>
+            <label class="radio-row">
+              <input type="radio" [(ngModel)]="adoptForm.impl_type" value="none" />
+              <span><b>仅登记</b><span class="muted" style="display:block;font-size:12px">进工具池供模型感知；执行由调用方侧完成</span></span>
+            </label>
+            <label class="radio-row">
+              <input type="radio" [(ngModel)]="adoptForm.impl_type" value="js" />
+              <span><b>JS 检测器</b><span class="muted" style="display:block;font-size:12px">粘贴 detect(text) 实现，网关可直接执行（类似 fastpath 插件）</span></span>
+            </label>
+            <div *ngIf="adoptForm.impl_type === 'js'" style="margin-top:8px">
+              <label>JS 源码（函数 detect(text) 返回命中文本或 null）</label>
+              <textarea [(ngModel)]="adoptForm.impl_source" rows="6" class="mono code-input"
+                        placeholder="function detect(text) { 返回命中文本或 null }"></textarea>
+            </div>
+            <label class="radio-row">
+              <input type="radio" [(ngModel)]="adoptForm.impl_type" value="alias" />
+              <span><b>转发到现有工具</b><span class="muted" style="display:block;font-size:12px">映射到系统已有工具（如 calc / fetch_url / mcp_*）</span></span>
+            </label>
+            <div *ngIf="adoptForm.impl_type === 'alias'" style="margin-top:8px">
+              <label>目标工具名</label>
+              <input [(ngModel)]="adoptForm.impl_source" placeholder="如 calc / get_time / fetch_url" />
+            </div>
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button class="small" (click)="closeAdopt()">取消</button>
+          <button class="small primary" (click)="adopt()" [disabled]="adopting()">录用</button>
+        </div>
+      </div>
+    </div>
   `,
 })
 export class ObservabilityComponent implements OnInit {
@@ -189,6 +239,43 @@ export class ObservabilityComponent implements OnInit {
     this.api.observability(this.days).subscribe({
       next: (d) => this.data.set(d),
       error: (e) => this.error.set(e?.message || '加载失败'),
+    });
+  }
+
+  // ---- 外部工具录用 ----
+  adoptTarget = signal<{ name: string; calls?: number; key_count?: number; adopted: boolean } | null>(null);
+  adoptForm = { description: '', impl_type: 'none', impl_source: '' };
+  adopting = signal(false);
+
+  openAdopt(t: { name: string; calls?: number; key_count?: number; adopted: boolean }): void {
+    this.adoptTarget.set(t);
+    this.adoptForm = { description: '', impl_type: 'none', impl_source: '' };
+  }
+
+  closeAdopt(): void {
+    if (this.adopting()) return;
+    this.adoptTarget.set(null);
+  }
+
+  adopt(): void {
+    const t = this.adoptTarget();
+    if (!t) return;
+    this.adopting.set(true);
+    this.api.adoptExternalTool(t.name, {
+      description: this.adoptForm.description,
+      impl_type: this.adoptForm.impl_type,
+      impl_source: this.adoptForm.impl_source || undefined,
+    }).subscribe({
+      next: () => { this.adopting.set(false); this.adoptTarget.set(null); this.load(); },
+      error: (e: Error) => { this.adopting.set(false); this.error.set('录用失败：' + e.message); },
+    });
+  }
+
+  unadopt(t: { name: string }): void {
+    if (!confirm('取消录用 ' + t.name + '？')) return;
+    this.api.deleteExternalTool(t.name).subscribe({
+      next: () => this.load(),
+      error: (e: Error) => this.error.set('取消录用失败：' + e.message),
     });
   }
 

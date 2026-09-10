@@ -170,6 +170,54 @@ func (s *Store) saveLocked() error {
 	return os.Rename(tmpName, s.path)
 }
 
+// ListExternalTools 返回已录用的外部工具列表。
+func (s *Store) ListExternalTools() []ExternalTool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]ExternalTool, len(s.cfg.ExternalTools))
+	copy(out, s.cfg.ExternalTools)
+	return out
+}
+
+// ExternalTool 返回某个已录用外部工具。
+func (s *Store) ExternalTool(name string) (ExternalTool, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, t := range s.cfg.ExternalTools {
+		if t.Name == name {
+			return t, true
+		}
+	}
+	return ExternalTool{}, false
+}
+
+// AdoptExternalTool 录用/更新一个外部工具（upsert 后落盘）。
+func (s *Store) AdoptExternalTool(t ExternalTool) error {
+	return s.Update(func(c *Config) error {
+		for i := range c.ExternalTools {
+			if c.ExternalTools[i].Name == t.Name {
+				c.ExternalTools[i] = t
+				return nil
+			}
+		}
+		c.ExternalTools = append(c.ExternalTools, t)
+		return nil
+	})
+}
+
+// DeleteExternalTool 取消录用某个外部工具。
+func (s *Store) DeleteExternalTool(name string) error {
+	return s.Update(func(c *Config) error {
+		for i := range c.ExternalTools {
+			if c.ExternalTools[i].Name == name {
+				c.ExternalTools = append(c.ExternalTools[:i], c.ExternalTools[i+1:]...)
+				return nil
+			}
+		}
+		return fmt.Errorf("external tool %q not adopted", name)
+	})
+}
+
 // Update 在锁内修改配置并落盘。fn 返回 error 时不写盘。
 func (s *Store) Update(fn func(c *Config) error) error {
 	s.mu.Lock()

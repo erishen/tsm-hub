@@ -174,7 +174,7 @@ import { ApiKey, Quota, SkillSummary } from './models';
           <tr>
             <th>名称 / Prefix</th><th>状态</th><th>模型</th><th>技能注入</th>
             <th class="num">用量 Tokens</th><th class="num">成本</th>
-            <th class="num">RPM</th><th>剩余 / 配额</th><th>操作</th>
+            <th class="num">RPM</th><th>工具使用 <span class="muted" style="font-weight:400;font-size:11px">（执行 / 声明）</span></th><th>剩余 / 配额</th><th>操作</th>
           </tr>
         </thead>
         <tbody>
@@ -199,6 +199,15 @@ import { ApiKey, Quota, SkillSummary } from './models';
             <td class="num">{{ compact(k.usage?.total_tokens ?? 0) }}</td>
             <td class="num">{{ usd(k.usage?.cost_usd ?? 0) }}</td>
             <td class="num">{{ k.rpm_current }}/{{ k.quota.rpm || '∞' }}</td>
+            <td style="font-size:12px;max-width:220px">
+              <ng-container *ngIf="k.tools_used && k.tools_used.length; else noTools">
+                <span class="mono" style="margin-right:4px" *ngFor="let t of k.tools_used; let last = last">{{ t }}{{ last ? '' : ',' }}</span>
+                <div class="muted" *ngIf="k.tools_declared && k.tools_declared.length" title="该 Key 请求中声明过的工具（含系统外）">
+                  声明：{{ k.tools_declared.join(', ') }}
+                </div>
+              </ng-container>
+              <ng-template #noTools><span class="muted">—</span></ng-template>
+            </td>
             <td class="muted" style="font-size:12px">{{ quotaRemain(k) }}</td>
             <td style="white-space:nowrap">
               <button class="small" (click)="startEdit(k)">编辑</button>
