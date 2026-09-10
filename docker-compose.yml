@@ -1,8 +1,8 @@
 services:
-  llm-router:
+  tsm-gateway:
     build: .
-    image: llm-router:latest
-    container_name: llm-router
+    image: tsm-gateway:latest
+    container_name: tsm-gateway
     restart: unless-stopped
     ports:
       - "9070:9070"

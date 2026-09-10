@@ -32,7 +32,7 @@ interface PgDraft {
   maxTokens: any;
 }
 
-const DRAFT_KEY = 'llm-router.playground.draft';
+const DRAFT_KEY = 'tsm-gateway.playground.draft';
 
 @Component({
   selector: 'app-playground',

@@ -16,11 +16,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erishen/llm-router/internal/auth"
-	"github.com/erishen/llm-router/internal/proxy"
-	"github.com/erishen/llm-router/internal/quota"
-	"github.com/erishen/llm-router/internal/router"
-	"github.com/erishen/llm-router/internal/store"
+	"github.com/erishen/tsm-gateway/internal/auth"
+	"github.com/erishen/tsm-gateway/internal/proxy"
+	"github.com/erishen/tsm-gateway/internal/quota"
+	"github.com/erishen/tsm-gateway/internal/router"
+	"github.com/erishen/tsm-gateway/internal/store"
 )
 
 // adminMux 注册管理 API（Go 1.22 起 net/http 支持方法与路径参数）。

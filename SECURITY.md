@@ -89,10 +89,10 @@
 ```nginx
 server {
     listen 443 ssl http2;
-    server_name llm-router.example.com;
+    server_name tsm-gateway.example.com;
 
-    ssl_certificate     /etc/ssl/certs/llm-router.crt;
-    ssl_certificate_key /etc/ssl/private/llm-router.key;
+    ssl_certificate     /etc/ssl/certs/tsm-gateway.crt;
+    ssl_certificate_key /etc/ssl/private/tsm-gateway.key;
     ssl_protocols       TLSv1.2 TLSv1.3;
 
     location / {
@@ -108,7 +108,7 @@ server {
 
 **Caddy 示例**（自动 HTTPS）：
 ```caddy
-llm-router.example.com {
+tsm-gateway.example.com {
     reverse_proxy 127.0.0.1:9070
 }
 ```

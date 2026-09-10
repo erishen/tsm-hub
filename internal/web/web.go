@@ -76,7 +76,7 @@ func placeholder() string {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>llm-router 管理台</title>
+  <title>tsm-gateway 管理台</title>
   <style>
     body { margin: 0; font: 15px/1.7 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
            color: #1f2937; background: #f7f8fa; display: flex; align-items: center;

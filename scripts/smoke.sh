@@ -46,7 +46,7 @@ echo "→ 启动 mock 上游 (bad=$BAD, ok=$OK)"
 "$ROOT/bin/mockupstream" -addr "$OK" -mode ok   & PIDS+=($!)
 
 echo "→ 启动网关 $GW"
-"$ROOT/bin/llm-router" -data "$TMP/data" -addr "$GW" -admin-token smoke-admin -log-level warn & PIDS+=($!)
+"$ROOT/bin/tsm-gateway" -data "$TMP/data" -addr "$GW" -admin-token smoke-admin -log-level warn & PIDS+=($!)
 
 for i in $(seq 1 50); do
   curl -sf "http://$GW/healthz" >/dev/null && break

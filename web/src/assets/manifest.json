@@ -1,7 +1,7 @@
 {
-  "name": "LLM Token Router",
-  "short_name": "LLM Router",
-  "description": "自制 Token Key + 智能路由的 LLM 网关管理台",
+  "name": "TSM Gateway",
+  "short_name": "TSM Gateway",
+  "description": "Tools + Skills + MCPs 能力网关管理台",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#f6f7f9",

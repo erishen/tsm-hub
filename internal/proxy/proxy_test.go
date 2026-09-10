@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/erishen/llm-router/internal/router"
+	"github.com/erishen/tsm-gateway/internal/router"
 )
 
 func TestRewriteBodySetsModel(t *testing.T) {

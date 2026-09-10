@@ -1,4 +1,4 @@
-module github.com/erishen/llm-router
+module github.com/erishen/tsm-gateway
 
 go 1.25.0
 
