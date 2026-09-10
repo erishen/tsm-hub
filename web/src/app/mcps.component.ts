@@ -86,9 +86,16 @@ import { McpServer, ToolInfo } from './models';
             <td colspan="6" style="padding:6px 0">
               <div class="skel-row"></div>
               <div class="skel-row" style="width:72%"></div>
+              <div class="skel-row" style="width:48%"></div>
             </td>
           </tr>
-          <tr *ngIf="!loadingMcps() && !mcps().length">
+          <tr *ngIf="!loadingMcps() && error() && !mcps().length">
+            <td colspan="6" class="empty">
+              <span class="err-text">{{ error() }}</span>
+              <button class="small" style="margin-left:10px" (click)="load()">重试</button>
+            </td>
+          </tr>
+          <tr *ngIf="!loadingMcps() && !error() && !mcps().length">
             <td colspan="6" class="empty">未配置 MCP server。示例：npx &#64;modelcontextprotocol/server-fetch</td>
           </tr>
         </tbody>
@@ -120,7 +127,13 @@ import { McpServer, ToolInfo } from './models';
           <div class="muted tool-desc">{{ t.description || '（无描述）' }}</div>
         </div>
       </div>
-      <ng-template #noTools><div class="empty">工具池为空</div></ng-template>
+      <ng-template #noTools>
+        <div class="empty" *ngIf="error() && !tools().length">
+          <span class="err-text">{{ error() }}</span>
+          <button class="small" style="margin-left:10px" (click)="loadTools()">重试</button>
+        </div>
+        <div class="empty" *ngIf="!error()">工具池为空</div>
+      </ng-template>
     </div>
 
     <!-- 测试工具弹窗 -->
@@ -267,6 +280,7 @@ import { McpServer, ToolInfo } from './models';
     .tpl-id { font-weight:600; font-size:13px; }
     .tpl-desc { font-size:12px; line-height:1.45; }
     .tpl-needs { margin-top:6px; font-size:12px; color:#b58900; }
+    .err-text { color:#d33; font-size:13px; }
     .skel-row { height:14px; border-radius:6px; margin:5px 2px;
       background:linear-gradient(90deg,#efece4 25%,#f8f6f1 37%,#efece4 63%);
       background-size:400% 100%; animation:skel 1.2s ease infinite; }
@@ -281,8 +295,8 @@ export class McpsComponent implements OnInit {
   tools = signal<ToolInfo[]>([]);
   error = signal('');
   saved = signal('');
-  loadingMcps = signal(false);
-  loadingTools = signal(false);
+  loadingMcps = signal(true);
+  loadingTools = signal(true);
   editing = signal<{ mode: 'add' | 'edit'; server?: McpServer } | null>(null);
   testing = signal<ToolInfo | null>(null);
   /** 当前展开的 MCP server（工具详情） */

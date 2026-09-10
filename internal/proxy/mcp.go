@@ -460,6 +460,7 @@ func (s *mcpServer) toolNames() []string {
 }
 
 // mcpToolSchemas 返回全部已连接 MCP server 的工具 schema（mcp_<server>_<tool>）。
+// 首次会并行触发各 server 连接，避免一个慢 server 拖住整个工具池。
 func (p *Proxy) mcpToolSchemas() []map[string]any {
 	cfg := p.store.Settings().Mcps
 	if len(cfg) == 0 {
@@ -470,23 +471,33 @@ func (p *Proxy) mcpToolSchemas() []map[string]any {
 		names = append(names, n)
 	}
 	sort.Strings(names)
+	results := make([][]map[string]any, len(names))
+	var wg sync.WaitGroup
+	for i, name := range names {
+		wg.Add(1)
+		go func(i int, name string) {
+			defer wg.Done()
+			s, err := p.mcps.ensure(name, cfg[name])
+			if err != nil {
+				return // 连不上的 server 本次不提供工具
+			}
+			for _, t := range s.tools {
+				params := cleanSchema(t.InputSchema)
+				results[i] = append(results[i], map[string]any{
+					"type": "function",
+					"function": map[string]any{
+						"name":        mcpToolName(name, t.Name),
+						"description": t.Description,
+						"parameters":  params,
+					},
+				})
+			}
+		}(i, name)
+	}
+	wg.Wait()
 	out := []map[string]any{}
-	for _, name := range names {
-		s, err := p.mcps.ensure(name, cfg[name])
-		if err != nil {
-			continue // 连不上的 server 本次不提供工具
-		}
-		for _, t := range s.tools {
-			params := cleanSchema(t.InputSchema)
-			out = append(out, map[string]any{
-				"type": "function",
-				"function": map[string]any{
-					"name":        mcpToolName(name, t.Name),
-					"description": t.Description,
-					"parameters":  params,
-				},
-			})
-		}
+	for _, r := range results {
+		out = append(out, r...)
 	}
 	return out
 }
