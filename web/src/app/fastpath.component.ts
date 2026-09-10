@@ -4,7 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { ApiService } from './api.service';
 
 interface FastMatcher { name: string; trigger: string; desc: string; builtin: boolean }
-interface FastPlugin { name: string; trigger: string; source: string; promoted: boolean; mtime: number; size: number }
+interface FastPlugin { name: string; trigger: string; source: string; promoted: boolean; mode?: string; mtime: number; size: number }
 
 @Component({
   selector: 'app-fastpath',
@@ -62,10 +62,10 @@ interface FastPlugin { name: string; trigger: string; source: string; promoted: 
             <td class="mono">{{ p.name }}</td>
             <td>{{ p.trigger || '—' }}</td>
             <td>
-              <span class="tag" [class.green]="p.promoted">{{ p.promoted ? '已晋升' : '运行时' }}</span>
+              <span class="tag" [class.green]="p.promoted">{{ p.promoted ? modeLabel(p.mode) : '运行时' }}</span>
             </td>
             <td>
-              <button class="small" *ngIf="!p.promoted" (click)="promote(p)">晋升</button>
+              <button class="small" *ngIf="!p.promoted" (click)="openPromote(p)">晋升</button>
               <button class="small danger" (click)="remove(p)">删除</button>
             </td>
           </tr>
@@ -78,6 +78,42 @@ interface FastPlugin { name: string; trigger: string; source: string; promoted: 
         <summary class="muted" style="cursor:pointer">查看插件源码</summary>
         <pre class="code" *ngFor="let p of plugins">{{ p.source }}</pre>
       </details>
+
+      <!-- 晋升模式选择弹窗 -->
+      <div class="modal-backdrop" *ngIf="promoteTarget">
+        <div class="modal" (click)="$event.stopPropagation()">
+        <div class="modal-head">
+          <span class="modal-icon">⚡</span>
+          <div class="modal-titles">
+            <h2>晋升插件</h2>
+            <div class="sub">{{ promoteTarget?.name }} · {{ promoteTarget?.trigger || '无触发词' }}</div>
+          </div>
+          <button class="icon" (click)="closePromote()" aria-label="关闭">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-section">
+            <div class="muted" style="font-size:12px;margin-bottom:12px">
+              选择晋升方式：
+            </div>
+            <label class="radio-row">
+              <input type="radio" [(ngModel)]="promoteMode" value="fastpath" />
+              <span><b>纯 fastpath（推荐）</b><span class="muted" style="display:block;font-size:12px">请求前精确匹配直接返回，零模型调用、零成本</span></span>
+            </label>
+            <label class="radio-row">
+              <input type="radio" [(ngModel)]="promoteMode" value="tool" />
+              <span><b>注册为工具</b><span class="muted" style="display:block;font-size:12px">进工具池，可被 LLM 主动调用、外部 /v1/tools 可查可声明</span></span>
+            </label>
+            <label class="radio-row">
+              <input type="radio" [(ngModel)]="promoteMode" value="both" />
+              <span><b>两者都要</b><span class="muted" style="display:block;font-size:12px">既拦截又当工具（同一段逻辑双通道生效）</span></span>
+            </label>
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button class="small" (click)="closePromote()">取消</button>
+          <button class="small primary" (click)="doPromote()">晋升</button>
+        </div>
+        </div>
     </div>
   `,
   styles: [`
@@ -86,6 +122,10 @@ interface FastPlugin { name: string; trigger: string; source: string; promoted: 
     .tag { display:inline-block; padding:2px 8px; border-radius:10px; background:#f0f0f0; font-size:12px; }
     .tag.green { background:#e6f7e9; color:#2e7d32; }
     .code { background:#1e1e1e; color:#d4d4d4; padding:10px; border-radius:8px; font-size:12px; overflow-x:auto; white-space:pre-wrap; }
+    .radio-row { display:flex; gap:10px; align-items:flex-start; padding:10px 12px;
+      border:1px solid var(--border,#e4e3dd); border-radius:10px; margin-bottom:8px; cursor:pointer; }
+    .radio-row:hover { background:#faf9f5; }
+    .radio-row input { margin-top:3px; }
   `]
 })
 export class FastpathComponent implements OnInit {
@@ -159,9 +199,30 @@ export class FastpathComponent implements OnInit {
     });
   }
 
-  promote(p: FastPlugin): void {
-    this.api.promoteFastpath(p.name).subscribe({
-      next: () => this.reload(),
+  promoteTarget: FastPlugin | null = null;
+  promoteMode = 'fastpath';
+
+  modeLabel(mode?: string): string {
+    if (!mode || mode === 'fastpath') return '已晋升 · 拦截';
+    if (mode === 'tool') return '已晋升 · 工具';
+    return '已晋升 · 两者';
+  }
+
+  openPromote(p: FastPlugin): void {
+    this.promoteTarget = p;
+    this.promoteMode = 'fastpath';
+  }
+
+  closePromote(): void {
+    this.promoteTarget = null;
+  }
+
+  doPromote(): void {
+    const p = this.promoteTarget;
+    if (!p) return;
+    this.genMsg = '';
+    this.api.promoteFastpath(p.name, this.promoteMode).subscribe({
+      next: () => { this.promoteTarget = null; this.reload(); },
       error: (e: Error) => (this.genMsg = '晋升失败：' + e.message),
     });
   }

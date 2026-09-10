@@ -179,8 +179,8 @@ export class ApiService {
       .pipe(catchError(this.handleError));
   }
 
-  promoteFastpath(name: string): Observable<unknown> {
-    return this.http.post(`/api/admin/fastpath/${encodeURIComponent(name)}/promote`, {}, { headers: this.headers() })
+  promoteFastpath(name: string, mode: string = 'fastpath'): Observable<unknown> {
+    return this.http.post(`/api/admin/fastpath/${encodeURIComponent(name)}/promote`, { mode }, { headers: this.headers() })
       .pipe(catchError(this.handleError));
   }
 

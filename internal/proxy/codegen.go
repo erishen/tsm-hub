@@ -33,6 +33,8 @@ type fastPlugin struct {
 	Trigger  string
 	Source   string
 	Promoted bool
+	// Mode 是晋升模式：fastpath（拦截）/ tool（注册为工具）/ both（两者）。
+	Mode string
 	mtime    int64
 	size     int64
 	vm       *goja.Runtime
@@ -55,6 +57,56 @@ func (p *Proxy) fastPluginsDir() string {
 
 func (p *Proxy) fastPromotedDir() string {
 	return filepath.Join(filepath.Dir(p.store.Path()), "fastpath_promoted")
+}
+
+// fastModesFile 是晋升插件的模式元数据（name -> fastpath/tool/both）。
+func (p *Proxy) fastModesFile() string {
+	return filepath.Join(p.fastPromotedDir(), "modes.json")
+}
+
+func (p *Proxy) readFastModes() map[string]string {
+	raw, err := os.ReadFile(p.fastModesFile())
+	if err != nil {
+		return map[string]string{}
+	}
+	var m map[string]string
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return map[string]string{}
+	}
+	return m
+}
+
+func (p *Proxy) writeFastMode(name, mode string) error {
+	modes := p.readFastModes()
+	if mode == "" || mode == "fastpath" {
+		delete(modes, name)
+	} else {
+		modes[name] = mode
+	}
+	if len(modes) == 0 {
+		_ = os.Remove(p.fastModesFile())
+		return nil
+	}
+	return os.WriteFile(p.fastModesFile(), mustJSON(modes), 0o644)
+}
+
+// deleteFastMode 删除某插件的模式记录。
+func (p *Proxy) deleteFastMode(name string) {
+	modes := p.readFastModes()
+	if _, ok := modes[name]; !ok {
+		return
+	}
+	delete(modes, name)
+	if len(modes) == 0 {
+		_ = os.Remove(p.fastModesFile())
+		return
+	}
+	_ = os.WriteFile(p.fastModesFile(), mustJSON(modes), 0o644)
+}
+
+func mustJSON(v any) []byte {
+	b, _ := json.Marshal(v)
+	return b
 }
 
 var jsFenceRe = regexp.MustCompile("(?s)```(?:js|javascript)?\\s*(.*?)```")
@@ -175,6 +227,13 @@ func (p *Proxy) loadPlugins() []*fastPlugin {
 				Name:     strings.TrimSuffix(name, ".js"),
 				Source:   string(src),
 				Promoted: promoted,
+				Mode:     "fastpath",
+			}
+			if promoted {
+				plugin.Mode = p.readFastModes()[plugin.Name]
+				if plugin.Mode == "" {
+					plugin.Mode = "fastpath"
+				}
 			}
 			if info != nil {
 				plugin.mtime = info.ModTime().Unix()
@@ -239,6 +298,7 @@ func (p *Proxy) FastPluginList() []map[string]any {
 			"trigger":  pl.Trigger,
 			"source":   pl.Source,
 			"promoted": pl.Promoted,
+			"mode":     pl.Mode,
 			"mtime":    pl.mtime,
 			"size":     pl.size,
 		})
@@ -250,20 +310,33 @@ func (p *Proxy) FastPluginList() []map[string]any {
 }
 
 // promoteFastPlugin 把插件晋升为正式检测器（移到 promoted 目录）。
-func (p *Proxy) PromoteFastPlugin(name string) error {
+func (p *Proxy) PromoteFastPlugin(name, mode string) error {
 	if !regexp.MustCompile(`^gen_[0-9a-f]{10}$`).MatchString(name) {
 		return fmt.Errorf("invalid plugin name")
 	}
+	if mode == "" {
+		mode = "fastpath"
+	}
+	if mode != "fastpath" && mode != "tool" && mode != "both" {
+		return fmt.Errorf("invalid mode: must be fastpath/tool/both")
+	}
 	src := filepath.Join(p.fastPluginsDir(), name+".js")
-	info, err := os.Stat(src)
-	if err != nil {
+	dst := filepath.Join(p.fastPromotedDir(), name+".js")
+	_, srcErr := os.Stat(src)
+	_, dstErr := os.Stat(dst)
+	if srcErr != nil && dstErr != nil {
 		return fmt.Errorf("plugin not found")
 	}
-	_ = info
-	if err := os.MkdirAll(p.fastPromotedDir(), 0o755); err != nil {
-		return err
+	// 未晋升：移入 promoted；已晋升：只改模式（保留原位）。
+	if srcErr == nil {
+		if err := os.MkdirAll(p.fastPromotedDir(), 0o755); err != nil {
+			return err
+		}
+		if err := os.Rename(src, dst); err != nil {
+			return err
+		}
 	}
-	if err := os.Rename(src, filepath.Join(p.fastPromotedDir(), name+".js")); err != nil {
+	if err := p.writeFastMode(name, mode); err != nil {
 		return err
 	}
 	p.fastMgr.mu.Lock()
@@ -290,10 +363,23 @@ func (p *Proxy) DeleteFastPlugin(name string) error {
 	if !removed {
 		return fmt.Errorf("plugin not found")
 	}
+	p.deleteFastMode(name)
 	p.fastMgr.mu.Lock()
 	p.fastMgr.stats = nil
 	p.fastMgr.mu.Unlock()
 	return nil
+}
+
+// FastToolPlugins 返回晋升模式为 tool/both 的插件（注册进工具池、可被 LLM 调用）。
+func (p *Proxy) FastToolPlugins() []*fastPlugin {
+	out := make([]*fastPlugin, 0)
+	for _, pl := range p.loadPlugins() {
+		if !pl.Promoted || (pl.Mode != "tool" && pl.Mode != "both") {
+			continue
+		}
+		out = append(out, pl)
+	}
+	return out
 }
 
 // -- LLM 生成 -----------------------------------------------------------------
@@ -423,6 +509,9 @@ func (p *Proxy) FastPathTry(r *http.Request, key store.APIKey, path, text string
 		return fast.answer, fast.method
 	}
 	for _, pl := range p.loadPlugins() {
+		if pl.Mode == "tool" {
+			continue // 纯工具模式：不进请求前拦截链
+		}
 		if answer, hit := runJSDetector(pl.Source, text); hit {
 			return answer, "plugin:" + pl.Name
 		}
