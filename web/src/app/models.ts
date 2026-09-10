@@ -253,6 +253,8 @@ export interface McpServer {
   transport?: string;
   /** http 传输的 MCP endpoint URL */
   url?: string;
+  /** 工具调用超时秒数；0 = 默认 30s（长任务 MCP 需要调大） */
+  timeout_sec?: number;
   connected: boolean;
   tools: string[];
   /** 每个 MCP 工具的能力定义（描述 + 参数 schema） */

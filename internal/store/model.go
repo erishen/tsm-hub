@@ -90,6 +90,9 @@ type MCPServer struct {
 	Transport string `json:"transport,omitempty"`
 	// URL 是 http 传输的 MCP endpoint（如 http://127.0.0.1:8787/mcp）。
 	URL string `json:"url,omitempty"`
+	// TimeoutSec 是工具调用的超时秒数；0 时用默认 30s。
+	// 长任务类 MCP（如数据管线、耗时 review）需要调大。
+	TimeoutSec int `json:"timeout_sec,omitempty"`
 }
 
 // AgentCfg 配置网关 agent：客户端不传 tools 时，网关自动附加内置工具池
