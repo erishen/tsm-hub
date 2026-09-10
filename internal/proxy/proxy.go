@@ -560,6 +560,24 @@ func compact(s string) string {
 	return s
 }
 
+// isFreeModel 判断一次上游调用是否免费：模型名带 :free/-free 后缀，或
+// 该 provider 最近一次探测快照里标记为 Free（与路由 smartScore 的判据一致）。
+func isFreeModel(st *store.Store, providerID, upstreamModel string) bool {
+	if strings.Contains(upstreamModel, ":free") || strings.HasSuffix(upstreamModel, "-free") {
+		return true
+	}
+	p, ok := st.GetProvider(providerID)
+	if !ok {
+		return false
+	}
+	for i := range p.ProbeModels {
+		if p.ProbeModels[i].ID == upstreamModel && p.ProbeModels[i].Free {
+			return true
+		}
+	}
+	return false
+}
+
 // account 把一次请求写入用量流水。
 func (p *Proxy) account(key store.APIKey, model string, res Result) {
 	st := p.store.Settings()
@@ -573,6 +591,10 @@ func (p *Proxy) account(key store.APIKey, model string, res Result) {
 		price = st.Pricing["default"]
 	}
 	cost := float64(res.PromptTokens)/1000*price.InputPer1K + float64(res.CompletionToken)/1000*price.OutputPer1K
+	// 免费模型（上游探测 Free 或 :free/-free 后缀）不计成本。
+	if isFreeModel(p.store, res.ProviderID, res.UpstreamModel) {
+		cost = 0
+	}
 	total := res.TotalTokens
 	if total == 0 {
 		total = res.PromptTokens + res.CompletionToken
