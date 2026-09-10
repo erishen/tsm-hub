@@ -61,6 +61,7 @@ func (s *Server) adminMux() http.Handler {
 	m.HandleFunc("GET /api/admin/external-tools", s.admin(s.handleListExternalTools))
 	m.HandleFunc("POST /api/admin/external-tools/{name}/adopt", s.admin(s.handleAdoptExternalTool))
 	m.HandleFunc("DELETE /api/admin/external-tools/{name}", s.admin(s.handleDeleteExternalTool))
+	m.HandleFunc("GET /api/admin/external-skills/candidates", s.admin(s.handleListExternalSkillCandidates))
 	m.HandleFunc("GET /api/admin/external-mcps/candidates", s.admin(s.handleListExternalMcpCandidates))
 	m.HandleFunc("POST /api/admin/external-mcps/{server}/adopt", s.admin(s.handleAdoptExternalMcp))
 	m.HandleFunc("GET /api/admin/sandbox/status", s.admin(s.handleSandboxStatus))
@@ -1707,6 +1708,73 @@ func (s *Server) handleListExternalTools(w http.ResponseWriter, r *http.Request)
 		out = append(out, item)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"external_tools": out})
+}
+
+// handleListExternalSkillCandidates 返回外部技能候选（技能库页"外部技能"区）：
+//   - 已录用 kind=skill 的能力（管理员在监控页录用为技能的），合并调用统计；
+//   - 未录用但调用方声明带技能特征（skill: / skill_ 前缀）的候选，
+//     供管理员在技能库页择优录用（adopt kind=skill）。
+func (s *Server) handleListExternalSkillCandidates(w http.ResponseWriter, r *http.Request) {
+	known := map[string]bool{}
+	for _, t := range s.proxy.ToolCatalog() {
+		known[t.Name] = true
+	}
+	for _, n := range []string{"read_file", "csv_analyze", "execute_code"} {
+		known[n] = true
+	}
+	stats := map[string]struct{ Calls, Keys int }{}
+	for _, t := range s.rec.ClientToolStats() {
+		stats[t.Name] = struct{ Calls, Keys int }{t.Calls, t.KeyCount}
+	}
+	adopted := map[string]store.ExternalTool{}
+	for _, t := range s.store.ListExternalTools() {
+		if t.Kind == "skill" {
+			adopted[t.Name] = t
+		}
+	}
+	out := make([]map[string]any, 0, len(adopted)+4)
+	seen := map[string]bool{}
+	for _, t := range s.store.ListExternalTools() {
+		if t.Kind != "skill" {
+			continue
+		}
+		item := map[string]any{
+			"name": t.Name, "description": t.Description, "adopted": true,
+			"adopted_at": t.AdoptedAt, "kind": "skill",
+		}
+		if st, ok := stats[t.Name]; ok {
+			item["calls"] = st.Calls
+			item["key_count"] = st.Keys
+		}
+		out = append(out, item)
+		seen[t.Name] = true
+	}
+	for _, t := range s.rec.ClientToolStats() {
+		if seen[t.Name] || known[t.Name] {
+			continue
+		}
+		if !strings.HasPrefix(t.Name, "skill:") && !strings.HasPrefix(t.Name, "skill_") {
+			continue
+		}
+		out = append(out, map[string]any{
+			"name": t.Name, "calls": t.Calls, "key_count": t.KeyCount,
+			"adopted": false, "kind": "skill",
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		ai, _ := out[i]["adopted"].(bool)
+		aj, _ := out[j]["adopted"].(bool)
+		if ai != aj {
+			return ai
+		}
+		ci, _ := out[i]["calls"].(int)
+		cj, _ := out[j]["calls"].(int)
+		if ci != cj {
+			return ci > cj
+		}
+		return out[i]["name"].(string) < out[j]["name"].(string)
+	})
+	writeJSON(w, http.StatusOK, map[string]any{"candidates": out})
 }
 
 // handleAdoptExternalTool 录用（或更新）一个外部自创能力（工具或技能）。

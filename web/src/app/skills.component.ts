@@ -1,12 +1,23 @@
 import { Component, OnInit, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { ApiService } from './api.service';
 import { SkillDetail, SkillSummary } from './models';
+
+interface SkillCandidate {
+  name: string;
+  calls: number;
+  key_count: number;
+  adopted: boolean;
+  description?: string;
+  adopted_at?: string;
+  kind?: string;
+}
 
 @Component({
   selector: 'app-skills',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, FormsModule],
   template: `
     <div class="page-head">
       <div>
@@ -56,6 +67,62 @@ import { SkillDetail, SkillSummary } from './models';
       </div>
       <ng-template #none><div class="empty">技能库为空或未配置 skills_dir</div></ng-template>
     </div>
+
+    <div class="card" *ngIf="!detail()">
+      <h2>外部技能候选（{{ candidates().length }}）
+        <span class="muted" style="font-weight:400;font-size:12px">
+          （调用方声明过、网关未收录的技能类能力；可择优录用为技能，skill-run 调用时注入指令说明）
+        </span>
+      </h2>
+      <div class="banner error" *ngIf="candError()">{{ candError() }}</div>
+      <div class="muted small" style="margin-bottom:8px">
+        已录用技能（<span class="mono">kind=skill</span>）会出现在模型可感知的技能清单；未录用候选带 <span class="mono">skill:</span>/<span class="mono">skill_</span> 前缀。
+      </div>
+      <table class="tbl" *ngIf="candidates().length; else noneCand">
+        <thead>
+          <tr><th>名称</th><th>说明</th><th style="width:110px">调用</th><th style="width:220px">操作</th></tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let c of candidates()">
+            <td class="col-name"><span class="mono small" [title]="c.name">{{ c.name }}</span></td>
+            <td>
+              <span *ngIf="c.adopted && c.description" class="muted small">{{ c.description }}</span>
+              <span *ngIf="c.adopted" class="badge ok" style="margin-left:6px">已录用</span>
+              <span *ngIf="!c.adopted" class="badge">候选</span>
+              <div class="muted small" *ngIf="c.adopted && c.adopted_at">录用于 {{ c.adopted_at }}</div>
+            </td>
+            <td><span class="mono small">{{ c.calls || 0 }} 次 · {{ c.key_count || 0 }} key</span></td>
+            <td>
+              <button class="small primary" *ngIf="!c.adopted" (click)="openAdopt(c)">录用为技能</button>
+              <button class="small danger" *ngIf="c.adopted" (click)="unadopt(c)">取消录用</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <ng-template #noneCand><div class="empty">暂无外部技能候选 —— 调用方声明 <span class="mono">skill:</span> 前缀的未收录能力时会出现在这里</div></ng-template>
+    </div>
+
+    <!-- 录用技能弹窗 -->
+    <div class="modal-backdrop" *ngIf="adopting()" (click)="closeAdopt()">
+      <div class="modal" (click)="$event.stopPropagation()">
+        <div class="modal-head">
+          <div class="modal-icon">✦</div>
+          <div class="modal-titles">
+            <h2>录用为技能 <span class="mono">{{ adopting()!.name }}</span></h2>
+            <div class="sub">录入技能指令说明，skill-run 调用时注入给模型（仅登记说明，执行在调用方侧）</div>
+          </div>
+          <button class="icon" (click)="closeAdopt()" aria-label="关闭">×</button>
+        </div>
+        <div class="modal-body">
+          <label>指令说明（SKILL.md 风格）</label>
+          <textarea rows="6" [(ngModel)]="adoptDesc" placeholder="描述该技能的用途、输入输出、使用边界…"></textarea>
+        </div>
+        <div class="modal-foot">
+          <button (click)="closeAdopt()">取消</button>
+          <button class="primary" (click)="confirmAdopt()" [disabled]="adoptSaving()">{{ adoptSaving() ? '录用中…' : '确认录用' }}</button>
+        </div>
+      </div>
+    </div>
   `,
   styles: [`
     .skill-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
@@ -80,17 +147,66 @@ export class SkillsComponent implements OnInit {
   readonly detail = signal<SkillDetail | null>(null);
   readonly error = signal('');
   readonly copied = signal(false);
+  readonly candidates = signal<SkillCandidate[]>([]);
+  readonly candError = signal('');
+  readonly adopting = signal<SkillCandidate | null>(null);
+  readonly adoptDesc = signal('');
+  readonly adoptSaving = signal(false);
 
   constructor(private api: ApiService) {}
 
   ngOnInit(): void {
     this.load();
+    this.loadCandidates();
   }
 
   load(): void {
     this.api.listSkills().subscribe({
       next: (r) => { this.skills.set(r.skills ?? []); this.dir.set(r.dir || ''); },
       error: (e: Error) => this.error.set(e.message),
+    });
+  }
+
+  loadCandidates(): void {
+    this.api.externalSkillCandidates().subscribe({
+      next: (r) => this.candidates.set(r.candidates || []),
+      error: (e: Error) => this.candError.set('加载失败：' + e.message),
+    });
+  }
+
+  openAdopt(c: SkillCandidate): void {
+    this.adopting.set(c);
+    this.adoptDesc.set(c.description || '');
+  }
+
+  closeAdopt(): void {
+    if (this.adoptSaving()) return;
+    this.adopting.set(null);
+  }
+
+  confirmAdopt(): void {
+    const c = this.adopting();
+    if (!c) return;
+    this.adoptSaving.set(true);
+    this.api.adoptExternalTool(c.name, {
+      description: this.adoptDesc(),
+      kind: 'skill',
+      impl_type: 'none',
+    }).subscribe({
+      next: () => {
+        this.adoptSaving.set(false);
+        this.adopting.set(null);
+        this.loadCandidates();
+      },
+      error: (e: Error) => { this.adoptSaving.set(false); this.candError.set('录用失败：' + e.message); },
+    });
+  }
+
+  unadopt(c: SkillCandidate): void {
+    if (!confirm(`取消录用技能「${c.name}」？`)) return;
+    this.api.deleteExternalTool(c.name).subscribe({
+      next: () => this.loadCandidates(),
+      error: (e: Error) => this.candError.set('取消失败：' + e.message),
     });
   }
 

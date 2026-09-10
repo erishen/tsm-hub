@@ -189,6 +189,16 @@ export class ApiService {
       .pipe(catchError(this.handleError));
   }
 
+  externalSkillCandidates(): Observable<{ candidates: { name: string; calls: number; key_count: number; adopted: boolean; description?: string; adopted_at?: string; kind?: string }[] }> {
+    return this.http.get<{ candidates: { name: string; calls: number; key_count: number; adopted: boolean; description?: string; adopted_at?: string; kind?: string }[] }>('/api/admin/external-skills/candidates', { headers: this.headers() })
+      .pipe(catchError(this.handleError));
+  }
+
+  deleteExternalTool(name: string): Observable<unknown> {
+    return this.http.delete(`/api/admin/external-tools/${encodeURIComponent(name)}`, { headers: this.headers() })
+      .pipe(catchError(this.handleError));
+  }
+
   externalMcpCandidates(): Observable<{ candidates: { server: string; calls: number; key_count: number; tools: { name: string; calls: number }[] }[] }> {
     return this.http.get<{ candidates: { server: string; calls: number; key_count: number; tools: { name: string; calls: number }[] }[] }>('/api/admin/external-mcps/candidates', { headers: this.headers() })
       .pipe(catchError(this.handleError));
@@ -211,11 +221,6 @@ export class ApiService {
 
   clearMemory(): Observable<unknown> {
     return this.http.delete('/api/admin/memory', { headers: this.headers() })
-      .pipe(catchError(this.handleError));
-  }
-
-  deleteExternalTool(name: string): Observable<unknown> {
-    return this.http.delete(`/api/admin/external-tools/${encodeURIComponent(name)}`, { headers: this.headers() })
       .pipe(catchError(this.handleError));
   }
 
