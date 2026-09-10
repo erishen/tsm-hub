@@ -149,6 +149,8 @@ import { Agg, DailyPoint, UsageRecord, UsageResponse } from './models';
                 <span class="muted" style="font-size:12px" *ngIf="r.failover?.length"
                       [title]="failTitle(r)">{{ failChain(r) }}</span>
               </span>
+              <span class="badge" *ngIf="r.exec_tools?.length" style="margin-left:2px"
+                    [title]="'网关执行的工具: ' + r.exec_tools!.join(', ')">⚙ {{ execSummary(r) }}</span>
             </td>
           </tr>
         </tbody>
@@ -174,6 +176,11 @@ export class UsageComponent implements OnInit {
   failChain(r: UsageRecord): string {
     if (!r.failover?.length) return '';
     return r.failover.map(f => f.provider_id).join(' → ');
+  }
+
+  execSummary(r: UsageRecord): string {
+    if (!r.exec_tools?.length) return '';
+    return r.exec_tools.length === 1 ? r.exec_tools[0] : r.exec_tools.length + ' 个工具';
   }
 
   constructor(private api: ApiService) {}

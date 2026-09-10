@@ -1298,6 +1298,17 @@ func (s *Server) handleObservability(w http.ResponseWriter, r *http.Request) {
 	}
 
 	failoverBy := s.rec.FailoverBy()
+	// 工具执行归因：TOP 20 个被实际调用的工具（含 mcp_* 与 skill 名）。
+	allTools := s.rec.ToolStats()
+	if len(allTools) > 20 {
+		allTools = allTools[:20]
+	}
+	toolStats := make([]map[string]any, 0, len(allTools))
+	for _, t := range allTools {
+		toolStats = append(toolStats, map[string]any{
+			"name": t.Name, "calls": t.Calls, "key_count": t.KeyCount,
+		})
+	}
 	provs := make([]map[string]any, 0)
 	for id, a := range s.rec.Providers() {
 		if !validProviderID(id) {
@@ -1332,6 +1343,7 @@ func (s *Server) handleObservability(w http.ResponseWriter, r *http.Request) {
 		"providers": provs,
 		"scenes":    scenes,
 		"trend":     s.rec.Daily(days),
+		"tools":     toolStats,
 	})
 }
 

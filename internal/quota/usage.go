@@ -92,6 +92,10 @@ type Recorder struct {
 	scenes    map[string]*Agg            // scene -> 累计
 	// failoverBy 统计每个 provider 作为 failover 失败候选被跳过的次数（稳定性反向指标）。
 	failoverBy map[string]int
+	// toolCalls 统计每个工具（内置/mcp_*/skill 名）被执行的总次数。
+	toolCalls map[string]int
+	// keyTools 统计每个 key 用过哪些工具（keyID -> 工具 -> 次数）。
+	keyTools map[string]map[string]int
 }
 
 // NewRecorder 打开用量目录并回放历史（默认最近 90 天）。
@@ -107,6 +111,8 @@ func NewRecorder(dir string) (*Recorder, error) {
 		providers:  map[string]*Agg{},
 		scenes:     map[string]*Agg{},
 		failoverBy: map[string]int{},
+		toolCalls:  map[string]int{},
+		keyTools:   map[string]map[string]int{},
 	}
 	if err := r.replay(90); err != nil {
 		return nil, err
@@ -214,6 +220,56 @@ func (r *Recorder) accumulate(rec store.UsageRecord) {
 	for _, f := range rec.Failover {
 		r.failoverBy[f.ProviderID]++
 	}
+	// 工具执行归因：客户端声明 + 网关实际执行。
+	for _, t := range rec.ExecTools {
+		r.toolCalls[t]++
+		if km := r.keyTools[rec.KeyID]; km != nil {
+			km[t]++
+		} else {
+			r.keyTools[rec.KeyID] = map[string]int{t: 1}
+		}
+	}
+}
+
+// ToolStat 是工具使用统计条目。
+type ToolStat struct {
+	Name     string `json:"name"`
+	Calls    int    `json:"calls"`
+	KeyCount int    `json:"key_count"`
+}
+
+// ToolStats 返回工具执行统计（按调用次数降序；不含客户端声明但未执行的）。
+func (r *Recorder) ToolStats() []ToolStat {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]ToolStat, 0, len(r.toolCalls))
+	for name, calls := range r.toolCalls {
+		kc := 0
+		for _, km := range r.keyTools {
+			if km[name] > 0 {
+				kc++
+			}
+		}
+		out = append(out, ToolStat{Name: name, Calls: calls, KeyCount: kc})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Calls != out[j].Calls {
+			return out[i].Calls > out[j].Calls
+		}
+		return out[i].Name < out[j].Name
+	})
+	return out
+}
+
+// KeyTools 返回某 key 实际执行过的工具（工具 -> 次数）。
+func (r *Recorder) KeyTools(keyID string) map[string]int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := map[string]int{}
+	for k, v := range r.keyTools[keyID] {
+		out[k] = v
+	}
+	return out
 }
 
 // FailoverBy 返回每个 provider 作为 failover 失败候选被跳过的次数。
