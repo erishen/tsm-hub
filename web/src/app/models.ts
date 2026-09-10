@@ -141,6 +141,12 @@ export interface ObservabilityResponse {
   scenes: { scene: string; usage: AggView }[];
   trend: DailyPoint[];
   tools: { name: string; calls: number; key_count: number }[];
+  /** skill:<name> 前缀聚合的技能执行统计。 */
+  skills: { skill: string; calls: number; key_count: number }[];
+  /** mcp_<server>_<tool> 按 server 聚合的 MCP 工具统计。 */
+  mcps: { server: string; calls: number; key_count: number }[];
+  /** 调用方声明但不在网关目录里的外部自创工具（adopted=已被录用进网关）。 */
+  external_tools: { name: string; calls: number; key_count: number; adopted: boolean }[];
 }
 
 export interface ProviderHealth {

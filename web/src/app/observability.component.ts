@@ -149,6 +149,64 @@ function rateClass(rate: number): string {
     </div>
 
     <div class="card">
+      <h2>技能调用 <span class="muted" style="font-weight:400;font-size:12px">（网关执行过的技能，按 skill: 前缀聚合）</span></h2>
+      <table *ngIf="data() && data()!.skills.length; else noneSkills">
+        <thead>
+          <tr>
+            <th>技能</th><th class="num">调用次数</th><th class="num">使用方（key 数）</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let t of data()!.skills">
+            <td><span class="mono">{{ t.skill }}</span></td>
+            <td class="num">{{ t.calls }}</td>
+            <td class="num">{{ t.key_count }}</td>
+          </tr>
+        </tbody>
+      </table>
+      <ng-template #noneSkills><div class="empty">暂无技能调用</div></ng-template>
+    </div>
+
+    <div class="card">
+      <h2>MCP 使用 <span class="muted" style="font-weight:400;font-size:12px">（mcp_&lt;server&gt;_&lt;tool&gt; 按 server 聚合）</span></h2>
+      <table *ngIf="data() && data()!.mcps.length; else noneMcps">
+        <thead>
+          <tr>
+            <th>MCP Server</th><th class="num">调用次数</th><th class="num">使用方（key 数）</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let t of data()!.mcps">
+            <td><span class="mono">{{ t.server }}</span></td>
+            <td class="num">{{ t.calls }}</td>
+            <td class="num">{{ t.key_count }}</td>
+          </tr>
+        </tbody>
+      </table>
+      <ng-template #noneMcps><div class="empty">暂无 MCP 调用</div></ng-template>
+    </div>
+
+    <div class="card">
+      <h2>外部自创工具 <span class="muted" style="font-weight:400;font-size:12px">（调用方声明、不在网关目录里的工具；可择优录用进网关）</span></h2>
+      <table *ngIf="data() && data()!.external_tools.length; else noneExt">
+        <thead>
+          <tr>
+            <th>工具</th><th class="num">调用次数</th><th class="num">使用方（key 数）</th><th>状态</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let t of data()!.external_tools">
+            <td><span class="mono">{{ t.name }}</span></td>
+            <td class="num">{{ t.calls }}</td>
+            <td class="num">{{ t.key_count }}</td>
+            <td><span [class]="t.adopted ? 'badge ok' : 'badge'">{{ t.adopted ? '已录用' : '未录用' }}</span></td>
+          </tr>
+        </tbody>
+      </table>
+      <ng-template #noneExt><div class="empty">暂无外部自创工具</div></ng-template>
+    </div>
+
+    <div class="card">
       <h2>按天趋势</h2>
       <table *ngIf="visibleTrend().length; else none3">
         <thead>

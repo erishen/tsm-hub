@@ -531,13 +531,24 @@ var baiFreeModels = map[string]bool{
 	"hy3": true, "mimo-v2.5": true, "qwen3.8-flash": true,
 }
 
-// markFreeByProvider 按 Provider 免费名单修正探测结果（仅 bai 需要：上游不带免费字段）。
-func markFreeByProvider(providerID string, models []map[string]any) []map[string]any {
-	if providerID != "bai" {
-		return models
+// markFreeByProvider 按 Provider 免费名单修正探测结果：
+//   - bai：官方免费阵容（上游 /v1/models 不带 is_free 字段，探测无法自动识别）；
+//   - alibailian：用户确认当前已配置模型均有免费额度（上游同样不带免费字段），
+//     把「已配置且探测返回」的模型标记免费，计费与目录两端自动一致。
+func markFreeByProvider(p store.Provider, models []map[string]any) []map[string]any {
+	configured := map[string]bool{}
+	for _, id := range p.Models {
+		configured[id] = true
 	}
 	for _, m := range models {
-		if id, _ := m["id"].(string); baiFreeModels[id] {
+		id, _ := m["id"].(string)
+		if id == "" {
+			continue
+		}
+		switch {
+		case p.ID == "bai" && baiFreeModels[id]:
+			m["free"] = true
+		case p.ID == "alibailian" && configured[id]:
 			m["free"] = true
 		}
 	}
@@ -571,7 +582,7 @@ func (s *Server) handleRefreshModels(w http.ResponseWriter, r *http.Request) {
 				statuses[p.ID] = fmt.Sprintf("上游返回 %d: %s", status, compact(string(body)))
 				return
 			}
-			out = markFreeByProvider(p.ID, out)
+			out = markFreeByProvider(p, out)
 			s.saveProbeSnapshot(p.BaseURL, p.APIKey, out)
 			statuses[p.ID] = "ok"
 		}(p)
@@ -653,6 +664,9 @@ func (s *Server) buildCatalog() map[string]any {
 				it.Free = true
 			} else if p.ID == "bai" && baiFreeModels[id] {
 				// B.AI 免费阵容（探测无 is_free 字段时的静态兜底）。
+				it.Free = true
+			} else if p.ID == "alibailian" {
+				// 阿里云百炼：上游 /v1/models 不带免费字段，当前已配置模型均确认有免费额度。
 				it.Free = true
 			} else if strings.HasSuffix(id, ":free") {
 				// OpenRouter :free 后缀约定（id 层面即表示免费）。
@@ -1303,6 +1317,22 @@ func toAggView(a quota.Agg) aggView {
 	return aggView{Agg: a, AvgLatencyMS: a.AvgLatency(), ErrorRate: a.ErrorRate()}
 }
 
+// knownToolName 判断调用方声明的工具名是否命中网关现有能力。
+// 除精确匹配外，兼容 MCP 客户端命名风格 server__tool ↔ 网关 mcp_server_tool
+// （如 fs__read_file ↔ mcp_fs_read_file），避免把自家能力误判为外部自创。
+func knownToolName(name string, known map[string]bool) bool {
+	if known[name] {
+		return true
+	}
+	if i := strings.Index(name, "__"); i > 0 {
+		alt := "mcp_" + name[:i] + "_" + name[i+2:]
+		if known[alt] {
+			return true
+		}
+	}
+	return false
+}
+
 // handleObservability 返回可观测性总览：总览卡片、provider 维度、场景维度、趋势。
 // 数据全部来自内存聚合（启动时回放，运行中增量），不触发任何上游查询。
 func (s *Server) handleObservability(w http.ResponseWriter, r *http.Request) {
@@ -1382,14 +1412,18 @@ func (s *Server) handleObservability(w http.ResponseWriter, r *http.Request) {
 	for _, t := range s.proxy.ToolCatalog() {
 		known[t.Name] = true
 	}
+	// 条件性内置工具（ReadRoot/Sandbox 未启用时不在目录，但仍是网关能力，不算外部自创）。
+	for _, n := range []string{"read_file", "csv_analyze", "execute_code"} {
+		known[n] = true
+	}
 	adopted := map[string]bool{}
 	for _, t := range s.store.ListExternalTools() {
 		adopted[t.Name] = true
 	}
 	extStats := make([]map[string]any, 0)
 	for _, t := range s.rec.ClientToolStats() {
-		if known[t.Name] {
-			continue // 系统内已有能力，不算外部自创
+		if knownToolName(t.Name, known) {
+			continue // 系统内已有能力（含命名归一化），不算外部自创
 		}
 		extStats = append(extStats, map[string]any{
 			"name": t.Name, "calls": t.Calls, "key_count": t.KeyCount,
