@@ -41,6 +41,7 @@ function rateClass(rate: number): string {
           </select>
         </div>
         <button (click)="load()">刷新</button>
+        <button (click)="exportCsv()" [disabled]="!data()?.trend?.length">导出 CSV</button>
       </div>
     </div>
 
@@ -348,6 +349,25 @@ constructor(private api: ApiService) {}
     return (this.data()?.trend || []).filter(
       (d) => d.requests > 0 || d.total_tokens > 0 || d.cost_usd > 0 || d.errors > 0,
     );
+  }
+
+  /** 导出按天趋势为 CSV（日期/请求/错误/Prompt Tokens/Completion Tokens/成本/平均延迟）。 */
+  exportCsv(): void {
+    const rows = this.visibleTrend();
+    if (!rows.length) return;
+    const header = ['日期', '请求数', '错误数', 'Prompt Tokens', 'Completion Tokens', '总成本(USD)', '平均延迟(ms)'];
+    const lines = [header.join(',')];
+    for (const d of rows) {
+      const avgLat = d.requests > 0 ? Math.round(d.latency_sum_ms / d.requests) : 0;
+      lines.push([d.date, d.requests, d.errors, d.prompt_tokens, d.completion_tokens, d.cost_usd.toFixed(6), avgLat].join(','));
+    }
+    const blob = new Blob(['\uFEFF' + lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `observability_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   // ---- 外部工具/技能录用 ----

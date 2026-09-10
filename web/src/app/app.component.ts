@@ -31,6 +31,23 @@ import { ApiService } from './api.service';
           LLM Token Router
           <small>自制 Key · 智能路由</small>
         </div>
+        <div class="global-search">
+          <input type="text" [(ngModel)]="searchQuery" (ngModelChange)="onSearch()"
+                 placeholder="搜索模型/工具/技能/Provider…" autocomplete="off" />
+          <div class="search-dropdown" *ngIf="searchOpen && searchResults.length">
+            <ng-container *ngFor="let group of searchResults">
+              <div class="search-group-title">{{ group.label }}（{{ group.items.length }}）</div>
+              <a *ngFor="let item of group.items" [routerLink]="item.route"
+                 (click)="closeSearch()" [title]="item.desc || ''">
+                <span class="mono">{{ item.name }}</span>
+                <span class="muted small" *ngIf="item.desc" style="margin-left:6px">{{ item.desc }}</span>
+              </a>
+            </ng-container>
+          </div>
+          <div class="search-dropdown" *ngIf="searchOpen && searchQuery && !searching && !searchResults.length">
+            <div class="empty" style="padding:12px">无匹配结果</div>
+          </div>
+        </div>
         <nav class="nav">
           <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{exact:true}">概览</a>
           <ng-container *ngFor="let group of navGroups">
@@ -102,6 +119,75 @@ export class AppComponent {
   ];
 
   collapsed: Record<string, boolean> = {};
+
+  // ---- 全局搜索 ----
+  searchQuery = '';
+  searchOpen = false;
+  searching = false;
+  searchResults: { label: string; items: { name: string; desc?: string; route: string }[] }[] = [];
+  private searchTimer: ReturnType<typeof setTimeout> | null = null;
+
+  onSearch(): void {
+    this.searchOpen = true;
+    if (this.searchTimer) clearTimeout(this.searchTimer);
+    const q = this.searchQuery.trim().toLowerCase();
+    if (!q) { this.searchResults = []; this.searching = false; return; }
+    this.searching = true;
+    this.searchTimer = setTimeout(() => this.doSearch(q), 250);
+  }
+
+  /** 并行拉取模型/工具/技能/Provider/路由/Key，本地过滤匹配项，按类型分组展示。 */
+  private doSearch(q: string): void {
+    Promise.all([
+      this.api.modelsCatalog().toPromise().catch(() => null),
+      this.api.listTools().toPromise().catch(() => null),
+      this.api.listSkills().toPromise().catch(() => null),
+      this.api.listProviders().toPromise().catch(() => null),
+      this.api.listRoutes().toPromise().catch(() => null),
+      this.api.listKeys().toPromise().catch(() => null),
+    ]).then(([models, tools, skills, providers, routes, keys]) => {
+      const groups: { label: string; items: { name: string; desc?: string; route: string }[] }[] = [];
+      const match = (s: string) => s.toLowerCase().includes(q);
+      if (models?.models) {
+        const items = models.models.filter((m: any) => match(m.id) || match(m.name || '')).slice(0, 8)
+          .map((m: any) => ({ name: m.id, desc: m.provider || '', route: '/models' }));
+        if (items.length) groups.push({ label: '模型', items });
+      }
+      if (tools?.tools) {
+        const items = tools.tools.filter((t: any) => match(t.name) || match(t.description || '')).slice(0, 8)
+          .map((t: any) => ({ name: t.name, desc: (t.description || '').slice(0, 30), route: '/tools' }));
+        if (items.length) groups.push({ label: '工具', items });
+      }
+      if (skills?.skills) {
+        const items = skills.skills.filter((s: any) => match(s.name) || match(s.description || '')).slice(0, 8)
+          .map((s: any) => ({ name: s.name, desc: (s.description || '').slice(0, 30), route: '/skills' }));
+        if (items.length) groups.push({ label: '技能', items });
+      }
+      if (providers?.providers) {
+        const items = providers.providers.filter((p: any) => match(p.id) || match(p.name || '')).slice(0, 8)
+          .map((p: any) => ({ name: p.id, desc: p.base_url || '', route: '/providers' }));
+        if (items.length) groups.push({ label: 'Provider', items });
+      }
+      if (routes?.routes) {
+        const items = routes.routes.filter((r: any) => match(r.id) || match(r.model || '')).slice(0, 8)
+          .map((r: any) => ({ name: r.id || r.model, desc: r.model || '', route: '/routes' }));
+        if (items.length) groups.push({ label: '路由', items });
+      }
+      if (keys?.keys) {
+        const items = keys.keys.filter((k: any) => match(k.name) || match(k.id || '')).slice(0, 8)
+          .map((k: any) => ({ name: k.name, desc: k.prefix || '', route: '/keys' }));
+        if (items.length) groups.push({ label: 'Key', items });
+      }
+      this.searchResults = groups;
+      this.searching = false;
+    });
+  }
+
+  closeSearch(): void {
+    this.searchOpen = false;
+    this.searchQuery = '';
+    this.searchResults = [];
+  }
 
   toggleGroup(name: string): void {
     this.collapsed[name] = !this.collapsed[name];
