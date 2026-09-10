@@ -184,8 +184,18 @@ export class ApiService {
       .pipe(catchError(this.handleError));
   }
 
-  adoptExternalTool(name: string, body: { description?: string; impl_type: string; impl_source?: string }): Observable<unknown> {
+  adoptExternalTool(name: string, body: { description?: string; kind?: string; impl_type: string; impl_source?: string }): Observable<unknown> {
     return this.http.post(`/api/admin/external-tools/${encodeURIComponent(name)}/adopt`, body, { headers: this.headers() })
+      .pipe(catchError(this.handleError));
+  }
+
+  externalMcpCandidates(): Observable<{ candidates: { server: string; calls: number; key_count: number; tools: { name: string; calls: number }[] }[] }> {
+    return this.http.get<{ candidates: { server: string; calls: number; key_count: number; tools: { name: string; calls: number }[] }[] }>('/api/admin/external-mcps/candidates', { headers: this.headers() })
+      .pipe(catchError(this.handleError));
+  }
+
+  adoptExternalMcp(server: string, body: { transport: string; url?: string; command?: string; args?: string[]; env?: Record<string, string> }): Observable<unknown> {
+    return this.http.post(`/api/admin/external-mcps/${encodeURIComponent(server)}/adopt`, body, { headers: this.headers() })
       .pipe(catchError(this.handleError));
   }
 

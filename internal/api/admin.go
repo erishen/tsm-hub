@@ -61,6 +61,8 @@ func (s *Server) adminMux() http.Handler {
 	m.HandleFunc("GET /api/admin/external-tools", s.admin(s.handleListExternalTools))
 	m.HandleFunc("POST /api/admin/external-tools/{name}/adopt", s.admin(s.handleAdoptExternalTool))
 	m.HandleFunc("DELETE /api/admin/external-tools/{name}", s.admin(s.handleDeleteExternalTool))
+	m.HandleFunc("GET /api/admin/external-mcps/candidates", s.admin(s.handleListExternalMcpCandidates))
+	m.HandleFunc("POST /api/admin/external-mcps/{server}/adopt", s.admin(s.handleAdoptExternalMcp))
 	return m
 }
 
@@ -1672,6 +1674,10 @@ func (s *Server) handleListExternalTools(w http.ResponseWriter, r *http.Request)
 	for _, t := range s.proxy.ToolCatalog() {
 		known[t.Name] = true
 	}
+	// 条件性内置工具（ReadRoot/Sandbox 未启用时不在目录，但仍是网关能力，不算外部自创）。
+	for _, n := range []string{"read_file", "csv_analyze", "execute_code"} {
+		known[n] = true
+	}
 	adopted := map[string]bool{}
 	impls := map[string]store.ExternalTool{}
 	for _, t := range s.store.ListExternalTools() {
@@ -1680,7 +1686,7 @@ func (s *Server) handleListExternalTools(w http.ResponseWriter, r *http.Request)
 	}
 	out := make([]map[string]any, 0)
 	for _, t := range s.rec.ClientToolStats() {
-		if known[t.Name] {
+		if knownToolName(t.Name, known) {
 			continue
 		}
 		item := map[string]any{
@@ -1690,14 +1696,21 @@ func (s *Server) handleListExternalTools(w http.ResponseWriter, r *http.Request)
 		if t2, ok := impls[t.Name]; ok {
 			item["impl_type"] = t2.ImplType
 			item["description"] = t2.Description
+			item["kind"] = t2.Kind
+			if item["kind"] == "" {
+				item["kind"] = "tool"
+			}
 		}
 		out = append(out, item)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"external_tools": out})
 }
 
-// handleAdoptExternalTool 录用（或更新）一个外部自创工具。
-// body: {description, impl_type(none/js/alias), impl_source}
+// handleAdoptExternalTool 录用（或更新）一个外部自创能力（工具或技能）。
+// body: {description, kind(tool|skill), impl_type(none/js/alias), impl_source}
+//   kind=tool  —— 与 fastpath 晋升一致，js 检测器可被 gen_ 调用；
+//   kind=skill —— 技能说明模式：impl_type 仅 none，impl_source 为该技能的指令说明，
+//                 skill-run 调用时作为技能说明注入（与目录技能行为一致）。
 func (s *Server) handleAdoptExternalTool(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if name == "" || strings.ContainsAny(name, "/\\ ") {
@@ -1706,6 +1719,7 @@ func (s *Server) handleAdoptExternalTool(w http.ResponseWriter, r *http.Request)
 	}
 	var c struct {
 		Description string `json:"description"`
+		Kind        string `json:"kind"`
 		ImplType    string `json:"impl_type"`
 		ImplSource  string `json:"impl_source"`
 	}
@@ -1713,10 +1727,20 @@ func (s *Server) handleAdoptExternalTool(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid json: "+err.Error())
 		return
 	}
+	if c.Kind == "" {
+		c.Kind = "tool"
+	}
+	if c.Kind != "tool" && c.Kind != "skill" {
+		writeError(w, http.StatusBadRequest, "bad_request", "kind must be tool/skill")
+		return
+	}
 	if c.ImplType == "" {
 		c.ImplType = "none"
 	}
-	if c.ImplType != "none" && c.ImplType != "js" && c.ImplType != "alias" {
+	if c.Kind == "skill" {
+		// 技能录用只登记说明（skill-run 注入指令文本），不支持 js/alias 执行。
+		c.ImplType = "none"
+	} else if c.ImplType != "none" && c.ImplType != "js" && c.ImplType != "alias" {
 		writeError(w, http.StatusBadRequest, "bad_request", "impl_type must be none/js/alias")
 		return
 	}
@@ -1733,6 +1757,7 @@ func (s *Server) handleAdoptExternalTool(w http.ResponseWriter, r *http.Request)
 	if err := s.store.AdoptExternalTool(store.ExternalTool{
 		Name:        name,
 		Description: c.Description,
+		Kind:        c.Kind,
 		ImplType:    c.ImplType,
 		ImplSource:  c.ImplSource,
 		AdoptedAt:   time.Now().Format("2006-01-02 15:04:05"),
@@ -1750,6 +1775,112 @@ func (s *Server) handleDeleteExternalTool(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// handleListExternalMcpCandidates 返回外部 MCP server 候选：
+// 调用方声明的 server__tool 风格工具（未命中网关能力、未在网关 MCP 配置）按 server 聚合，
+// 供管理员择优接入网关（一键写入 Settings.Mcps 并常驻连接）。
+func (s *Server) handleListExternalMcpCandidates(w http.ResponseWriter, r *http.Request) {
+	known := map[string]bool{}
+	for _, t := range s.proxy.ToolCatalog() {
+		known[t.Name] = true
+	}
+	configured := s.store.Settings().Mcps
+	byServer := map[string]map[string]int{} // server -> tool -> calls
+	serverCalls := map[string]int{}
+	serverKeys := map[string]int{}
+	for _, t := range s.rec.ClientToolStats() {
+		if known[t.Name] {
+			continue
+		}
+		i := strings.Index(t.Name, "__")
+		if i <= 0 {
+			continue // 非 server__tool 风格，不是 MCP 候选
+		}
+		server := t.Name[:i]
+		if !validProviderID(server) {
+			continue
+		}
+		if _, ok := configured[server]; ok {
+			continue // 已接入网关的 server，不算外部候选
+		}
+		if byServer[server] == nil {
+			byServer[server] = map[string]int{}
+		}
+		byServer[server][t.Name] += t.Calls
+		serverCalls[server] += t.Calls
+		if serverKeys[server] < t.KeyCount {
+			serverKeys[server] = t.KeyCount
+		}
+	}
+	out := make([]map[string]any, 0, len(byServer))
+	for sv, tools := range byServer {
+		toolList := make([]map[string]any, 0, len(tools))
+		for name, calls := range tools {
+			toolList = append(toolList, map[string]any{"name": name, "calls": calls})
+		}
+		sort.Slice(toolList, func(i, j int) bool {
+			return toolList[i]["calls"].(int) > toolList[j]["calls"].(int)
+		})
+		out = append(out, map[string]any{
+			"server": sv, "calls": serverCalls[sv], "key_count": serverKeys[sv],
+			"tools": toolList,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i]["calls"].(int) > out[j]["calls"].(int)
+	})
+	writeJSON(w, http.StatusOK, map[string]any{"candidates": out})
+}
+
+// handleAdoptExternalMcp 把外部 MCP 候选接入网关：写入 Settings.Mcps 并重连。
+// body: {transport(stdio|http), url, command, args, env}
+func (s *Server) handleAdoptExternalMcp(w http.ResponseWriter, r *http.Request) {
+	server := r.PathValue("server")
+	if server == "" || !validProviderID(server) {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid mcp server name")
+		return
+	}
+	var c struct {
+		Transport string            `json:"transport"`
+		URL       string            `json:"url"`
+		Command   string            `json:"command"`
+		Args      []string          `json:"args"`
+		Env       map[string]string `json:"env"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&c); err != nil && err.Error() != "EOF" {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid json: "+err.Error())
+		return
+	}
+	if c.Transport == "" {
+		c.Transport = "stdio"
+	}
+	if c.Transport == "http" {
+		if c.URL == "" || (!strings.HasPrefix(c.URL, "http://") && !strings.HasPrefix(c.URL, "https://")) {
+			writeError(w, http.StatusBadRequest, "bad_request", "valid http(s) url required for http transport")
+			return
+		}
+	} else if c.Transport == "stdio" {
+		if c.Command == "" {
+			writeError(w, http.StatusBadRequest, "bad_request", "command required for stdio transport")
+			return
+		}
+	} else {
+		writeError(w, http.StatusBadRequest, "bad_request", "transport must be stdio/http")
+		return
+	}
+	if err := s.store.Update(func(cfg *store.Config) error {
+		if cfg.Settings.Mcps == nil {
+			cfg.Settings.Mcps = map[string]store.MCPServer{}
+		}
+		cfg.Settings.Mcps[server] = store.MCPServer{Transport: c.Transport, URL: c.URL, Command: c.Command, Args: c.Args, Env: c.Env}
+		return nil
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", err.Error())
+		return
+	}
+	s.proxy.ResetMCP()
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
