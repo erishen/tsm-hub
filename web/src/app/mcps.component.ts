@@ -69,7 +69,10 @@ import { McpServer, ToolInfo } from './models';
             </td>
           </tr>
           <tr *ngIf="loadingMcps()">
-            <td colspan="6" class="empty">加载中…</td>
+            <td colspan="6" style="padding:6px 0">
+              <div class="skel-row"></div>
+              <div class="skel-row" style="width:72%"></div>
+            </td>
           </tr>
           <tr *ngIf="!loadingMcps() && !mcps().length">
             <td colspan="6" class="empty">未配置 MCP server。示例：npx &#64;modelcontextprotocol/server-fetch</td>
@@ -88,7 +91,10 @@ import { McpServer, ToolInfo } from './models';
         <button class="small" (click)="loadTools()">加载</button>
       </div>
       <div class="tool-grid" *ngIf="loadingTools()">
-        <div class="empty" style="grid-column:1/-1">加载工具池中（MCP 进程可能较慢）…</div>
+        <div class="tool-card" style="grid-column:auto"><div class="skel-bar" style="width:55%"></div><div class="skel-bar" style="width:90%;margin-top:8px"></div></div>
+        <div class="tool-card"><div class="skel-bar" style="width:45%"></div><div class="skel-bar" style="width:80%;margin-top:8px"></div></div>
+        <div class="tool-card"><div class="skel-bar" style="width:60%"></div><div class="skel-bar" style="width:85%;margin-top:8px"></div></div>
+        <div class="muted small" style="grid-column:1/-1">加载工具池中（MCP 进程可能较慢）…</div>
       </div>
       <div class="tool-grid" *ngIf="!loadingTools() && tools().length; else noTools">
         <div class="tool-card" *ngFor="let t of tools()">
@@ -236,6 +242,13 @@ import { McpServer, ToolInfo } from './models';
     .tpl-id { font-weight:600; font-size:13px; }
     .tpl-desc { font-size:12px; line-height:1.45; }
     .tpl-needs { margin-top:6px; font-size:12px; color:#b58900; }
+    .skel-row { height:14px; border-radius:6px; margin:5px 2px;
+      background:linear-gradient(90deg,#efece4 25%,#f8f6f1 37%,#efece4 63%);
+      background-size:400% 100%; animation:skel 1.2s ease infinite; }
+    .skel-bar { height:12px; border-radius:6px;
+      background:linear-gradient(90deg,#efece4 25%,#f8f6f1 37%,#efece4 63%);
+      background-size:400% 100%; animation:skel 1.2s ease infinite; }
+    @keyframes skel { 0% {background-position:100% 0;} 100% {background-position:0 0;} }
   `],
 })
 export class McpsComponent implements OnInit {
@@ -310,19 +323,34 @@ export class McpsComponent implements OnInit {
     this.loadTools();
   }
 
+  // 保证 loading 骨架至少可见 350ms，避免接口太快导致闪烁不可见。
+  private minShown(start: number, flag: { done: () => void }): void {
+    const el = Date.now() - start;
+    if (el >= 350) { flag.done(); return; }
+    setTimeout(flag.done, 350 - el);
+  }
+
   load(): void {
     this.loadingMcps.set(true);
+    const t0 = Date.now();
     this.api.listMcps().subscribe({
-      next: (r) => { this.mcps.set(r.mcps || []); this.loadingMcps.set(false); },
-      error: (e) => { this.error.set(e.error?.error?.message || '加载 MCP 配置失败'); this.loadingMcps.set(false); },
+      next: (r) => {
+        this.mcps.set(r.mcps || []);
+        this.minShown(t0, { done: () => this.loadingMcps.set(false) });
+      },
+      error: (e) => { this.error.set(e.error?.error?.message || '加载 MCP 配置失败'); this.minShown(t0, { done: () => this.loadingMcps.set(false) }); },
     });
   }
 
   loadTools(): void {
     this.loadingTools.set(true);
+    const t0 = Date.now();
     this.api.listTools().subscribe({
-      next: (r) => { this.tools.set(r.tools || []); this.loadingTools.set(false); },
-      error: (e) => { this.error.set(e.error?.error?.message || '加载工具池失败'); this.loadingTools.set(false); },
+      next: (r) => {
+        this.tools.set(r.tools || []);
+        this.minShown(t0, { done: () => this.loadingTools.set(false) });
+      },
+      error: (e) => { this.error.set(e.error?.error?.message || '加载工具池失败'); this.minShown(t0, { done: () => this.loadingTools.set(false) }); },
     });
   }
 
