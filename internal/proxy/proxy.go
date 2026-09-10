@@ -12,8 +12,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -34,11 +36,13 @@ type Proxy struct {
 	skills *skills.Library
 	mcps   *mcpManager
 	fastMgr fastPathMgr
+	// mem 是 remember/recall 的 SQLite 持久化存储；打开失败时为 nil（降级：工具返回错误）。
+	mem *memoryStore
 }
 
 // New 创建转发器。
 func New(s *store.Store, rt *router.Router, h *router.Tracker, rec *quota.Recorder, sk *skills.Library) *Proxy {
-	return &Proxy{
+	p := &Proxy{
 		store:  s,
 		router: rt,
 		health: h,
@@ -54,6 +58,13 @@ func New(s *store.Store, rt *router.Router, h *router.Tracker, rec *quota.Record
 			},
 		},
 	}
+	if mem, err := openMemory(filepath.Join(s.DataDir(), "memory.db")); err != nil {
+		// 记忆库打不开不拖垮网关：remember/recall 返回错误，其余能力不受影响。
+		log.Printf("[memory] open sqlite failed, remember/recall degraded: %v", err)
+	} else {
+		p.mem = mem
+	}
+	return p
 }
 
 // Result 描述一次转发的最终 outcome，用于记账。

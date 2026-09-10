@@ -143,6 +143,9 @@ func (s *Store) reindex() {
 // Path 返回配置文件路径。
 func (s *Store) Path() string { return s.path }
 
+// DataDir 返回数据目录（config.json 所在目录，派生数据文件如 memory.db 放这里）。
+func (s *Store) DataDir() string { return filepath.Dir(s.path) }
+
 func (s *Store) Settings() Settings {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
