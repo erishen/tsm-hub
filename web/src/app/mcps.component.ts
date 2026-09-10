@@ -163,6 +163,15 @@ import { McpServer } from './models';
               </div>
             </div>
           </div>
+          <div class="form-section" *ngIf="editing()!.mode === 'adopt'">
+            <h3>AI 建议接入方式</h3>
+            <div class="muted small" style="margin-bottom:8px">
+              声明里没有连接配置 —— 让网关 LLM 根据 server/工具名推断最可能的接入方式（npx 包 / 自建服务），自动预填表单。
+            </div>
+            <div class="banner ok" *ngIf="suggestNotes()">{{ suggestNotes() }}</div>
+            <div class="banner error" *ngIf="suggestError()">{{ suggestError() }}</div>
+            <button class="small primary" (click)="suggestMcp()" [disabled]="suggestRunning()">{{ suggestRunning() ? '分析中…' : '✦ AI 建议' }}</button>
+          </div>
           <div class="form-section">
             <h3>连接</h3>
             <div class="form-row">
@@ -287,6 +296,9 @@ export class McpsComponent implements OnInit {
     try { return JSON.stringify(o, null, 2); } catch { return ''; }
   }
   saving = signal(false);
+  suggestRunning = signal(false);
+  suggestNotes = signal('');
+  suggestError = signal('');
   form = { name: '', transport: 'stdio', command: '', argsText: '', envText: '', url: '' };
 
   // 常用 MCP 模板（参考 resolve-studio 的 MCP 接入清单；包名均已在本机验证可用）。
@@ -356,7 +368,40 @@ export class McpsComponent implements OnInit {
   /** 从外部候选一键接入：预填 server 名；命中常见 MCP 包映射时自动预填启动命令，保存走 adopt 路径。 */
   openAdoptMcp(c: { server: string; suggested_command?: string }): void {
     this.form = { name: c.server, transport: 'stdio', command: c.suggested_command || '', argsText: '', envText: '', url: '' };
+    this.suggestNotes.set('');
+    this.suggestError.set('');
     this.editing.set({ mode: 'adopt' });
+  }
+
+  /** 让网关 LLM 根据候选 server/工具名推断连接方式并预填表单。 */
+  suggestMcp(): void {
+    const c = this.candidates().find((x) => x.server === this.form.name);
+    if (!c) return;
+    this.suggestRunning.set(true);
+    this.suggestNotes.set('');
+    this.suggestError.set('');
+    this.api.suggestExternalMcp(c.server, c.tools.map((t) => ({ name: t.name, calls: t.calls }))).subscribe({
+      next: (r) => {
+        this.suggestRunning.set(false);
+        const s = r.suggestion;
+        if (s.transport === 'http') {
+          this.form.transport = 'http';
+          this.form.url = s.url || this.form.url;
+        } else {
+          this.form.transport = 'stdio';
+          if (s.command) this.form.command = s.command;
+          this.form.argsText = (s.args || []).join(' ');
+          if (s.env_hint) {
+            this.form.envText = s.env_hint;
+          }
+        }
+        this.suggestNotes.set(s.notes || 'AI 建议已预填，请核对后保存');
+      },
+      error: (e: Error) => {
+        this.suggestRunning.set(false);
+        this.suggestError.set(e.message || 'AI 建议失败');
+      },
+    });
   }
 
   // 保证 loading 骨架至少可见 350ms，避免接口太快导致闪烁不可见。

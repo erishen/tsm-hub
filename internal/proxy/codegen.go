@@ -465,6 +465,15 @@ func (p *Proxy) codegenSolve(r *http.Request, key store.APIKey, path, text strin
 	return answer, true, ""
 }
 
+// ChatMessage 是发送给上游的聊天消息（导出别名，供管理台复用补全通道）。
+type ChatMessage = chatMessage
+
+// Complete 走候选链做一次无工具的纯补全（管理台功能复用：如外部 MCP 接入建议）。
+// 返回 (body, reason)：body 非空即成功；失败时 reason 描述原因。
+func (p *Proxy) Complete(r *http.Request, key store.APIKey, path string, msgs []ChatMessage) ([]byte, string) {
+	return p.complete(r, key, path, msgs)
+}
+
 // complete 走候选链做一次无工具的纯补全（codegen 专用：不带工具 schema，
 // 避免模型返回 tool_calls 而非代码）。返回 (body, reason)：body 非空即成功；
 // 失败时 reason 描述原因（可能为空表示无候选可试）。
