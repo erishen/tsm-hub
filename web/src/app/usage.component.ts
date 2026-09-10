@@ -51,7 +51,7 @@ import { Agg, DailyPoint, UsageRecord, UsageResponse } from './models';
 
     <div class="card">
       <h2>按天</h2>
-      <table *ngIf="data() && data()!.days.length; else none">
+      <table *ngIf="visibleDays().length; else none">
         <thead>
           <tr>
             <th>日期</th><th class="num">请求</th><th class="num">Prompt</th>
@@ -60,7 +60,7 @@ import { Agg, DailyPoint, UsageRecord, UsageResponse } from './models';
           </tr>
         </thead>
         <tbody>
-          <tr *ngFor="let d of data()!.days">
+          <tr *ngFor="let d of visibleDays()">
             <td class="mono">{{ d.date }}</td>
             <td class="num">{{ d.requests }}</td>
             <td class="num">{{ d.prompt_tokens }}</td>
@@ -214,6 +214,13 @@ export class UsageComponent implements OnInit {
         this.error.set('清空失败: ' + e.message);
       },
     });
+  }
+
+  /** 按天表格只展示有请求/用量/成本的日期，清空后不残留 0 行。 */
+  visibleDays(): DailyPoint[] {
+    return (this.data()?.days || []).filter(
+      (d) => d.requests > 0 || d.total_tokens > 0 || d.cost_usd > 0 || d.errors > 0,
+    );
   }
 
   sum(days: DailyPoint[]): Agg {
