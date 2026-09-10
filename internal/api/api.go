@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"log/slog"
 	"net/http"
 	"runtime/debug"
@@ -17,6 +18,7 @@ import (
 	"time"
 
 	"github.com/erishen/llm-router/internal/auth"
+	"github.com/erishen/llm-router/internal/audit"
 	"github.com/erishen/llm-router/internal/proxy"
 	"github.com/erishen/llm-router/internal/quota"
 	"github.com/erishen/llm-router/internal/router"
@@ -36,6 +38,7 @@ type Server struct {
 	sess    *auth.Session
 	logger  *slog.Logger
 	skills  *skills.Library
+	audit   *audit.Store
 
 	mu           sync.RWMutex
 	startAt      time.Time
@@ -84,6 +87,16 @@ func New(o Options) *Server {
 
 		loginFails: map[string]loginFail{},
 		revealMap:  map[string]keyReveal{},
+	}
+	// 初始化审计日志（data/audit.db），保留天数从 settings 读取，默认 90 天
+	retentionDays := 90
+	if o.Store != nil && o.Store.Settings().AuditRetentionDays > 0 {
+		retentionDays = o.Store.Settings().AuditRetentionDays
+	}
+	if auditStore, err := audit.Open(o.Store.DataDir(), retentionDays); err != nil {
+		log.Printf("[audit] init failed, audit logging disabled: %v", err)
+	} else {
+		s.audit = auditStore
 	}
 	s.adminHandler = s.adminMux()
 	return s

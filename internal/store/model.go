@@ -51,6 +51,10 @@ type Settings struct {
 	// IgnoredMcpServers 是外部 MCP 候选忽略列表：被忽略的 server 不出现在
 	// 外部 MCP 候选列表里（即使调用方声明过其工具）。管理员可手动恢复。
 	IgnoredMcpServers []string `json:"ignored_mcp_servers,omitempty"`
+	// AuditRetentionDays 是审计日志保留天数，默认 90 天；<=0 时用默认值。
+	AuditRetentionDays int `json:"audit_retention_days,omitempty"`
+	// UsageRetentionDays 是用量流水保留天数，默认 0（不自动清理）；>0 时启动时清理过期文件。
+	UsageRetentionDays int `json:"usage_retention_days,omitempty"`
 	// Sandbox 是 Docker 沙箱（execute_code 工具）配置。
 	Sandbox SandboxCfg `json:"sandbox,omitempty"`
 	// Fastpath 是确定性快路径 + codegen 配置。

@@ -72,7 +72,64 @@ func (s *Server) adminMux() http.Handler {
 	m.HandleFunc("GET /api/admin/sandbox/status", s.admin(s.handleSandboxStatus))
 	m.HandleFunc("GET /api/admin/memory", s.admin(s.handleListMemory))
 	m.HandleFunc("DELETE /api/admin/memory", s.admin(s.handleClearMemory))
+	m.HandleFunc("GET /api/admin/audit-logs", s.admin(s.handleAuditLogs))
 	return m
+}
+
+// recordAudit 记录一条审计日志，自动从请求中获取 operator/clientIP/userAgent。
+func (s *Server) recordAudit(r *http.Request, action, object, objectID string, detail any) {
+	if s.audit == nil {
+		return
+	}
+	operator := "admin"
+	if tok := r.Header.Get("X-Admin-Token"); tok != "" {
+		operator = "token:" + maskToken(tok)
+	} else if sess := r.Header.Get("X-Session-Token"); sess != "" {
+		operator = "session:" + sess[:8]
+	}
+	clientIP := r.RemoteAddr
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		clientIP = xff
+	}
+	userAgent := r.Header.Get("User-Agent")
+	s.audit.Record(action, object, objectID, detail, operator, clientIP, userAgent)
+}
+
+// maskToken 脱敏 admin token（前4位+***）。
+func maskToken(t string) string {
+	if len(t) <= 8 {
+		return "***"
+	}
+	return t[:4] + "***"
+}
+
+// handleAuditLogs 查询审计日志，支持 object/action/object_id 过滤和分页。
+func (s *Server) handleAuditLogs(w http.ResponseWriter, r *http.Request) {
+	if s.audit == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"logs": []any{}, "total": 0, "enabled": false})
+		return
+	}
+	object := r.URL.Query().Get("object")
+	action := r.URL.Query().Get("action")
+	objectID := r.URL.Query().Get("object_id")
+	limit := 100
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 500 {
+			limit = n
+		}
+	}
+	offset := 0
+	if v := r.URL.Query().Get("offset"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			offset = n
+		}
+	}
+	logs, total, err := s.audit.Query(object, action, objectID, limit, offset)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "query audit logs failed: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"logs": logs, "total": total, "enabled": true, "limit": limit, "offset": offset})
 }
 
 // admin 校验管理口令（X-Admin-Token 或登录会话 X-Session-Token）。
@@ -1356,6 +1413,7 @@ func (s *Server) handleUpsertProvider(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
+	s.recordAudit(r, "upsert", "provider", p.ID, map[string]any{"name": p.Name, "base_url": p.BaseURL, "models": p.Models})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "id": p.ID})
 }
 
@@ -1365,6 +1423,7 @@ func (s *Server) handleDeleteProvider(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", err.Error())
 		return
 	}
+	s.recordAudit(r, "delete", "provider", id, nil)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -1384,6 +1443,7 @@ func (s *Server) handleUpsertRoute(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
+	s.recordAudit(r, "upsert", "route", rt.Model, map[string]any{"targets": rt.Targets, "strategy": rt.Strategy})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "model": rt.Model})
 }
 
@@ -1396,6 +1456,7 @@ func (s *Server) handleDeleteRoute(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", err.Error())
 		return
 	}
+	s.recordAudit(r, "delete", "route", model, nil)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -1489,6 +1550,7 @@ func (s *Server) handleCreateKey(w http.ResponseWriter, r *http.Request) {
 	s.revealMu.Lock()
 	s.revealMap[k.ID] = keyReveal{plain: plaintext, until: time.Now().Add(keyRevealWindow)}
 	s.revealMu.Unlock()
+	s.recordAudit(r, "create", "key", k.ID, map[string]any{"name": k.Name, "models": k.Models, "quota": k.Quota})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok": true, "id": k.ID, "key": plaintext, "prefix": display,
 		"warning": "请立即保存该 key；创建后 2 分钟内可从管理台补看，超窗后服务端只保存哈希",
@@ -1538,6 +1600,7 @@ func (s *Server) handleToggleKey(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", err.Error())
 		return
 	}
+	s.recordAudit(r, "toggle", "key", r.PathValue("id"), map[string]any{"enabled": req.Enabled})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "enabled": req.Enabled})
 }
 
@@ -1546,6 +1609,7 @@ func (s *Server) handleDeleteKey(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", err.Error())
 		return
 	}
+	s.recordAudit(r, "delete", "key", r.PathValue("id"), nil)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -1564,6 +1628,7 @@ func (s *Server) handleUpdateKey(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", err.Error())
 		return
 	}
+	s.recordAudit(r, "update", "key", r.PathValue("id"), map[string]any{"name": req.Name, "models": req.Models})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -1612,6 +1677,7 @@ func (s *Server) handleClearUsage(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
 		return
 	}
+	s.recordAudit(r, "clear", "usage", "", nil)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "cleared": true})
 }
 
@@ -1918,6 +1984,7 @@ func (s *Server) handleUpsertMcp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.proxy.ResetMCP()
+	s.recordAudit(r, "upsert", "mcp", name, map[string]any{"transport": c.Transport, "command": c.Command, "url": c.URL})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -1934,6 +2001,7 @@ func (s *Server) handleDeleteMcp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.proxy.ResetMCP()
+	s.recordAudit(r, "delete", "mcp", name, nil)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -1970,6 +2038,7 @@ func (s *Server) handleDeleteFastpath(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
+	s.recordAudit(r, "delete", "fastpath", name, nil)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -2452,6 +2521,7 @@ func (s *Server) handleListMemory(w http.ResponseWriter, r *http.Request) {
 // handleClearMemory 清空全部会话记忆。
 func (s *Server) handleClearMemory(w http.ResponseWriter, r *http.Request) {
 	s.proxy.ClearMemory()
+	s.recordAudit(r, "clear", "memory", "", nil)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -2492,12 +2562,14 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	var patch struct {
-		DefaultTimeoutMS int                    `json:"default_timeout_ms"`
-		MaxBodyBytes     int64                  `json:"max_body_bytes"`
-		FailThreshold    int                    `json:"fail_threshold"`
-		CooldownSec      int                    `json:"cooldown_sec"`
-		Pricing          map[string]store.Price `json:"pricing"`
-		Smart            *store.SmartScoreCfg   `json:"smart"`
+		DefaultTimeoutMS   int                    `json:"default_timeout_ms"`
+		MaxBodyBytes       int64                  `json:"max_body_bytes"`
+		FailThreshold      int                    `json:"fail_threshold"`
+		CooldownSec        int                    `json:"cooldown_sec"`
+		Pricing            map[string]store.Price `json:"pricing"`
+		Smart              *store.SmartScoreCfg   `json:"smart"`
+		AuditRetentionDays int                    `json:"audit_retention_days"`
+		UsageRetentionDays int                    `json:"usage_retention_days"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid json: "+err.Error())
@@ -2527,12 +2599,27 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		if patch.Smart != nil {
 			c.Settings.Smart = *patch.Smart
 		}
+		if patch.AuditRetentionDays > 0 {
+			c.Settings.AuditRetentionDays = patch.AuditRetentionDays
+		}
+		if patch.UsageRetentionDays > 0 {
+			c.Settings.UsageRetentionDays = patch.UsageRetentionDays
+		}
 		return nil
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", err.Error())
 		return
 	}
+	// 更新审计日志保留天数（运行时生效）
+	if s.audit != nil && patch.AuditRetentionDays > 0 {
+		s.audit.SetRetentionDays(patch.AuditRetentionDays)
+	}
+	s.recordAudit(r, "update", "settings", "", map[string]any{
+		"default_timeout_ms":  patch.DefaultTimeoutMS,
+		"max_body_bytes":      patch.MaxBodyBytes,
+		"audit_retention_days": patch.AuditRetentionDays,
+	})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 

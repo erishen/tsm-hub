@@ -239,6 +239,17 @@ export class ApiService {
       .pipe(catchError(this.handleError));
   }
 
+  getAuditLogs(params: { object?: string; action?: string; object_id?: string; limit?: number; offset?: number }): Observable<{ logs: any[]; total: number; enabled: boolean }> {
+    const qs = new URLSearchParams();
+    if (params.object) qs.set('object', params.object);
+    if (params.action) qs.set('action', params.action);
+    if (params.object_id) qs.set('object_id', params.object_id);
+    qs.set('limit', String(params.limit || 50));
+    qs.set('offset', String(params.offset || 0));
+    return this.http.get<{ logs: any[]; total: number; enabled: boolean }>(`/api/admin/audit-logs?${qs.toString()}`, { headers: this.headers() })
+      .pipe(catchError(this.handleError));
+  }
+
   deleteFastpath(name: string): Observable<unknown> {
     return this.http.delete(`/api/admin/fastpath/${encodeURIComponent(name)}`, { headers: this.headers() })
       .pipe(catchError(this.handleError));

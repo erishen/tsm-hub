@@ -7,6 +7,7 @@
 - **前端**：Angular 19（standalone + signals），构建产物 `embed` 进 Go 二进制
 - **存储**：JSON 配置文件（原子写）+ JSONL 用量流水，无需数据库
 - **协议**：OpenAI 兼容（`/v1/chat/completions`、`/v1/models`…），含 SSE 流式透传
+- **安全**：Key SHA-256 哈希存储、审计日志、用量自动清理、[安全部署指南](./SECURITY.md)
 
 ---
 
