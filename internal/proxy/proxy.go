@@ -63,6 +63,8 @@ func New(s *store.Store, rt *router.Router, h *router.Tracker, rec *quota.Record
 		log.Printf("[memory] open sqlite failed, remember/recall degraded: %v", err)
 	} else {
 		p.mem = mem
+		// provider 健康状态与记忆共用 memory.db 持久化（重启保留冷却/失败计数）。
+		p.initHealthPersist(mem.db)
 	}
 	return p
 }

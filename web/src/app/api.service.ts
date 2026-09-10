@@ -258,6 +258,12 @@ export class ApiService {
     ).pipe(catchError(this.handleError));
   }
 
+  /** 短窗口内补看新建 key 的明文（创建后 2 分钟）。 */
+  revealKey(id: string): Observable<{ key: string }> {
+    return this.http.get<{ key: string }>(`/api/admin/keys/${encodeURIComponent(id)}/plaintext`, { headers: this.headers() })
+      .pipe(catchError(this.handleError));
+  }
+
   toggleKey(id: string, enabled: boolean): Observable<unknown> {
     return this.http.post(`/api/admin/keys/${encodeURIComponent(id)}/toggle`, { enabled }, { headers: this.headers() })
       .pipe(catchError(this.handleError));

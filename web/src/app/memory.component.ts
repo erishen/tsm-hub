@@ -17,6 +17,7 @@ import { ApiService } from './api.service';
 
     <div class="banner error" *ngIf="error()">{{ error() }}</div>
 
+    <div class="page-loading" *ngIf="loading()">加载中…</div>
     <div class="card">
       <h2>记忆条目（{{ memory().length }}）</h2>
       <table class="tbl" *ngIf="memory().length; else noneMem">
@@ -55,6 +56,7 @@ import { ApiService } from './api.service';
 export class MemoryComponent implements OnInit {
   memory = signal<{ ns: string; value: string }[]>([]);
   error = signal('');
+  readonly loading = signal(true);
 
   constructor(private api: ApiService) {}
 
@@ -63,9 +65,10 @@ export class MemoryComponent implements OnInit {
   }
 
   loadMemory(): void {
+    this.loading.set(true);
     this.api.listMemory().subscribe({
-      next: (r) => this.memory.set(r.entries || []),
-      error: (e: Error) => this.error.set('加载失败：' + e.message),
+      next: (r) => { this.memory.set(r.entries || []); this.loading.set(false); },
+      error: (e: Error) => { this.error.set('加载失败：' + e.message); this.loading.set(false); },
     });
   }
 

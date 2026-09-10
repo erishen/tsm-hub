@@ -31,6 +31,7 @@ interface SkillCandidate {
 
     <div class="banner error" *ngIf="error()">{{ error() }}</div>
 
+    <div class="page-loading" *ngIf="loading()">加载中…</div>
     <div class="card" *ngIf="detail()">
       <div style="display:flex;align-items:flex-start;gap:10px">
         <div style="flex:1">
@@ -80,7 +81,8 @@ interface SkillCandidate {
       <div class="muted small" style="margin-bottom:8px">
         已录用技能（<span class="mono">kind=skill</span>）会出现在模型可感知的技能清单；未录用候选带 <span class="mono">skill:</span>/<span class="mono">skill_</span> 前缀。
       </div>
-      <table class="tbl" *ngIf="candidates().length; else noneCand">
+      <div class="skel-row" *ngIf="loadingCandidates()" style="max-width:640px;margin:10px 0"></div>
+      <table class="tbl" *ngIf="!loadingCandidates() && candidates().length; else noneCand">
         <thead>
           <tr><th>名称</th><th>说明</th><th style="width:110px">调用</th><th style="width:220px">操作</th></tr>
         </thead>
@@ -148,9 +150,11 @@ export class SkillsComponent implements OnInit, OnDestroy {
   readonly dir = signal('');
   readonly detail = signal<SkillDetail | null>(null);
   readonly error = signal('');
+  readonly loading = signal(true);
   readonly copied = signal(false);
   readonly candidates = signal<SkillCandidate[]>([]);
   readonly candError = signal('');
+  readonly loadingCandidates = signal(true);
   readonly adopting = signal<SkillCandidate | null>(null);
   readonly adoptDesc = signal('');
   readonly adoptSaving = signal(false);
@@ -173,16 +177,18 @@ constructor(private api: ApiService) {}
   }
 
   load(): void {
+    this.loading.set(true);
     this.api.listSkills().subscribe({
-      next: (r) => { this.skills.set(r.skills ?? []); this.dir.set(r.dir || ''); },
-      error: (e: Error) => this.error.set(e.message),
+      next: (r) => { this.skills.set(r.skills ?? []); this.dir.set(r.dir || ''); this.loading.set(false); },
+      error: (e: Error) => { this.error.set(e.message); this.loading.set(false); },
     });
   }
 
   loadCandidates(): void {
+    this.loadingCandidates.set(true);
     this.api.externalSkillCandidates().subscribe({
-      next: (r) => this.candidates.set(r.candidates || []),
-      error: (e: Error) => this.candError.set('加载失败：' + e.message),
+      next: (r) => { this.candidates.set(r.candidates || []); this.loadingCandidates.set(false); },
+      error: (e: Error) => { this.candError.set('加载失败：' + e.message); this.loadingCandidates.set(false); },
     });
   }
 

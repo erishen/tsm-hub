@@ -7,12 +7,16 @@ package proxy
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"time"
 
 	_ "modernc.org/sqlite"
+
+	"github.com/erishen/llm-router/internal/router"
 )
 
 // memoryStore 是 remember/recall 的 SQLite 持久化存储。
@@ -89,4 +93,48 @@ func (m *memoryStore) Close() error {
 		return nil
 	}
 	return m.db.Close()
+}
+
+// initHealthPersist 在 memory.db 中持久化 provider 健康状态：
+// 重启后保留冷却/失败计数/延迟 EWMA，避免重启后立刻重打刚挂的 provider。
+// 写入走"信号 + 2s 合并"的异步 goroutine；进程退出最多丢 2s 内的状态变更。
+func (p *Proxy) initHealthPersist(db *sql.DB) {
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS provider_health (
+		key TEXT PRIMARY KEY,
+		snapshot TEXT NOT NULL,
+		updated_at TEXT NOT NULL
+	)`); err != nil {
+		log.Printf("[health] init persist failed: %v", err)
+		return
+	}
+	// 启动恢复：时间字段原样恢复，是否可用由 Tracker 结合当前时间自然判断。
+	var snap string
+	if err := db.QueryRow(`SELECT snapshot FROM provider_health WHERE key = 'runtime'`).Scan(&snap); err == nil && snap != "" {
+		var ps []router.ProviderHealth
+		if json.Unmarshal([]byte(snap), &ps) == nil {
+			p.health.Restore(ps)
+			log.Printf("[health] restored %d provider states from sqlite", len(ps))
+		}
+	}
+	ch := make(chan struct{}, 1)
+	p.health.SetPersist(func() {
+		select {
+		case ch <- struct{}{}:
+		default:
+		}
+	})
+	go func() {
+		for range ch {
+			time.Sleep(2 * time.Second) // 合并 2s 内的连续变更
+			snapBytes, err := json.Marshal(p.health.Snapshot())
+			if err != nil {
+				continue
+			}
+			if _, err := db.Exec(`INSERT INTO provider_health(key, snapshot, updated_at) VALUES('runtime', ?, ?)
+				ON CONFLICT(key) DO UPDATE SET snapshot = excluded.snapshot, updated_at = excluded.updated_at`,
+				string(snapBytes), time.Now().Format(time.RFC3339)); err != nil {
+				log.Printf("[health] persist failed: %v", err)
+			}
+		}
+	}()
 }

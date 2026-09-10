@@ -19,6 +19,7 @@ interface FastPlugin { name: string; trigger: string; source: string; promoted: 
 
     <div class="card" style="margin-bottom:16px">
       <h3>试一下</h3>
+    <div class="page-loading" *ngIf="loading()">加载中…</div>
       <div class="row">
         <input style="flex:1" [(ngModel)]="testQuery" placeholder="输入问题，如：23*47+5 等于多少 / 把字符串 abcdef 反转输出"
                (keyup.enter)="test()" />
@@ -132,6 +133,7 @@ interface FastPlugin { name: string; trigger: string; source: string; promoted: 
 export class FastpathComponent implements OnInit, OnDestroy {
   builtin: FastMatcher[] = [];
   plugins: FastPlugin[] = [];
+  readonly loading = signal(true);
   testQuery = '';
   testResult: string | null = null;
   testMethod = '';
@@ -156,12 +158,14 @@ constructor(private api: ApiService) {}
   }
 
   reload(): void {
+    this.loading.set(true);
     this.api.getFastpath().subscribe({
       next: (d: any) => {
         this.builtin = d.builtin || [];
         this.plugins = d.plugins || [];
+        this.loading.set(false);
       },
-      error: (e: Error) => console.error(e),
+      error: (e: Error) => { console.error(e); this.loading.set(false); },
     });
   }
 

@@ -21,6 +21,7 @@ import { Balance, Provider, ProbeModel } from './models';
 
     <div class="banner error" *ngIf="error()">{{ error() }}</div>
 
+    <div class="page-loading" *ngIf="loading()">加载中…</div>
     <div class="card">
       <h2>已配置（{{ providers().length }}）</h2>
       <table *ngIf="providers().length; else none">
@@ -161,6 +162,7 @@ import { Balance, Provider, ProbeModel } from './models';
 export class ProvidersComponent implements OnInit, OnDestroy {
   readonly providers = signal<Provider[]>([]);
   readonly error = signal('');
+  readonly loading = signal(true);
   readonly editing = signal(false);
   readonly saving = signal(false);
   readonly probing = signal(false);
@@ -208,9 +210,10 @@ constructor(private api: ApiService) {}
   }
 
   load(): void {
+    this.loading.set(true);
     this.api.listProviders().subscribe({
-      next: (r) => this.providers.set(r.providers ?? []),
-      error: (e: Error) => this.error.set(e.message),
+      next: (r) => { this.providers.set(r.providers ?? []); this.loading.set(false); },
+      error: (e: Error) => { this.error.set(e.message); this.loading.set(false); },
     });
   }
 

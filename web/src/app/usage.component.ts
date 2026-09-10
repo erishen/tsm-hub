@@ -30,6 +30,7 @@ import { Agg, DailyPoint, UsageRecord, UsageResponse } from './models';
 
     <div class="banner error" *ngIf="error()">{{ error() }}</div>
 
+    <div class="page-loading" *ngIf="loading()">加载中…</div>
     <div class="grid" *ngIf="data()">
       <div class="stat">
         <div class="label">区间 Tokens</div>
@@ -163,6 +164,7 @@ import { Agg, DailyPoint, UsageRecord, UsageResponse } from './models';
 export class UsageComponent implements OnInit {
   readonly data = signal<UsageResponse | null>(null);
   readonly error = signal('');
+  readonly loading = signal(true);
   readonly clearing = signal(false);
   days = 7;
 
@@ -192,9 +194,10 @@ export class UsageComponent implements OnInit {
   }
 
   load(): void {
+    this.loading.set(true);
     this.api.usage(this.days, 100).subscribe({
-      next: (u) => this.data.set(u),
-      error: (e: Error) => this.error.set(e.message),
+      next: (u) => { this.data.set(u); this.loading.set(false); },
+      error: (e: Error) => { this.error.set(e.message); this.loading.set(false); },
     });
   }
 
