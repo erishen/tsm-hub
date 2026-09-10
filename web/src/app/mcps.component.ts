@@ -136,7 +136,10 @@ import { McpServer } from './models';
               <span class="badge" *ngIf="!c.suggested_command" title="调用方声明只含工具名，无连接配置，需手动填写">需手动填连接</span>
             </td>
             <td>
-              <button class="small primary" (click)="openAdoptMcp(c)">接入</button>
+              <div style="display:flex;gap:6px;flex-wrap:wrap">
+                <button class="small primary" (click)="openAdoptMcp(c)">接入</button>
+                <button class="small danger" (click)="ignoreCandidate(c)" title="从候选列表移除（软删除，可在 config.json 恢复）">删除</button>
+              </div>
             </td>
           </tr>
         </tbody>
@@ -384,6 +387,17 @@ constructor(private api: ApiService) {}
     this.api.externalMcpCandidates().subscribe({
       next: (r) => { this.candidates.set(r.candidates || []); this.loadingCandidates.set(false); },
       error: () => { this.candidates.set([]); this.loadingCandidates.set(false); },
+    });
+  }
+
+  /** 删除外部 MCP 候选：加入忽略列表，不再显示（软删除，工具统计仍保留）。 */
+  ignoreCandidate(c: { server: string }): void {
+    if (!confirm(`确认从候选列表移除「${c.server}」？\n\n这是软删除：工具调用统计仍保留，只是不再出现在候选列表。可在 config.json 的 settings.ignored_mcp_servers 中移除以恢复。`)) return;
+    this.api.ignoreExternalMcp(c.server).subscribe({
+      next: () => {
+        this.candidates.set(this.candidates().filter((x) => x.server !== c.server));
+      },
+      error: (e: Error) => alert('删除失败：' + e.message),
     });
   }
 

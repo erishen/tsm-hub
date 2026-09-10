@@ -68,6 +68,7 @@ func (s *Server) adminMux() http.Handler {
 	m.HandleFunc("GET /api/admin/external-mcps/candidates", s.admin(s.handleListExternalMcpCandidates))
 	m.HandleFunc("POST /api/admin/external-mcps/suggest", s.admin(s.handleSuggestExternalMcp))
 	m.HandleFunc("POST /api/admin/external-mcps/{server}/adopt", s.admin(s.handleAdoptExternalMcp))
+	m.HandleFunc("DELETE /api/admin/external-mcps/{server}", s.admin(s.handleIgnoreExternalMcp))
 	m.HandleFunc("GET /api/admin/sandbox/status", s.admin(s.handleSandboxStatus))
 	m.HandleFunc("GET /api/admin/memory", s.admin(s.handleListMemory))
 	m.HandleFunc("DELETE /api/admin/memory", s.admin(s.handleClearMemory))
@@ -2308,6 +2309,10 @@ func (s *Server) handleListExternalMcpCandidates(w http.ResponseWriter, r *http.
 		known[t.Name] = true
 	}
 	configured := s.store.Settings().Mcps
+	ignored := map[string]bool{}
+	for _, sv := range s.store.Settings().IgnoredMcpServers {
+		ignored[sv] = true
+	}
 	byServer := map[string]map[string]int{} // server -> tool -> calls
 	serverCalls := map[string]int{}
 	serverKeys := map[string]int{}
@@ -2325,6 +2330,9 @@ func (s *Server) handleListExternalMcpCandidates(w http.ResponseWriter, r *http.
 		}
 		if _, ok := configured[server]; ok {
 			continue // 已接入网关的 server，不算外部候选
+		}
+		if ignored[server] {
+			continue // 管理员已忽略的 server，不显示在候选里
 		}
 		if byServer[server] == nil {
 			byServer[server] = map[string]int{}
@@ -2354,6 +2362,30 @@ func (s *Server) handleListExternalMcpCandidates(w http.ResponseWriter, r *http.
 		return out[i]["calls"].(int) > out[j]["calls"].(int)
 	})
 	writeJSON(w, http.StatusOK, map[string]any{"candidates": out})
+}
+
+// handleIgnoreExternalMcp 把外部 MCP 候选加入忽略列表，不再显示在候选里。
+// 忽略是软删除：工具统计仍保留，只是从候选列表过滤；可通过从 config.json
+// 的 settings.ignored_mcp_servers 移除来恢复。
+func (s *Server) handleIgnoreExternalMcp(w http.ResponseWriter, r *http.Request) {
+	server := r.PathValue("server")
+	if server == "" || !validProviderID(server) {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid server name")
+		return
+	}
+	if err := s.store.Update(func(c *store.Config) error {
+		for _, sv := range c.Settings.IgnoredMcpServers {
+			if sv == server {
+				return nil // 已在忽略列表，幂等
+			}
+		}
+		c.Settings.IgnoredMcpServers = append(c.Settings.IgnoredMcpServers, server)
+		return nil
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", "ignore failed: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "server": server, "ignored": true})
 }
 
 // handleAdoptExternalMcp 把外部 MCP 候选接入网关：写入 Settings.Mcps 并重连。

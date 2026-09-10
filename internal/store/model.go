@@ -48,6 +48,9 @@ type Settings struct {
 	// {transport:"http", url}（Streamable HTTP 远程）。
 	// 连接后其工具以 mcp_<server>_<tool> 注册进网关工具池，由网关执行。
 	Mcps map[string]MCPServer `json:"mcps,omitempty"`
+	// IgnoredMcpServers 是外部 MCP 候选忽略列表：被忽略的 server 不出现在
+	// 外部 MCP 候选列表里（即使调用方声明过其工具）。管理员可手动恢复。
+	IgnoredMcpServers []string `json:"ignored_mcp_servers,omitempty"`
 	// Sandbox 是 Docker 沙箱（execute_code 工具）配置。
 	Sandbox SandboxCfg `json:"sandbox,omitempty"`
 	// Fastpath 是确定性快路径 + codegen 配置。

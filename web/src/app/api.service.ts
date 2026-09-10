@@ -214,6 +214,11 @@ export class ApiService {
       .pipe(catchError(this.handleError));
   }
 
+  ignoreExternalMcp(server: string): Observable<{ ok: boolean; server: string; ignored: boolean }> {
+    return this.http.delete<{ ok: boolean; server: string; ignored: boolean }>(`/api/admin/external-mcps/${encodeURIComponent(server)}`, { headers: this.headers() })
+      .pipe(catchError(this.handleError));
+  }
+
   suggestExternalMcp(server: string, tools: { name: string; calls: number }[]): Observable<{ suggestion: { transport: string; command: string; args: string[]; url: string; env_hint: string; notes: string } }> {
     return this.http.post<{ suggestion: { transport: string; command: string; args: string[]; url: string; env_hint: string; notes: string } }>('/api/admin/external-mcps/suggest', { server, tools }, { headers: this.headers() })
       .pipe(catchError(this.handleError));
