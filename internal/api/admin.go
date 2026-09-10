@@ -1154,6 +1154,14 @@ func (s *Server) probeBalance(ctx context.Context, baseURL, key string) map[stri
 		{"tokenrouter.com", "免费/低价模型聚合", "", "",
 			"无公开余额接口，余额请在 TokenRouter Dashboard 查看",
 			"https://www.tokenrouter.com"},
+		{"apihub.agnes-ai.com", "免费+付费（文本/图片/视频统一网关）",
+			"文本模型免费调用 · 图片模型每月500次 · 视频模型首月100秒",
+			"付费计划每5小时限流：Starter 1500次 / Plus 7500次 / Pro 30000次",
+			"无公开余额API（/v1/account/balance 等均404）；免费额度政策如上，付费计划剩余次数请在 Agnes 控制台查看",
+			"https://agnes-ai.com"},
+		{"api.b.ai", "Credits 计费（登录送10万免费 credits）", "", "",
+			"API 网关仅开放推理路径（/v1/chat/completions、/v1/models 等），余额/计费路径被 403 拒绝；credits 余额请在 B.AI 控制台 Top up 页面查看",
+			"https://b.ai"},
 	}
 	for _, pn := range platforms {
 		if strings.Contains(baseURL, pn.host) {
