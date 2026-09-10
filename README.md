@@ -3,11 +3,14 @@
 > 自制 Token Key + 智能路由的 LLM 网关：对外只暴露自己签发的 `sk-tr-…` Key，
 > 内部把 OpenAI 兼容请求智能路由到配置好的多家上游模型。
 
-- **后端**：Go 1.22，**零第三方依赖**（只用标准库），单二进制
+- **后端**：Go 1.22，**零第三方依赖**（只用标准库 + modernc.org/sqlite 纯 Go 实现），单二进制
 - **前端**：Angular 19（standalone + signals），构建产物 `embed` 进 Go 二进制
-- **存储**：JSON 配置文件（原子写）+ JSONL 用量流水，无需数据库
+- **存储**：JSON 配置文件（原子写）+ JSONL 用量流水 + SQLite（记忆/审计日志），无需外部数据库
 - **协议**：OpenAI 兼容（`/v1/chat/completions`、`/v1/models`…），含 SSE 流式透传
-- **安全**：Key SHA-256 哈希存储、审计日志、用量自动清理、[安全部署指南](./SECURITY.md)
+- **能力池**：内置通用工具 + Agent Skills 技能库 + MCP server + Docker 沙箱 + 会话记忆
+- **智能路由**：优先级 failover、权重分流、smart 成本智能路由、auto 场景路由、确定性快路径
+- **安全合规**：Key SHA-256 哈希存储、审计日志、用量自动清理、上游 Key `env:` 引用、[安全部署指南](./SECURITY.md)
+- **管理台**：18 个页面（概览/Providers/路由表/Keys/模型/额度/用量/监控/技能库/MCP/工具/记忆/沙箱/快路径/应用推荐/测试/审计日志），深色模式、全局搜索、PWA
 
 ---
 
@@ -102,9 +105,11 @@ llm-router/
 │   ├── store/           # 配置模型与原子落盘、内存索引
 │   ├── auth/            # 自制 Key 签发/校验、管理会话
 │   ├── router/          # 路由选择 + 健康状态机
-│   ├── proxy/           # OpenAI 兼容转发、SSE 透传、usage 采集
+│   ├── proxy/           # OpenAI 兼容转发、SSE 透传、usage 采集、agent 工具循环、MCP、记忆、沙箱、快路径
 │   ├── quota/           # 限流、用量聚合、JSONL 落盘
 │   ├── api/             # HTTP 路由（/v1/*、/api/admin/*）
+│   ├── audit/           # 审计日志（SQLite 存储、自动脱敏、自动清理）
+│   ├── skills/          # Agent Skills 技能库加载与注入
 │   └── web/             # embed 前端产物
 ├── web/                 # Angular 管理台源码
 ├── scripts/smoke.sh     # 端到端冒烟
@@ -130,6 +135,9 @@ llm-router/
 | `settings.skills_dir` | Agent Skills 技能库目录（支持相对路径）；空 = 不启用技能 |
 | `settings.agent.*` | 网关 agent（通用工具 + 服务端执行循环），见下 |
 | `settings.mcps` | 外部 MCP server（stdio 或 Streamable HTTP），其工具以 `mcp_<server>_<tool>` 注册进网关工具池 |
+| `settings.audit_retention_days` | 审计日志保留天数（默认 90），过期自动清理 |
+| `settings.usage_retention_days` | 用量流水保留天数（默认 0=不自动清理），启动时删除过期文件 |
+| `settings.sandbox.*` | Docker 沙箱配置（execute_code 工具），见下 |
 
 **网关 agent（内置通用工具）**：客户端请求**不传 `tools`** 时，网关自动附加内置工具池
 并在服务端执行 `tool_calls` 循环，最终返回答案（流式请求同样内部跑完循环后按 SSE 回放）：
@@ -259,6 +267,17 @@ javascript / shell / java / go / rust / c / cpp）。沙箱安全边界：禁网
 总览（请求数/错误率/平均延迟/成本/failover 次数）、按 provider 归因、按场景分布、
 按天趋势。管理台「监控」页直接展示。历史流水（旧字段缺失）自动兼容，无需迁移。
 
+**审计日志**：所有管理操作（创建/修改/删除 Provider、路由、Key、MCP、设置等）自动记录，
+存储在 `data/audit.db`（SQLite），包含时间、操作类型、对象类型、对象 ID、详情（自动脱敏
+`api_key`/`token`/`password`/`secret`）、操作者、客户端 IP、User-Agent。默认保留 90 天，
+可通过 `settings.audit_retention_days` 配置。管理台「审计日志」页可按对象类型、操作类型、
+对象 ID 过滤查询和分页。
+
+**外部发现与晋升机制**：网关自动记录调用方请求中声明的 `tools`、`skills`、`mcps`，
+在管理台「工具」「技能库」「MCP」页面展示为外部候选。管理员可查看使用统计，择优"录用"
+为网关内置能力（工具晋升为内置工具或快路径插件，技能接入技能库，MCP 接入网关工具池）。
+这样外部调用方的最佳实践可以沉淀为网关的通用能力，后续调用方无需重复声明。
+
 ---
 
 ## 对外可编程接口
@@ -289,15 +308,45 @@ curl http://localhost:9070/v1/skills -H "Authorization: Bearer <你的Key>"
 | POST | `/api/admin/login` | 用 admin token 换会话 token（同 IP 错 5 次锁 10 分钟）|
 | GET | `/api/admin/overview` | 概览：provider/路由/Key 数量、今日与累计用量 |
 | GET/POST | `/api/admin/providers` | Provider 列表 / 新增或更新 |
+| POST | `/api/admin/providers/probe` | 探测上游模型列表与额度 |
+| GET | `/api/admin/providers/balances` | 批量查询各 Provider 额度/余额（带缓存）|
 | DELETE | `/api/admin/providers/{id}` | 删除（同时清理路由表里的相关候选）|
 | GET/POST | `/api/admin/routes` | 路由表列表 / 新增或更新 |
 | DELETE | `/api/admin/routes/{model}` | 删除路由 |
 | GET/POST | `/api/admin/keys` | Key 列表 / 签发（**响应里一次性返回明文**）|
 | POST | `/api/admin/keys/{id}/toggle` | 启停 |
+| PATCH | `/api/admin/keys/{id}` | 更新 Key 名称/模型白名单/配额 |
+| GET | `/api/admin/keys/{id}/plaintext` | 重看新建 Key 明文（创建后 2 分钟内有效，只显示一次）|
 | DELETE | `/api/admin/keys/{id}` | 删除 |
+| GET | `/api/admin/models/catalog` | 模型目录：所有 Provider 的模型汇总，按类型分类、标注免费/付费 |
+| POST | `/api/admin/models/refresh` | 刷新模型目录（重新探测所有 Provider）|
+| GET | `/api/admin/models/recommendations` | 应用推荐：根据当前模型池推荐适合的应用场景 |
 | GET | `/api/admin/usage?days=7&limit=50` | 按天 / 模型 / Key 聚合 + 最近流水 |
+| POST | `/api/admin/usage/clear` | 清空全部用量流水 |
+| GET | `/api/admin/observability/overview` | 可观测性：总览/按 Provider 归因/按场景分布/按天趋势 |
 | GET | `/api/admin/health` | Provider 实时健康（延迟 EWMA、失败数、冷却到期时间）|
-| GET/POST | `/api/admin/settings` | 查看 / 修改全局设置（超时、阈值、价格表）|
+| GET/POST | `/api/admin/settings` | 查看 / 修改全局设置（超时、阈值、价格表、审计/用量保留天数）|
+| GET | `/api/admin/skills` | 技能库清单 |
+| GET | `/api/admin/skills/{name}` | 单个技能全文（Markdown）|
+| GET/POST | `/api/admin/mcps` | MCP server 列表 / 新增或更新 |
+| DELETE | `/api/admin/mcps/{name}` | 删除 MCP server |
+| GET | `/api/admin/tools` | 网关工具池目录（内置 + MCP + 条件工具）|
+| POST | `/api/admin/tools/invoke` | 一键测试工具执行 |
+| GET | `/api/admin/fastpath` | 快路径状态：内置匹配器 + 插件列表 |
+| POST | `/api/admin/fastpath/{name}/promote` | 晋升插件为正式检测器（可选 fastpath 插件或 Tools）|
+| DELETE | `/api/admin/fastpath/{name}` | 删除快路径插件 |
+| POST | `/api/admin/fastpath/generate` | 手动触发 codegen：对 query 生成检测器并验证 |
+| GET | `/api/admin/external-tools` | 外部调用方使用的工具候选（自动发现，可择优录用）|
+| POST | `/api/admin/external-tools/{name}/adopt` | 录用外部工具为网关内置工具 |
+| DELETE | `/api/admin/external-tools/{name}` | 删除/忽略外部工具候选 |
+| GET | `/api/admin/external-skills/candidates` | 外部技能候选列表 |
+| GET | `/api/admin/external-mcps/candidates` | 外部 MCP 候选列表（自动发现调用方声明的 MCP）|
+| POST | `/api/admin/external-mcps/{server}/adopt` | 接入外部 MCP server |
+| DELETE | `/api/admin/external-mcps/{server}` | 忽略/删除外部 MCP 候选 |
+| GET | `/api/admin/sandbox/status` | Docker 沙箱状态（是否可用、镜像、配置）|
+| GET | `/api/admin/memory` | 会话记忆列表（remember/recall 数据，SQLite 持久化）|
+| DELETE | `/api/admin/memory` | 清空全部会话记忆 |
+| GET | `/api/admin/audit-logs` | 审计日志查询（支持 object/action/object_id 过滤 + 分页）|
 
 另有探测端点（都不需要鉴权）：
 
