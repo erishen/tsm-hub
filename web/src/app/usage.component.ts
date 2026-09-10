@@ -24,6 +24,7 @@ import { Agg, DailyPoint, UsageRecord, UsageResponse } from './models';
           </select>
         </div>
         <button (click)="load()">刷新</button>
+        <button class="danger" (click)="clear()" [disabled]="clearing()">{{ clearing() ? '清空中…' : '清空' }}</button>
       </div>
     </div>
 
@@ -162,6 +163,7 @@ import { Agg, DailyPoint, UsageRecord, UsageResponse } from './models';
 export class UsageComponent implements OnInit {
   readonly data = signal<UsageResponse | null>(null);
   readonly error = signal('');
+  readonly clearing = signal(false);
   days = 7;
 
   readonly compact = compact;
@@ -193,6 +195,24 @@ export class UsageComponent implements OnInit {
     this.api.usage(this.days, 100).subscribe({
       next: (u) => this.data.set(u),
       error: (e: Error) => this.error.set(e.message),
+    });
+  }
+
+  /** 清空全部用量流水（含 JSONL 文件与内存聚合），确认后执行并刷新。 */
+  clear(): void {
+    if (!confirm('确认清空全部用量记录？此操作不可恢复（data/usage/*.jsonl 会被删除）。')) return;
+    this.clearing.set(true);
+    this.api.clearUsage().subscribe({
+      next: () => {
+        this.clearing.set(false);
+        this.error.set('');
+        this.data.set(null);
+        this.load();
+      },
+      error: (e: Error) => {
+        this.clearing.set(false);
+        this.error.set('清空失败: ' + e.message);
+      },
     });
   }
 

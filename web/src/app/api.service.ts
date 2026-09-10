@@ -245,6 +245,11 @@ export class ApiService {
       .pipe(catchError(this.handleError));
   }
 
+  clearUsage(): Observable<{ ok: boolean; cleared: boolean }> {
+    return this.http.post<{ ok: boolean; cleared: boolean }>('/api/admin/usage/clear', {}, { headers: this.headers() })
+      .pipe(catchError(this.handleError));
+  }
+
   observability(days = 14): Observable<ObservabilityResponse> {
     return this.http.get<ObservabilityResponse>(`/api/admin/observability/overview?days=${days}`, { headers: this.headers() })
       .pipe(catchError(this.handleError));

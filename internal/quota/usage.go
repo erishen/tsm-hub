@@ -432,6 +432,40 @@ func (r *Recorder) Close() error {
 	return err
 }
 
+// Clear 清空全部用量：删除所有 JSONL 流水并重置内存聚合（总量/按天/模型/工具/场景等）。
+func (r *Recorder) Clear() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.writer != nil {
+		_ = r.writer.Flush()
+		_ = r.file.Close()
+		r.writer, r.file, r.day = nil, nil, ""
+	}
+	entries, err := os.ReadDir(r.dir)
+	if err != nil {
+		return fmt.Errorf("read usage dir: %w", err)
+	}
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".jsonl") {
+			continue
+		}
+		if err := os.Remove(filepath.Join(r.dir, e.Name())); err != nil {
+			return fmt.Errorf("remove usage file %s: %w", e.Name(), err)
+		}
+	}
+	r.totals = map[string]*Agg{}
+	r.daily = map[string]map[string]*Agg{}
+	r.models = map[string]*Agg{}
+	r.providers = map[string]*Agg{}
+	r.scenes = map[string]*Agg{}
+	r.failoverBy = map[string]int{}
+	r.toolCalls = map[string]int{}
+	r.keyTools = map[string]map[string]int{}
+	r.clientToolCalls = map[string]int{}
+	r.keyClientTools = map[string]map[string]int{}
+	return nil
+}
+
 // Total 返回某个 Key 的历史累计用量。
 func (r *Recorder) Total(keyID string) Agg {
 	r.mu.Lock()
