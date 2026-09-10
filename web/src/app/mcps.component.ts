@@ -2,7 +2,7 @@ import { Component, OnInit, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from './api.service';
-import { McpServer, ToolInfo } from './models';
+import { McpServer } from './models';
 
 @Component({
   selector: 'app-mcps',
@@ -137,118 +137,6 @@ import { McpServer, ToolInfo } from './models';
       <ng-template #noneCand><div class="empty">暂无外部 MCP 候选 —— 调用方声明的 server__tool 风格工具（未命中网关能力）会出现在这里</div></ng-template>
     </div>
 
-    <div class="card">
-      <h2>Sandbox <span class="muted" style="font-weight:400;font-size:12px">（execute_code · Docker 一次性容器隔离执行）</span></h2>
-      <div *ngIf="sandbox(); else sandboxLoading" style="display:flex;flex-direction:column;gap:10px">
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-          <span class="badge" [class.ok]="sandbox()!.enabled">{{ sandbox()!.enabled ? '已启用' : '未启用' }}</span>
-          <span class="badge" [class.ok]="sandbox()!.docker_ok" [class.err]="!sandbox()!.docker_ok">{{ sandbox()!.docker_ok ? 'Docker 可用' : 'Docker 不可用' }}</span>
-          <span class="muted small" style="margin-left:auto">超时 {{ sandbox()!.timeout_sec }}s · 内存 {{ sandbox()!.memory_mb }}MB · CPU {{ sandbox()!.cpus }} · 输出上限 {{ sandbox()!.max_output_kb }}KB</span>
-        </div>
-        <div class="muted small">安全：--cap-drop ALL · --network none · 只读根文件系统（仅 /tmp 可写）· 超时自动 kill 清理。支持语言：</div>
-        <div class="mcp-chips">
-          <span class="chip" *ngFor="let l of sandbox()!.languages">{{ l }}</span>
-        </div>
-        <div class="muted small">在下方「网关工具池」找到 <span class="mono">execute_code</span> 可一键测试；配置位于 settings.sandbox（enabled/timeout/memory/cpu）。</div>
-      </div>
-      <ng-template #sandboxLoading><div class="empty">加载沙箱状态中…</div></ng-template>
-    </div>
-
-    <div class="card">
-      <h2>会话记忆 <span class="muted" style="font-weight:400;font-size:12px">（内置 remember/recall，按 key 隔离；SQLite 持久化，重启保留）</span></h2>
-      <table class="tbl" *ngIf="memory().length; else noneMem">
-        <thead>
-          <tr>
-            <th>作用域（Key ID）</th><th>Key</th><th>内容</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr *ngFor="let e of memory()">
-            <td class="col-name"><span class="mono small">{{ memScope(e.ns) }}</span></td>
-            <td class="col-name"><span class="mono small">{{ memKey(e.ns) }}</span></td>
-            <td><span class="mono small ellipsis" [title]="e.value">{{ e.value }}</span></td>
-          </tr>
-        </tbody>
-      </table>
-      <ng-template #noneMem><div class="empty">暂无会话记忆 —— 调用方可经 remember 写入、recall 取回</div></ng-template>
-      <div style="margin-top:10px" *ngIf="memory().length">
-        <button class="small danger" (click)="clearMem()">清空全部记忆</button>
-      </div>
-    </div>
-
-    <div class="card">
-      <h2>网关工具池（{{ tools().length }}）</h2>
-      <div class="muted small" style="margin-bottom:10px">
-        客户端不传 tools 时，网关自动附加以下工具并在服务端执行；点击「刷新」可重新探测 MCP 工具。
-      </div>
-      <div style="display:flex;gap:8px;margin-bottom:10px">
-        <button class="small" (click)="refreshTools()">刷新</button>
-        <button class="small" (click)="loadTools()">加载</button>
-      </div>
-      <div class="tool-grid" *ngIf="loadingTools()">
-        <div class="tool-card" style="grid-column:auto"><div class="skel-bar" style="width:55%"></div><div class="skel-bar" style="width:90%;margin-top:8px"></div></div>
-        <div class="tool-card"><div class="skel-bar" style="width:45%"></div><div class="skel-bar" style="width:80%;margin-top:8px"></div></div>
-        <div class="tool-card"><div class="skel-bar" style="width:60%"></div><div class="skel-bar" style="width:85%;margin-top:8px"></div></div>
-        <div class="muted small" style="grid-column:1/-1">加载工具池中（MCP 进程可能较慢）…</div>
-      </div>
-      <div class="tool-grid" *ngIf="!loadingTools() && tools().length; else noTools">
-        <div class="tool-card" *ngFor="let t of tools()">
-          <div class="tool-name">
-            <span class="mono tname" [title]="t.name">{{ t.name }}</span>
-            <span class="badge" [class.ok]="t.source.startsWith('mcp:')">{{ srcLabel(t.source) }}</span>
-            <button class="small" style="margin-left:auto" (click)="openTest(t)" *ngIf="!t.source.startsWith('mcp:') || t.parameters">测试</button>
-          </div>
-          <div class="muted tool-desc">{{ t.description || '（无描述）' }}</div>
-        </div>
-      </div>
-      <ng-template #noTools>
-        <div class="empty" *ngIf="error() && !tools().length">
-          <span class="err-text">{{ error() }}</span>
-          <button class="small" style="margin-left:10px" (click)="loadTools()">重试</button>
-        </div>
-        <div class="empty" *ngIf="!error()">工具池为空</div>
-      </ng-template>
-    </div>
-
-    <!-- 测试工具弹窗 -->
-    <div class="modal-backdrop" *ngIf="testing()" (click)="closeTest()">
-      <div class="modal" (click)="$event.stopPropagation()">
-        <div class="modal-head">
-          <div class="modal-icon">▶</div>
-          <div class="modal-titles">
-            <h2>测试工具 <span class="mono">{{ testing()!.name }}</span></h2>
-            <div class="sub">{{ testing()!.description }}</div>
-          </div>
-          <button class="icon" (click)="closeTest()" aria-label="关闭">×</button>
-        </div>
-        <div class="modal-body">
-          <div *ngIf="!paramFields().length" class="muted" style="margin-top:8px">该工具无需参数。</div>
-          <ng-container *ngFor="let f of paramFields()">
-            <label>
-              {{ f.key }}<span class="req" *ngIf="f.required"> *</span>
-              <span class="muted small" *ngIf="f.desc"> — {{ f.desc }}</span>
-            </label>
-            <select *ngIf="f.enum && f.enum.length" [(ngModel)]="testArgs[f.key]">
-              <option *ngFor="let e of f.enum" [value]="e">{{ e }}</option>
-            </select>
-            <input *ngIf="!f.enum || !f.enum.length" [(ngModel)]="testArgs[f.key]"
-                   [type]="f.type === 'number' ? 'number' : 'text'"
-                   [placeholder]="f.type === 'boolean' ? 'true / false' : ''" />
-          </ng-container>
-
-          <div class="test-result" *ngIf="testResult() !== null">
-            <div class="muted small" style="margin-bottom:4px">返回结果：</div>
-            <pre>{{ testResult() }}</pre>
-          </div>
-          <div class="banner error" *ngIf="testError()">{{ testError() }}</div>
-        </div>
-        <div class="modal-foot">
-          <button (click)="closeTest()">关闭</button>
-          <button class="primary" (click)="runTest()" [disabled]="testRunning()">{{ testRunning() ? '调用中…' : '运行' }}</button>
-        </div>
-      </div>
-    </div>
-
     <!-- 编辑弹窗 -->
     <div class="modal-backdrop" *ngIf="editing()" (click)="closeEdit()">
       <div class="modal" (click)="$event.stopPropagation()">
@@ -358,24 +246,16 @@ import { McpServer, ToolInfo } from './models';
     .skel-row { height:14px; border-radius:6px; margin:5px 2px;
       background:linear-gradient(90deg,#efece4 25%,#f8f6f1 37%,#efece4 63%);
       background-size:400% 100%; animation:skel 1.2s ease infinite; }
-    .skel-bar { height:12px; border-radius:6px;
-      background:linear-gradient(90deg,#efece4 25%,#f8f6f1 37%,#efece4 63%);
-      background-size:400% 100%; animation:skel 1.2s ease infinite; }
     @keyframes skel { 0% {background-position:100% 0;} 100% {background-position:0 0;} }
   `],
 })
 export class McpsComponent implements OnInit {
   mcps = signal<McpServer[]>([]);
-  tools = signal<ToolInfo[]>([]);
   candidates = signal<{ server: string; calls: number; key_count: number; tools: { name: string; calls: number }[] }[]>([]);
-  sandbox = signal<{ enabled: boolean; docker_ok: boolean; timeout_sec: number; memory_mb: number; cpus: number; max_output_kb: number; languages: string[] } | null>(null);
-  memory = signal<{ ns: string; value: string }[]>([]);
   error = signal('');
   saved = signal('');
   loadingMcps = signal(true);
-  loadingTools = signal(true);
   editing = signal<{ mode: 'add' | 'edit' | 'adopt'; server?: McpServer } | null>(null);
-  testing = signal<ToolInfo | null>(null);
   /** 当前展开详情（工具 chips 点击）的 MCP server 名 */
   expandedName = signal<string | null>(null);
 
@@ -402,10 +282,6 @@ export class McpsComponent implements OnInit {
     if (!o || !Object.keys(o).length) return '';
     try { return JSON.stringify(o, null, 2); } catch { return ''; }
   }
-  testArgs: Record<string, string> = {};
-  testResult = signal<string | null>(null);
-  testError = signal('');
-  testRunning = signal(false);
   saving = signal(false);
   form = { name: '', transport: 'stdio', command: '', argsText: '', envText: '', url: '' };
 
@@ -462,45 +338,9 @@ export class McpsComponent implements OnInit {
 
   ngOnInit(): void {
     this.load();
-    this.loadTools();
     this.loadCandidates();
-    this.loadSandbox();
-    this.loadMemory();
   }
 
-  loadSandbox(): void {
-    this.api.sandboxStatus().subscribe({
-      next: (r) => this.sandbox.set(r),
-      error: () => this.sandbox.set(null),
-    });
-  }
-
-  loadMemory(): void {
-    this.api.listMemory().subscribe({
-      next: (r) => this.memory.set(r.entries || []),
-      error: () => this.memory.set([]),
-    });
-  }
-
-  clearMem(): void {
-    if (!confirm('清空全部会话记忆（remember/recall 数据）？')) return;
-    this.api.clearMemory().subscribe({
-      next: () => this.loadMemory(),
-      error: (e: Error) => this.error.set('清空失败：' + e.message),
-    });
-  }
-
-  /** 从 ns "mem:<keyID>:<key>" 解析 keyID。 */
-  memScope(ns: string): string {
-    const p = ns.split(':');
-    return p.length >= 3 ? p[1] : ns;
-  }
-
-  /** 从 ns 解析 key。 */
-  memKey(ns: string): string {
-    const p = ns.split(':');
-    return p.length >= 3 ? p.slice(2).join(':') : ns;
-  }
 
   loadCandidates(): void {
     this.api.externalMcpCandidates().subscribe({
@@ -534,32 +374,6 @@ export class McpsComponent implements OnInit {
     });
   }
 
-  loadTools(): void {
-    this.loadingTools.set(true);
-    const t0 = Date.now();
-    this.api.listTools().subscribe({
-      next: (r) => {
-        this.tools.set(r.tools || []);
-        this.minShown(t0, { done: () => this.loadingTools.set(false) });
-      },
-      error: (e) => { this.error.set(e.error?.error?.message || '加载工具池失败'); this.minShown(t0, { done: () => this.loadingTools.set(false) }); },
-    });
-  }
-
-  refreshTools(): void {
-    this.error.set('');
-    this.saved.set('');
-    this.loadingTools.set(true);
-    this.api.listTools().subscribe({
-      next: (r) => {
-        this.tools.set(r.tools || []);
-        this.loadingTools.set(false);
-        this.saved.set('工具池已刷新');
-        this.load();
-      },
-      error: (e) => { this.loadingTools.set(false); this.error.set(e.error?.error?.message || '刷新失败'); },
-    });
-  }
 
   openEdit(m: McpServer | null): void {
     this.error.set('');
@@ -632,64 +446,10 @@ export class McpsComponent implements OnInit {
         this.editing.set(null);
         this.saved.set(mode === 'adopt' ? '外部 MCP ' + name + ' 已接入网关' : '已保存，MCP server 已重建连接');
         this.load();
-        this.loadTools();
       },
       error: (e) => {
         this.saving.set(false);
         this.error.set(e.error?.error?.message || '保存失败');
-      },
-    });
-  }
-
-  openTest(t: ToolInfo): void {
-    this.testError.set('');
-    this.testResult.set(null);
-    this.testing.set(t);
-    this.testArgs = {};
-    const props = t.parameters?.properties || {};
-    for (const k of Object.keys(props)) {
-      this.testArgs[k] = '';
-    }
-  }
-
-  closeTest(): void {
-    this.testing.set(null);
-  }
-
-  paramFields(): { key: string; type: string; required: boolean; desc: string; enum?: string[] }[] {
-    const t = this.testing();
-    if (!t?.parameters?.properties) return [];
-    const props = t.parameters.properties;
-    const req = new Set(t.parameters.required || []);
-    return Object.keys(props).map((k) => ({
-      key: k,
-      type: props[k].type || 'string',
-      required: req.has(k),
-      desc: props[k].description || '',
-      enum: props[k].enum,
-    }));
-  }
-
-  runTest(): void {
-    const t = this.testing();
-    if (!t) return;
-    const args: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(this.testArgs)) {
-      if (v === '') continue;
-      const f = this.paramFields().find((x) => x.key === k);
-      args[k] = f?.type === 'number' ? Number(v) : f?.type === 'boolean' ? v === 'true' : v;
-    }
-    this.testRunning.set(true);
-    this.testError.set('');
-    this.testResult.set(null);
-    this.api.invokeTool(t.name, args).subscribe({
-      next: (r) => {
-        this.testRunning.set(false);
-        this.testResult.set(r.result);
-      },
-      error: (e) => {
-        this.testRunning.set(false);
-        this.testError.set(e.error?.error?.message || '调用失败');
       },
     });
   }
@@ -700,16 +460,9 @@ export class McpsComponent implements OnInit {
       next: () => {
         this.saved.set('已删除');
         this.load();
-        this.loadTools();
       },
       error: (e) => this.error.set(e.error?.error?.message || '删除失败'),
     });
   }
 
-  srcLabel(src: string): string {
-    if (src === 'builtin') return '内置';
-    if (src === 'builtin-conditional') return '条件';
-    if (src.startsWith('mcp:')) return src.slice(4);
-    return src;
-  }
 }
