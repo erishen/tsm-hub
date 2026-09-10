@@ -112,12 +112,12 @@ import { McpServer } from './models';
     </div>
 
     <div class="card">
-      <h2>外部 MCP 候选（{{ candidates().length }}）<span class="muted" style="font-weight:400;font-size:12px">（调用方声明过的 server__tool 风格工具，尚未接入网关；可一键接入并常驻连接）</span></h2>
+      <h2>外部 MCP 候选（{{ candidates().length }}）<span class="muted" style="font-weight:400;font-size:12px">（调用方使用过、但网关尚未接入的 MCP server；可一键接入并常驻连接）</span></h2>
       <div class="skel-row" *ngIf="loadingCandidates()" style="max-width:640px;margin:10px 0"></div>
       <table class="tbl" *ngIf="!loadingCandidates() && candidates().length; else noneCand">
         <thead>
           <tr>
-            <th>Server</th><th class="num">调用次数</th><th class="num">使用方（key 数）</th><th>高频工具</th><th style="width:130px">操作</th>
+            <th>Server</th><th class="num">调用次数</th><th class="num">使用方（key 数）</th><th>高频工具</th><th>建议连接命令</th><th style="width:140px">操作</th>
           </tr>
         </thead>
         <tbody>
@@ -144,7 +144,7 @@ import { McpServer } from './models';
           </tr>
         </tbody>
       </table>
-      <ng-template #noneCand><div class="empty">暂无外部 MCP 候选 —— 调用方声明的 server__tool 风格工具（未命中网关能力）会出现在这里</div></ng-template>
+      <ng-template #noneCand><div class="empty">暂无外部 MCP 候选 —— 调用方使用过、但网关尚未接入的 MCP server 会出现在这里</div></ng-template>
     </div>
 
     <!-- 编辑弹窗 -->
