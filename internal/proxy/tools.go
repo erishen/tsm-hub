@@ -93,13 +93,36 @@ func (p *Proxy) ToolCatalog() []ToolInfo {
 		names = append(names, n)
 	}
 	sort.Strings(names)
+	// 并行 ensure：首次加载/断线重连时同时拉起全部 MCP 进程，
+	// 总耗时从「串行累加」降为「最慢者」，避免工具池接口卡住页面。
+	type mcpRes struct {
+		name string
+		s    *mcpServer
+		err  error
+	}
+	ch := make(chan mcpRes, len(names))
 	for _, name := range names {
-		s, err := p.mcps.ensure(name, cfg[name])
-		if err != nil {
-			out = append(out, ToolInfo{Name: "mcp_" + name + "_*", Description: "MCP server 连接失败: " + err.Error(), Source: "mcp:" + name})
+		go func(name string) {
+			s, err := p.mcps.ensure(name, cfg[name])
+			ch <- mcpRes{name: name, s: s, err: err}
+		}(name)
+	}
+	byName := make(map[string]*mcpServer, len(names))
+	errs := map[string]error{}
+	for range names {
+		r := <-ch
+		if r.err != nil {
+			errs[r.name] = r.err
 			continue
 		}
-		for _, t := range s.tools {
+		byName[r.name] = r.s
+	}
+	for _, name := range names {
+		if e, bad := errs[name]; bad {
+			out = append(out, ToolInfo{Name: "mcp_" + name + "_*", Description: "MCP server 连接失败: " + e.Error(), Source: "mcp:" + name})
+			continue
+		}
+		for _, t := range byName[name].tools {
 			out = append(out, ToolInfo{
 				Name:        mcpToolName(name, t.Name),
 				Description: t.Description,
