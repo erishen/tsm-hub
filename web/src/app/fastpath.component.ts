@@ -86,7 +86,7 @@ interface FastPlugin { name: string; trigger: string; source: string; promoted: 
           <span class="modal-icon">⚡</span>
           <div class="modal-titles">
             <h2>晋升插件</h2>
-            <div class="sub">{{ promoteTarget?.name }} · {{ promoteTarget?.trigger || '无触发词' }}</div>
+            <div class="sub">{{ promoteTarget.name }} · {{ promoteTarget.trigger || '无触发词' }}</div>
           </div>
           <button class="icon" (click)="closePromote()" aria-label="关闭">×</button>
         </div>
