@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/erishen/llm-router/internal/auth"
+	"github.com/erishen/llm-router/internal/proxy"
 	"github.com/erishen/llm-router/internal/quota"
 	"github.com/erishen/llm-router/internal/router"
 	"github.com/erishen/llm-router/internal/store"
@@ -63,6 +64,7 @@ func (s *Server) adminMux() http.Handler {
 	m.HandleFunc("DELETE /api/admin/external-tools/{name}", s.admin(s.handleDeleteExternalTool))
 	m.HandleFunc("GET /api/admin/external-skills/candidates", s.admin(s.handleListExternalSkillCandidates))
 	m.HandleFunc("GET /api/admin/external-mcps/candidates", s.admin(s.handleListExternalMcpCandidates))
+	m.HandleFunc("POST /api/admin/external-mcps/suggest", s.admin(s.handleSuggestExternalMcp))
 	m.HandleFunc("POST /api/admin/external-mcps/{server}/adopt", s.admin(s.handleAdoptExternalMcp))
 	m.HandleFunc("GET /api/admin/sandbox/status", s.admin(s.handleSandboxStatus))
 	m.HandleFunc("GET /api/admin/memory", s.admin(s.handleListMemory))
@@ -1867,6 +1869,111 @@ var knownMcpCommands = map[string]string{
 	"google-maps": "npx -y @modelcontextprotocol/server-google-maps",
 	"brave-search": "npx -y @modelcontextprotocol/server-brave-search",
 	"firecrawl":  "npx -y firecrawl-mcp",
+}
+
+// handleSuggestExternalMcp 用网关自身 LLM 为外部 MCP 候选推断接入方式：
+// 调用方声明只含工具名，不含连接配置；让模型根据 server/工具名给出
+// transport/command/args/url 建议，命中常见包或自建服务均可解释。
+func (s *Server) handleSuggestExternalMcp(w http.ResponseWriter, r *http.Request) {
+	var c struct {
+		Server string `json:"server"`
+		Tools  []struct {
+			Name  string `json:"name"`
+			Calls int    `json:"calls"`
+		} `json:"tools"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&c); err != nil || strings.TrimSpace(c.Server) == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", "server required")
+		return
+	}
+	if len(c.Tools) == 0 {
+		writeError(w, http.StatusBadRequest, "bad_request", "tools required")
+		return
+	}
+	var sb strings.Builder
+	for _, t := range c.Tools {
+		sb.WriteString(fmt.Sprintf("- %s（调用 %d 次）\n", t.Name, t.Calls))
+	}
+	prompt := fmt.Sprintf(`你是 MCP（Model Context Protocol）服务器接入助手。外部调用方在 LLM 网关里声明了以下外部 MCP 工具，但没有提供连接配置。请根据 server 名与工具名推断最可能的接入方式。
+
+server 名: %s
+工具声明:
+%s
+只输出 JSON（不要 markdown 围栏、不要任何解释文字）：
+{"transport":"stdio 或 http","command":"启动命令，如 npx -y @xxx/yyy；不确定则空串","args":["参数数组，可空"],"url":"http 模式的端点 URL；stdio 模式空串","env_hint":"可能需要配置的环境变量或密钥名；没有则空串","notes":"一句中文说明：这是公开知名包 / 自建服务 / 不确定，以及为什么"}
+
+规则：优先用公开知名的 npx 包（如 @modelcontextprotocol/*、serena-mcp 等）；如果 server 名明显是自建服务（如内部项目缩写、私有工具名），如实说明并给出通用 stdio 接入建议；不要编造不存在的包名，不确定就明确写“不确定”。`, c.Server, sb.String())
+	msgs := []proxy.ChatMessage{{"role": "user", "content": prompt}}
+	body, why := s.proxy.Complete(r, store.APIKey{}, "/v1/chat/completions", msgs)
+	if len(body) == 0 {
+		if why == "" {
+			why = "无可用 chat 路由"
+		}
+		writeError(w, http.StatusBadGateway, "suggest_failed", "LLM 建议失败："+why)
+		return
+	}
+	var resp struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil || len(resp.Choices) == 0 {
+		writeError(w, http.StatusBadGateway, "suggest_failed", "LLM 响应无 choices")
+		return
+	}
+	sug, err := parseSuggestJSON(resp.Choices[0].Message.Content)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "suggest_failed", "LLM 未按 JSON 格式返回："+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"suggestion": sug})
+}
+
+// parseSuggestJSON 从模型输出中提取建议 JSON（兼容 ```json 围栏与前后杂文）。
+func parseSuggestJSON(content string) (map[string]any, error) {
+	s := strings.TrimSpace(content)
+	if i := strings.Index(s, "```"); i >= 0 {
+		s = s[i+3:]
+		if j := strings.Index(s, "```"); j >= 0 {
+			s = s[:j]
+		}
+		s = strings.TrimSpace(s)
+		if i := strings.Index(s, "\n"); i >= 0 && strings.Contains(s[:i], "json") {
+			s = strings.TrimSpace(s[i+1:])
+		}
+	}
+	if i := strings.Index(s, "{"); i >= 0 {
+		s = s[i:]
+		if j := strings.LastIndex(s, "}"); j >= 0 {
+			s = s[:j+1]
+		}
+	}
+	var out map[string]any
+	if err := json.Unmarshal([]byte(s), &out); err != nil {
+		return nil, err
+	}
+	// 归一化字段
+	if v, ok := out["command"].(string); ok {
+		out["command"] = v
+	} else {
+		out["command"] = ""
+	}
+	if v, ok := out["transport"].(string); ok && (v == "stdio" || v == "http") {
+		out["transport"] = v
+	} else {
+		out["transport"] = "stdio"
+	}
+	for _, k := range []string{"url", "env_hint", "notes"} {
+		if _, ok := out[k].(string); !ok {
+			out[k] = ""
+		}
+	}
+	if _, ok := out["args"].([]any); !ok {
+		out["args"] = []any{}
+	}
+	return out, nil
 }
 
 // handleListExternalMcpCandidates 返回外部 MCP server 候选：

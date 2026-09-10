@@ -209,6 +209,11 @@ export class ApiService {
       .pipe(catchError(this.handleError));
   }
 
+  suggestExternalMcp(server: string, tools: { name: string; calls: number }[]): Observable<{ suggestion: { transport: string; command: string; args: string[]; url: string; env_hint: string; notes: string } }> {
+    return this.http.post<{ suggestion: { transport: string; command: string; args: string[]; url: string; env_hint: string; notes: string } }>('/api/admin/external-mcps/suggest', { server, tools }, { headers: this.headers() })
+      .pipe(catchError(this.handleError));
+  }
+
   sandboxStatus(): Observable<{ enabled: boolean; docker_ok: boolean; timeout_sec: number; memory_mb: number; cpus: number; max_output_kb: number; languages: string[] }> {
     return this.http.get<{ enabled: boolean; docker_ok: boolean; timeout_sec: number; memory_mb: number; cpus: number; max_output_kb: number; languages: string[] }>('/api/admin/sandbox/status', { headers: this.headers() })
       .pipe(catchError(this.handleError));
