@@ -66,7 +66,7 @@ import { Balance, Provider, ProbeModel } from './models';
           </tr>
         </tbody>
       </table>
-      <ng-template #none><div class="empty">还没有 Provider</div></ng-template>
+      <ng-template #none><div class="empty">还没有 Provider，点击右上角「+ 新增」添加上游 LLM 服务</div></ng-template>
     </div>
 
     <!-- 编辑弹窗 -->
