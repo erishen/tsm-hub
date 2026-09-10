@@ -32,6 +32,10 @@ build:
 	$(call sign,$(BINARY))
 	@echo "✓ built $(BINARY) ($(VERSION))"
 
+## install-mcps: 预装 MCP server 依赖（npm 系 + serena，平台开箱即用）
+install-mcps:
+	./scripts/install-mcps.sh
+
 ## mock: 编译本地 mock 上游（联调用）
 mock:
 	@mkdir -p bin

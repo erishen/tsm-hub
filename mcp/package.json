@@ -1,0 +1,14 @@
+{
+  "name": "llm-router-mcp-deps",
+  "private": true,
+  "version": "1.0.0",
+  "description": "llm-router 网关预装的 MCP server 依赖（npm 系）",
+  "dependencies": {
+    "@modelcontextprotocol/server-filesystem": "^2026.8.31",
+    "@modelcontextprotocol/server-sequential-thinking": "^2026.8.31",
+    "@modelcontextprotocol/server-memory": "^2026.8.31",
+    "@modelcontextprotocol/server-github": "^2025.4.8",
+    "@modelcontextprotocol/server-brave-search": "^0.6.2",
+    "@playwright/mcp": "^0.0.80"
+  }
+}
