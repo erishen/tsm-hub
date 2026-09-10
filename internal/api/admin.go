@@ -501,7 +501,7 @@ var modelCatalog = map[string]modelMeta{
 	"poolside/laguna-xs-2.1:free":             {"text", "软件工程 Agent 编码（小号）", ""},
 	"poolside/laguna-s-2.1:free":              {"text", "软件工程 Agent 编码（标准）", ""},
 	"cohere/north-mini-code:free":             {"text", "轻量编码/代码补全（North Mini Code）", ""},
-	"dots-studio/dots-3-note-preview:free":    {"text", "笔记/长文档整理（Dots 3）", ""},
+	"dots-studio/dots-3-note-preview:free":    {"specialized", "笔记/长文档整理（Dots 3）", ""},
 	"google/gemma-4-26b-a4b-it:free":          {"text", "通用对话/指令（Google Gemma 4）", ""},
 	"google/gemma-4-31b-it:free":              {"text", "通用对话/指令（Google Gemma 4）", ""},
 	"google/lyria-3-clip-preview":             {"audio", "音频/音乐生成（Lyria 3）", ""},
@@ -522,6 +522,8 @@ func inferModelMeta(id string) modelMeta {
 		return modelMeta{"audio", "音频/语音生成", ""}
 	case strings.Contains(lower, "embed"):
 		return modelMeta{"embedding", "向量嵌入/检索", ""}
+	case strings.Contains(lower, "ocr") || strings.Contains(lower, "rerank") || strings.Contains(lower, "note"):
+		return modelMeta{"specialized", "专用能力（OCR/重排/笔记）", ""}
 	case strings.Contains(lower, "vision") || strings.Contains(lower, "omni") || strings.Contains(lower, "vl"):
 		return modelMeta{"vision", "图像/多模态理解", ""}
 	case strings.Contains(lower, "safety") || strings.Contains(lower, "moder") || strings.Contains(lower, "guard"):
