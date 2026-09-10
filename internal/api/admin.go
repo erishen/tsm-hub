@@ -299,7 +299,25 @@ func (s *Server) handleProviderBalances(w http.ResponseWriter, r *http.Request) 
 				out[i].Error = "no_key"
 				return
 			}
-			bal := s.probeBalance(ctx, strings.TrimRight(p.BaseURL, "/"), key)
+			base := strings.TrimRight(p.BaseURL, "/")
+			// 重试：最多 3 次尝试（首次 + 2 次重试），间隔 500ms；
+			// 上游偶尔超时/502 时自动重试，避免瞬时故障误报 unavailable。
+			const maxAttempts = 3
+			var bal map[string]any
+			for attempt := 0; attempt < maxAttempts; attempt++ {
+				if attempt > 0 {
+					select {
+					case <-ctx.Done():
+						out[i].Error = "timeout"
+						return
+					case <-time.After(500 * time.Millisecond):
+					}
+				}
+				bal = s.probeBalance(ctx, base, key)
+				if bal != nil {
+					break
+				}
+			}
 			if bal == nil {
 				out[i].Error = "unavailable"
 				return
