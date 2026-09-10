@@ -93,12 +93,18 @@ import { Provider, Route, RouteTarget } from './models';
 
     <div class="card">
       <h2>已配置（{{ routes().length }}）</h2>
+      <div class="batch-bar" *ngIf="selectedCount()">
+        <span>已选 {{ selectedCount() }} 项</span>
+        <button class="small danger" (click)="batchDelete()">批量删除</button>
+        <button class="small" style="margin-left:auto" (click)="clearSelection()">取消选择</button>
+      </div>
       <table *ngIf="routes().length; else none">
         <thead>
-          <tr><th>对外模型</th><th>策略</th><th>候选（按尝试顺序）</th><th>操作</th></tr>
+          <tr><th style="width:32px"><input type="checkbox" [checked]="allSelected()" (change)="toggleAll($event)" /></th><th>对外模型</th><th>策略</th><th>候选（按尝试顺序）</th><th>操作</th></tr>
         </thead>
         <tbody>
-          <tr *ngFor="let r of routes()">
+          <tr *ngFor="let r of routes()" [class.selected]="isSelected(r.model || '*')">
+            <td><input type="checkbox" [checked]="isSelected(r.model || '*')" (change)="toggleSelect(r.model || '*', $event)" /></td>
             <td class="mono">
               {{ r.model || '*(通配)' }}
               <span class="badge" *ngIf="!r.model">兜底</span>
@@ -136,6 +142,36 @@ export class RoutesComponent implements OnInit, OnDestroy {
   editingModel = '';
 
   form: Route = { model: '', strategy: 'failover', targets: [], remark: '' };
+
+  // ---- 批量操作 ----
+  private selected = new Set<string>();
+  selectedCount(): number { return this.selected.size; }
+  isSelected(model: string): boolean { return this.selected.has(model); }
+  allSelected(): boolean { return this.routes().length > 0 && this.selected.size === this.routes().length; }
+  toggleSelect(model: string, ev: Event): void {
+    const checked = (ev.target as HTMLInputElement).checked;
+    if (checked) this.selected.add(model); else this.selected.delete(model);
+  }
+  toggleAll(ev: Event): void {
+    const checked = (ev.target as HTMLInputElement).checked;
+    if (checked) this.routes().forEach((r) => this.selected.add(r.model || '*'));
+    else this.selected.clear();
+  }
+  clearSelection(): void { this.selected.clear(); }
+
+  /** 批量删除：逐个调用 deleteRoute API，完成后刷新列表。 */
+  batchDelete(): void {
+    const models = [...this.selected];
+    if (!models.length) return;
+    if (!confirm(`确认删除选中的 ${models.length} 条路由规则？此操作不可恢复。`)) return;
+    let done = 0;
+    models.forEach((model) => {
+      this.api.deleteRoute(model).subscribe({
+        next: () => { if (++done === models.length) { this.selected.clear(); this.load(); } },
+        error: () => { if (++done === models.length) { this.selected.clear(); this.load(); } },
+      });
+    });
+  }
 
   
   /** 弹窗滚动锁：打开时锁 body，关闭/销毁时恢复（防止滚动穿透母页面）。 */

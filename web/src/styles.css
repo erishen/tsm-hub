@@ -376,3 +376,14 @@ button.primary:hover {
   background-size:400% 100%; animation:skel 1.2s ease infinite; }
 .page-loading { padding:10px 14px; color:var(--muted); font-size:13px; }
 @keyframes skel { 0% {background-position:100% 0;} 100% {background-position:0 0;} }
+
+/* 批量操作工具栏 */
+.batch-bar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 8px 12px; margin-bottom: 10px;
+  background: var(--primary-soft); border: 1px solid var(--border);
+  border-radius: 8px; font-size: 13px;
+}
+.batch-bar span { font-weight: 500; }
+table tr.selected { background: var(--primary-soft); }
+table input[type="checkbox"] { cursor: pointer; width: 16px; height: 16px; }

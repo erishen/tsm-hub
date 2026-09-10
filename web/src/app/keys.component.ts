@@ -188,16 +188,25 @@ import { ApiKey, Quota, SkillSummary } from './models';
 
     <div class="card">
       <h2>已签发（{{ keys().length }}）</h2>
+      <div class="batch-bar" *ngIf="selectedCount()">
+        <span>已选 {{ selectedCount() }} 项</span>
+        <button class="small" (click)="batchToggle(true)">批量启用</button>
+        <button class="small" (click)="batchToggle(false)">批量停用</button>
+        <button class="small danger" (click)="batchDelete()">批量删除</button>
+        <button class="small" style="margin-left:auto" (click)="clearSelection()">取消选择</button>
+      </div>
       <table *ngIf="keys().length; else none">
         <thead>
           <tr>
+            <th style="width:32px"><input type="checkbox" [checked]="allSelected()" (change)="toggleAll($event)" /></th>
             <th>名称 / Prefix</th><th>状态</th><th>模型</th><th>技能注入</th>
             <th class="num">用量 Tokens</th><th class="num">成本</th>
             <th class="num">RPM</th><th>工具使用 <span class="muted" style="font-weight:400;font-size:11px">（执行 / 声明）</span></th><th>剩余 / 配额</th><th>操作</th>
           </tr>
         </thead>
         <tbody>
-          <tr *ngFor="let k of keys()">
+          <tr *ngFor="let k of keys()" [class.selected]="isSelected(k.id)">
+            <td><input type="checkbox" [checked]="isSelected(k.id)" (change)="toggleSelect(k.id, $event)" /></td>
             <td>
               <div>{{ k.name }}</div>
               <div class="mono muted">{{ k.prefix }}</div>
@@ -261,6 +270,50 @@ export class KeysComponent implements OnInit, OnDestroy {
   /** 复制的目标标记：'' = 无；'key' | 'curl' | 'py' | 'curlKey' */
   readonly copied = signal('');
   justCreated: { id: string; key: string; prefix: string } | null = null;
+
+  // ---- 批量操作 ----
+  private selected = new Set<string>();
+  selectedCount(): number { return this.selected.size; }
+  isSelected(id: string): boolean { return this.selected.has(id); }
+  allSelected(): boolean { return this.keys().length > 0 && this.selected.size === this.keys().length; }
+  toggleSelect(id: string, ev: Event): void {
+    const checked = (ev.target as HTMLInputElement).checked;
+    if (checked) this.selected.add(id); else this.selected.delete(id);
+  }
+  toggleAll(ev: Event): void {
+    const checked = (ev.target as HTMLInputElement).checked;
+    if (checked) this.keys().forEach((k) => this.selected.add(k.id));
+    else this.selected.clear();
+  }
+  clearSelection(): void { this.selected.clear(); }
+
+  /** 批量启用/停用：逐个调用 toggleKey API，完成后刷新列表。 */
+  batchToggle(enabled: boolean): void {
+    const ids = [...this.selected];
+    if (!ids.length) return;
+    if (!confirm(`确认${enabled ? '启用' : '停用'}选中的 ${ids.length} 个 Key？`)) return;
+    let done = 0;
+    ids.forEach((id) => {
+      this.api.toggleKey(id, enabled).subscribe({
+        next: () => { if (++done === ids.length) { this.selected.clear(); this.load(); } },
+        error: () => { if (++done === ids.length) { this.selected.clear(); this.load(); } },
+      });
+    });
+  }
+
+  /** 批量删除：逐个调用 deleteKey API，完成后刷新列表。 */
+  batchDelete(): void {
+    const ids = [...this.selected];
+    if (!ids.length) return;
+    if (!confirm(`确认删除选中的 ${ids.length} 个 Key？使用这些 Key 的客户端会立即失效。此操作不可恢复。`)) return;
+    let done = 0;
+    ids.forEach((id) => {
+      this.api.deleteKey(id).subscribe({
+        next: () => { if (++done === ids.length) { this.selected.clear(); this.load(); } },
+        error: () => { if (++done === ids.length) { this.selected.clear(); this.load(); } },
+      });
+    });
+  }
 
   /** 可编程接口：用同一个 Key 读取网关能力（发现 tools / mcps / skills / models）。 */
   readonly apiEndpoints = [
