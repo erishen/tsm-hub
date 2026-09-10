@@ -279,3 +279,32 @@ export interface ToolParam {
   description?: string;
   enum?: string[];
 }
+
+
+/** 应用推荐场景 */
+export interface AppScenario {
+  id: string;
+  name: string;
+  icon: string;
+  description: string;
+  example: string;
+  features: string[];
+  models: {
+    id: string;
+    provider: string;
+    category: string;
+    purpose: string;
+    context_length?: number;
+    free: boolean;
+    route_score: number;
+    in_route: boolean;
+  }[];
+}
+
+/** 应用推荐响应 */
+export interface RecommendationsResp {
+  scenarios: AppScenario[];
+  total_models: number;
+  free_models: number;
+  scenario_num: number;
+}

@@ -11,6 +11,7 @@ const routes: Routes = [
   { path: 'keys', loadComponent: () => import('./app/keys.component').then((m) => m.KeysComponent) },
   { path: 'balances', loadComponent: () => import('./app/balances.component').then((m) => m.BalancesComponent) },
   { path: 'models', loadComponent: () => import('./app/models.component').then((m) => m.ModelsComponent) },
+  { path: 'recommendations', loadComponent: () => import('./app/recommendations.component').then((m) => m.RecommendationsComponent) },
   { path: 'usage', loadComponent: () => import('./app/usage.component').then((m) => m.UsageComponent) },
   { path: 'observability', loadComponent: () => import('./app/observability.component').then((m) => m.ObservabilityComponent) },
   { path: 'skills', loadComponent: () => import('./app/skills.component').then((m) => m.SkillsComponent) },

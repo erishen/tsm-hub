@@ -31,6 +31,7 @@ func (s *Server) adminMux() http.Handler {
 	m.HandleFunc("GET /api/admin/providers/balances", s.admin(s.handleProviderBalances))
 	m.HandleFunc("GET /api/admin/models/catalog", s.admin(s.handleModelsCatalog))
 	m.HandleFunc("POST /api/admin/models/refresh", s.admin(s.handleRefreshModels))
+	m.HandleFunc("GET /api/admin/models/recommendations", s.admin(s.handleModelRecommendations))
 	m.HandleFunc("POST /api/admin/providers", s.admin(s.handleUpsertProvider))
 	m.HandleFunc("POST /api/admin/providers/probe", s.admin(s.handleProbeModels))
 	m.HandleFunc("DELETE /api/admin/providers/{id}", s.admin(s.handleDeleteProvider))
@@ -574,6 +575,204 @@ func markFreeByProvider(p store.Provider, models []map[string]any) []map[string]
 	}
 	return models
 }
+
+
+// appScenario 是一个应用开发场景，根据当前模型池能力动态匹配推荐模型。
+type appScenario struct {
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Icon        string   `json:"icon"`
+	Description string   `json:"description"`
+	Categories  []string `json:"-"`
+	Keywords    []string `json:"-"`
+	MinContext  int      `json:"-"`
+	Example     string   `json:"example"`
+	Features    []string `json:"features"`
+}
+
+// appScenarios 是预设的应用开发场景列表，根据模型池能力动态过滤。
+var appScenarios = []appScenario{
+	{
+		ID: "chatbot", Name: "智能客服 / 问答机器人", Icon: "💬",
+		Description: "7×24 小时自动客服、FAQ 问答、知识库对话，免费模型即可支撑高并发。",
+		Categories:  []string{"text"}, Keywords: []string{"flash", "lite", "mini"},
+		Example: "你是电商客服助手。用户问：「我的订单什么时候发货？」 请根据订单号查询并礼貌回复。",
+		Features: []string{"免费可用", "高并发", "多语言"},
+	},
+	{
+		ID: "coding", Name: "代码助手 / 代码审查", Icon: "⌨️",
+		Description: "代码补全、Bug 修复、Code Review、技术方案生成，主打编码能力强的模型。",
+		Categories:  []string{"text"}, Keywords: []string{"code", "coder", "agent", "deepseek"},
+		Example: "审查以下 Python 函数的性能问题并给出优化方案：\n```python\ndef process(items):\n    result = []\n    for i in items:\n        result.append(i * 2)\n    return result\n```",
+		Features: []string{"编码专用", "免费模型", "多语言"},
+	},
+	{
+		ID: "agent", Name: "Agent / 工具调用", Icon: "🤖",
+		Description: "Function Calling、多步推理、工具编排，适合构建自主 Agent 工作流。",
+		Categories:  []string{"text"}, Keywords: []string{"agent", "flash", "ultra", "kimi"},
+		MinContext:  100000,
+		Example: "你是研究 Agent。可用工具：search(query)、fetch(url)、summarize(text)。任务：调研「2026 年大模型推理优化」并输出 500 字摘要。",
+		Features: []string{"Function Calling", "大上下文", "多步推理"},
+	},
+	{
+		ID: "rag", Name: "长文档分析 / RAG", Icon: "📚",
+		Description: "1M 上下文直接喂文档，或配合向量嵌入+重排序构建 RAG 系统，支持百万字分析。",
+		Categories:  []string{"text", "embedding", "specialized"}, Keywords: []string{"flash", "deepseek", "glm", "kimi"},
+		MinContext:  100000,
+		Example: "请阅读以下合同文本，提取关键条款：甲方、乙方、合同金额、付款方式、违约责任、终止条件。[文档内容]",
+		Features: []string{"1M 上下文", "向量嵌入", "重排序", "免费"},
+	},
+	{
+		ID: "multimodal", Name: "多模态理解 / OCR", Icon: "🖼️",
+		Description: "图像理解、图表分析、OCR 文字识别、文档结构化，支持图片+文本混合输入。",
+		Categories:  []string{"vision", "specialized"}, Keywords: []string{"vision", "ocr", "vl"},
+		Example: "请识别这张发票图片中的：开票日期、金额、税额、销售方名称、购买方名称，并输出 JSON。",
+		Features: []string{"图像理解", "OCR", "图表分析"},
+	},
+	{
+		ID: "notes", Name: "笔记 / 长文档整理", Icon: "📝",
+		Description: "会议纪要整理、长文摘要、知识卡片生成，专用笔记模型 500K 上下文。",
+		Categories:  []string{"specialized"}, Keywords: []string{"note", "dots"},
+		Example: "请将以下 2 小时会议录音转写文本整理为：会议主题、关键决议、行动项（含负责人和截止日期）、待讨论问题。",
+		Features: []string{"500K 上下文", "专用模型", "免费"},
+	},
+	{
+		ID: "music", Name: "音乐 / 音频生成", Icon: "🎵",
+		Description: "文本生成音乐、音效、BGM，支持风格描述和时长控制，1M 上下文。",
+		Categories:  []string{"audio"}, Keywords: []string{"lyria", "music"},
+		Example: "生成一段 30 秒的轻快电子音乐，适合产品介绍视频背景，节奏 120 BPM，无歌词。",
+		Features: []string{"文本生音乐", "1M 上下文", "免费"},
+	},
+	{
+		ID: "safety", Name: "内容安全 / 审核", Icon: "🛡️",
+		Description: "文本/图片内容审核、违规检测、分类标签，可集成到 UGC 平台做前置过滤。",
+		Categories:  []string{"other"}, Keywords: []string{"safety", "moderation", "guard"},
+		Example: "请审核以下用户评论是否违规，输出分类：正常/广告/辱骂/色情/政治敏感/其他，并给出置信度。",
+		Features: []string{"内容审核", "分类标签", "免费"},
+	},
+	{
+		ID: "research", Name: "深度研究 / 推理", Icon: "🔬",
+		Description: "复杂问题拆解、多步推理、深度研究报告，主打推理能力强的大参数模型。",
+		Categories:  []string{"text"}, Keywords: []string{"reason", "think", "ultra", "pro", "nemotron"},
+		MinContext:  100000,
+		Example: "请分析「AI 编程助手对软件工程师生产力的影响」，从正面、负面、长期趋势三个维度展开，引用数据支撑。",
+		Features: []string{"深度推理", "大上下文", "免费旗舰"},
+	},
+	{
+		ID: "edge", Name: "轻量 / 高并发场景", Icon: "⚡",
+		Description: "低延迟、高吞吐、低成本场景，轻量模型适合边缘部署和大规模并发。",
+		Categories:  []string{"text"}, Keywords: []string{"lite", "flash", "mini", "small", "xs"},
+		Example: "你是快速分类助手。用户输入：「今天天气真好」 请在 100ms 内输出情感分类：正面/负面/中性。",
+		Features: []string{"低延迟", "高并发", "免费", "轻量"},
+	},
+}
+
+// handleModelRecommendations 根据当前模型池能力返回可做的应用开发场景推荐。
+func (s *Server) handleModelRecommendations(w http.ResponseWriter, r *http.Request) {
+	catalog := s.buildCatalog()
+	type modelItem struct {
+		ID            string `json:"id"`
+		Provider      string `json:"provider"`
+		Category      string `json:"category"`
+		Purpose       string `json:"purpose"`
+		ContextLength int    `json:"context_length,omitempty"`
+		Free          bool   `json:"free"`
+		Unavailable   string `json:"unavailable,omitempty"`
+		RouteScore    int    `json:"route_score"`
+		InRoute       bool   `json:"in_route"`
+	}
+	// buildCatalog 返回 []*item（局部类型），用 JSON 中转解析为通用 modelItem
+	rawBytes, _ := json.Marshal(catalog["models"])
+	var allModels []modelItem
+	_ = json.Unmarshal(rawBytes, &allModels)
+
+	type scenarioResp struct {
+		appScenario
+		Models []modelItem `json:"models"`
+	}
+	var result []scenarioResp
+	for _, sc := range appScenarios {
+		// 筛选匹配模型
+		var matched []modelItem
+		for _, m := range allModels {
+			if m.Unavailable != "" {
+				continue // 跳过不可用
+			}
+			// 类别匹配
+			catOK := false
+			for _, c := range sc.Categories {
+				if m.Category == c {
+					catOK = true
+					break
+				}
+			}
+			if !catOK {
+				continue
+			}
+			// 上下文要求
+			if sc.MinContext > 0 && m.ContextLength < sc.MinContext {
+				continue
+			}
+			matched = append(matched, m)
+		}
+		if len(matched) == 0 {
+			continue // 没有可用模型的场景不展示
+		}
+		// 排序：关键词匹配加分 + 免费优先 + 评分高
+		sort.Slice(matched, func(i, j int) bool {
+			scoreI, scoreJ := matched[i].RouteScore, matched[j].RouteScore
+			lowerI, lowerJ := strings.ToLower(matched[i].ID), strings.ToLower(matched[j].ID)
+			for _, kw := range sc.Keywords {
+				if strings.Contains(lowerI, kw) {
+					scoreI += 50
+				}
+				if strings.Contains(lowerJ, kw) {
+					scoreJ += 50
+				}
+			}
+			if matched[i].Free {
+				scoreI += 100
+			}
+			if matched[j].Free {
+				scoreJ += 100
+			}
+			return scoreI > scoreJ
+		})
+		// 取 top 3
+		if len(matched) > 3 {
+			matched = matched[:3]
+		}
+		result = append(result, scenarioResp{appScenario: sc, Models: matched})
+	}
+	// 统计
+	freeCount := 0
+	for _, m := range allModels {
+		if m.Free {
+			freeCount++
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"scenarios":    result,
+		"total_models": len(allModels),
+		"free_models":  freeCount,
+		"scenario_num": len(result),
+	})
+}
+
+// getStr / getBool 辅助函数
+func getStr(m map[string]any, k string) string {
+	if v, ok := m[k].(string); ok {
+		return v
+	}
+	return ""
+}
+func getBool(m map[string]any, k string) bool {
+	if v, ok := m[k].(bool); ok {
+		return v
+	}
+	return false
+}
+
 
 // handleRefreshModels 并行探测所有已配置 Key 的 Provider（非 mock-local），刷新模型快照后返回目录。
 // 单个 Provider 失败不阻塞；providers 字段返回每个 Provider 的探测结果（ok / 错误摘要）。
