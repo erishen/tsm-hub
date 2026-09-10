@@ -102,30 +102,36 @@ import { McpServer, ToolInfo } from './models';
     <!-- 测试工具弹窗 -->
     <div class="modal-backdrop" *ngIf="testing()" (click)="closeTest()">
       <div class="modal" (click)="$event.stopPropagation()">
-        <h2>测试工具 <span class="mono">{{ testing()!.name }}</span></h2>
-        <div class="sub">{{ testing()!.description }}</div>
-
-        <div *ngIf="!paramFields().length" class="muted" style="margin-top:8px">该工具无需参数。</div>
-        <ng-container *ngFor="let f of paramFields()">
-          <label>
-            {{ f.key }}<span class="req" *ngIf="f.required"> *</span>
-            <span class="muted small" *ngIf="f.desc"> — {{ f.desc }}</span>
-          </label>
-          <select *ngIf="f.enum && f.enum.length" [(ngModel)]="testArgs[f.key]">
-            <option *ngFor="let e of f.enum" [value]="e">{{ e }}</option>
-          </select>
-          <input *ngIf="!f.enum || !f.enum.length" [(ngModel)]="testArgs[f.key]"
-                 [type]="f.type === 'number' ? 'number' : 'text'"
-                 [placeholder]="f.type === 'boolean' ? 'true / false' : ''" />
-        </ng-container>
-
-        <div class="test-result" *ngIf="testResult() !== null">
-          <div class="muted small" style="margin-bottom:4px">返回结果：</div>
-          <pre>{{ testResult() }}</pre>
+        <div class="modal-head">
+          <div class="modal-icon">▶</div>
+          <div class="modal-titles">
+            <h2>测试工具 <span class="mono">{{ testing()!.name }}</span></h2>
+            <div class="sub">{{ testing()!.description }}</div>
+          </div>
+          <button class="icon" (click)="closeTest()" aria-label="关闭">×</button>
         </div>
-        <div class="banner error" *ngIf="testError()">{{ testError() }}</div>
+        <div class="modal-body">
+          <div *ngIf="!paramFields().length" class="muted" style="margin-top:8px">该工具无需参数。</div>
+          <ng-container *ngFor="let f of paramFields()">
+            <label>
+              {{ f.key }}<span class="req" *ngIf="f.required"> *</span>
+              <span class="muted small" *ngIf="f.desc"> — {{ f.desc }}</span>
+            </label>
+            <select *ngIf="f.enum && f.enum.length" [(ngModel)]="testArgs[f.key]">
+              <option *ngFor="let e of f.enum" [value]="e">{{ e }}</option>
+            </select>
+            <input *ngIf="!f.enum || !f.enum.length" [(ngModel)]="testArgs[f.key]"
+                   [type]="f.type === 'number' ? 'number' : 'text'"
+                   [placeholder]="f.type === 'boolean' ? 'true / false' : ''" />
+          </ng-container>
 
-        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+          <div class="test-result" *ngIf="testResult() !== null">
+            <div class="muted small" style="margin-bottom:4px">返回结果：</div>
+            <pre>{{ testResult() }}</pre>
+          </div>
+          <div class="banner error" *ngIf="testError()">{{ testError() }}</div>
+        </div>
+        <div class="modal-foot">
           <button (click)="closeTest()">关闭</button>
           <button class="primary" (click)="runTest()" [disabled]="testRunning()">{{ testRunning() ? '调用中…' : '运行' }}</button>
         </div>
@@ -135,37 +141,64 @@ import { McpServer, ToolInfo } from './models';
     <!-- 编辑弹窗 -->
     <div class="modal-backdrop" *ngIf="editing()" (click)="closeEdit()">
       <div class="modal" (click)="$event.stopPropagation()">
-        <h2>{{ editing()!.mode === 'edit' ? '编辑 MCP Server' : '添加 MCP Server' }}</h2>
-        <div class="sub" *ngIf="editing()!.mode === 'edit'">修改后立即重建连接，配置持久化到 settings.mcps</div>
-
-        <label>名称 <span class="req">*</span></label>
-        <input [(ngModel)]="form.name" placeholder="如 fetch / fs / demo" [disabled]="editing()!.mode === 'edit'" />
-        <div class="muted small">唯一标识；工具名将形如 mcp_&lt;名称&gt;_&lt;tool&gt;</div>
-
-        <label>传输方式</label>
-        <select [(ngModel)]="form.transport" style="width:100%;padding:8px;border:1px solid var(--border,#e4e3dd);border-radius:8px">
-          <option value="stdio">stdio（本地子进程）</option>
-          <option value="http">http（Streamable HTTP 远程）</option>
-        </select>
-
-        <ng-container *ngIf="form.transport === 'http'">
-          <label>Endpoint URL <span class="req">*</span></label>
-          <input [(ngModel)]="form.url" placeholder="如 http://127.0.0.1:8787/mcp" />
-          <div class="muted small">远程 MCP server 地址（支持 application/json 与 SSE 响应）</div>
-        </ng-container>
-
-        <ng-container *ngIf="form.transport !== 'http'">
-          <label>命令 <span class="req">*</span></label>
-          <input [(ngModel)]="form.command" placeholder="如 npx / python3 / node" />
-
-          <label>参数（空格分隔）</label>
-          <input [(ngModel)]="form.argsText" placeholder="如 -y @modelcontextprotocol/server-fetch" />
-
-          <label>环境变量（可选，KEY=VALUE 每行一个）</label>
-          <textarea [(ngModel)]="form.envText" rows="2" placeholder="如 MY_TOKEN=abc"></textarea>
-        </ng-container>
-
-        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+        <div class="modal-head">
+          <div class="modal-icon">{{ editing()!.mode === 'edit' ? '✎' : '+' }}</div>
+          <div class="modal-titles">
+            <h2>{{ editing()!.mode === 'edit' ? '编辑 MCP Server' : '添加 MCP Server' }}</h2>
+            <div class="sub">{{ editing()!.mode === 'edit' ? '修改后立即重建连接，配置持久化到 settings.mcps' : '连接 stdio 本地进程或 Streamable HTTP 远程的 MCP server' }}</div>
+          </div>
+          <button class="icon" (click)="closeEdit()" aria-label="关闭">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-section">
+            <h3>标识</h3>
+            <div class="form-row">
+              <div>
+                <label>名称 <span class="req">*</span></label>
+                <input [(ngModel)]="form.name" placeholder="如 fs / think / serena" [disabled]="editing()!.mode === 'edit'" />
+                <div class="muted small">唯一标识；工具名将形如 mcp_&lt;名称&gt;_&lt;tool&gt;</div>
+              </div>
+            </div>
+          </div>
+          <div class="form-section">
+            <h3>连接</h3>
+            <div class="form-row">
+              <div>
+                <label>传输方式</label>
+                <select [(ngModel)]="form.transport">
+                  <option value="stdio">stdio（本地子进程）</option>
+                  <option value="http">http（Streamable HTTP 远程）</option>
+                </select>
+              </div>
+            </div>
+            <ng-container *ngIf="form.transport === 'http'">
+              <label>Endpoint URL <span class="req">*</span></label>
+              <input [(ngModel)]="form.url" placeholder="如 http://127.0.0.1:8787/mcp" />
+              <div class="muted small">远程 MCP server 地址（支持 application/json 与 SSE 响应）</div>
+            </ng-container>
+            <ng-container *ngIf="form.transport !== 'http'">
+              <div class="form-row">
+                <div>
+                  <label>命令 <span class="req">*</span></label>
+                  <input [(ngModel)]="form.command" placeholder="如 ./mcp/node_modules/.bin/mcp-server-filesystem" />
+                </div>
+              </div>
+              <div class="form-row">
+                <div>
+                  <label>参数（空格分隔）</label>
+                  <input [(ngModel)]="form.argsText" placeholder="如 /path/to/workspace" />
+                </div>
+              </div>
+              <div class="form-row">
+                <div>
+                  <label>环境变量（可选，KEY=VALUE 每行一个）</label>
+                  <textarea [(ngModel)]="form.envText" rows="2" placeholder="如 GITHUB_TOKEN=ghp_xxx"></textarea>
+                </div>
+              </div>
+            </ng-container>
+          </div>
+        </div>
+        <div class="modal-foot">
           <button (click)="closeEdit()">取消</button>
           <button class="primary" (click)="save()" [disabled]="saving()">{{ saving() ? '保存中…' : '保存' }}</button>
         </div>
@@ -177,9 +210,6 @@ import { McpServer, ToolInfo } from './models';
     .tool-card { border:1px solid var(--border,#e4e3dd); border-radius:10px; padding:10px 12px; }
     .tool-name { display:flex; align-items:center; gap:8px; font-weight:600; }
     .tool-desc { margin-top:4px; font-size:12px; line-height:1.45; }
-    .modal { overflow-y:auto; }
-    .modal label { display:block; margin:12px 0 4px; font-size:13px; font-weight:600; }
-    .modal input, .modal textarea { width:100%; box-sizing:border-box; }
     .req { color:#d33; }
     .test-result { margin-top:12px; }
     .test-result pre { background:#f6f5f1; border:1px solid var(--border,#e4e3dd); border-radius:8px; padding:10px; font-size:12px; white-space:pre-wrap; word-break:break-all; max-height:220px; overflow:auto; margin:0; }
