@@ -18,6 +18,9 @@ const MaskedSecretMarker = "…"
 // Store 是配置的内存态 + 落盘器。所有读操作走内存索引，写操作加锁后原子落盘。
 type Store struct {
 	path string
+	// unavailablePath 是冷却状态的独立落盘文件（data/unavailable.json），
+	// 与 config.json 分离，避免高频冷却写入频繁重写主配置。
+	unavailablePath string
 
 	mu  sync.RWMutex
 	cfg Config
@@ -27,8 +30,8 @@ type Store struct {
 	keys      map[string]int // key id -> index in cfg.Keys
 	keyHash   map[string]int // sha256 hex -> index in cfg.Keys
 
-	// unavailable 是「某 provider 上某模型被上游判为不可用」的运行时状态（内存，不落盘，
-	// 重启后自动恢复）。providerID -> model -> 原因+到期。
+	// unavailable 是「某 provider 上某模型被上游判为不可用」的运行时状态。
+	// providerID -> model -> 原因+到期。变更即写 unavailable.json，重启后恢复。
 	unavailable map[string]map[string]UnavailableModel
 }
 
@@ -37,7 +40,14 @@ func New(path string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, fmt.Errorf("create data dir: %w", err)
 	}
-	s := &Store{path: path, unavailable: map[string]map[string]UnavailableModel{}}
+	s := &Store{
+		path:            path,
+		unavailablePath: filepath.Join(filepath.Dir(path), "unavailable.json"),
+		unavailable:     map[string]map[string]UnavailableModel{},
+	}
+	if err := s.loadUnavailable(); err != nil {
+		return nil, err
+	}
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		s.cfg = defaultConfig()
 		if err := s.saveLocked(); err != nil {
@@ -238,8 +248,63 @@ func (s *Store) Update(fn func(c *Config) error) error {
 
 // ---------- Provider ----------
 
+// loadUnavailable 从 unavailable.json 恢复冷却状态（过期项丢弃）。
+// 文件不存在视为全新启动。
+func (s *Store) loadUnavailable() error {
+	b, err := os.ReadFile(s.unavailablePath)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read unavailable: %w", err)
+	}
+	var m map[string]map[string]UnavailableModel
+	if err := json.Unmarshal(b, &m); err != nil {
+		return fmt.Errorf("parse unavailable: %w", err)
+	}
+	now := time.Now()
+	for pid, mm := range m {
+		for model, u := range mm {
+			if now.After(u.Until) {
+				delete(mm, model)
+			}
+		}
+		if len(mm) == 0 {
+			delete(m, pid)
+		}
+	}
+	s.unavailable = m
+	if s.unavailable == nil {
+		s.unavailable = map[string]map[string]UnavailableModel{}
+	}
+	return nil
+}
+
+// persistUnavailable 把未过期的冷却状态写回 unavailable.json（调用方持有锁）。
+// 写失败仅忽略：冷却是运行时优化，丢失只会导致重启后重试一次坏 provider。
+func (s *Store) persistUnavailable() {
+	now := time.Now()
+	out := map[string]map[string]UnavailableModel{}
+	for pid, mm := range s.unavailable {
+		for model, u := range mm {
+			if now.After(u.Until) {
+				continue
+			}
+			if out[pid] == nil {
+				out[pid] = map[string]UnavailableModel{}
+			}
+			out[pid][model] = u
+		}
+	}
+	b, err := json.MarshalIndent(out, "", "  ")
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(s.unavailablePath, b, 0o600)
+}
+
 // MarkModelUnavailable 记录某 provider 上某模型被上游判为不可用（如 404 model not found），
-// 有效期 ttl，期间 ModelUnavailable 返回原因。仅内存态，重启后自动恢复。
+// 有效期 ttl，期间 ModelUnavailable 返回原因。变更即持久化，重启后恢复。
 func (s *Store) MarkModelUnavailable(providerID, model, reason string, ttl time.Duration) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -249,6 +314,7 @@ func (s *Store) MarkModelUnavailable(providerID, model, reason string, ttl time.
 		s.unavailable[providerID] = m
 	}
 	m[model] = UnavailableModel{Reason: reason, Until: time.Now().Add(ttl)}
+	s.persistUnavailable()
 }
 
 // ModelUnavailable 判断某 provider 上某模型当前是否被标记为不可用（未过期）。

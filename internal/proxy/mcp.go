@@ -58,10 +58,78 @@ func (s *mcpServer) isHTTP() bool {
 type mcpManager struct {
 	mu      sync.Mutex
 	servers map[string]*mcpServer
+	// store 供 supervisor 读取最新配置。
+	store *store.Store
+	// errs 记录最近一次连接失败原因（供管理台展示）。
+	errs map[string]string
+	// retry 是每个 server 的下次重试时间（失败退避）。
+	retry map[string]time.Time
 }
 
 func newMCPManager() *mcpManager {
-	return &mcpManager{servers: map[string]*mcpServer{}}
+	return &mcpManager{
+		servers: map[string]*mcpServer{},
+		errs:    map[string]string{},
+		retry:   map[string]time.Time{},
+	}
+}
+
+// Start 启动 supervisor goroutine：网关启动后常驻连接全部配置的 MCP server，
+// 断开后按退避自动重连，配置变更（ResetMCP）后下一轮自动重建。
+func (m *mcpManager) Start(s *store.Store) {
+	m.mu.Lock()
+	m.store = s
+	m.mu.Unlock()
+	go m.supervise()
+}
+
+func (m *mcpManager) supervise() {
+	// 启动后先立即预热一轮，再周期性巡检。
+	for {
+		m.mu.Lock()
+		st := m.store
+		m.mu.Unlock()
+		if st != nil {
+			for name, c := range st.Settings().Mcps {
+				m.ensureAsync(name, c)
+			}
+		}
+		time.Sleep(5 * time.Second)
+	}
+}
+
+// ensureAsync 在后台确保 server 已连接；失败按 5~60s 退避重试，并记录原因。
+func (m *mcpManager) ensureAsync(name string, cfg store.MCPServer) {
+	m.mu.Lock()
+	srv, ok := m.servers[name]
+	if ok && srv.connected() {
+		delete(m.errs, name)
+		delete(m.retry, name)
+		m.mu.Unlock()
+		return
+	}
+	if next, pending := m.retry[name]; pending && time.Now().Before(next) {
+		m.mu.Unlock()
+		return
+	}
+	m.mu.Unlock()
+
+	s, err := m.ensure(name, cfg)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err != nil {
+		m.errs[name] = err.Error()
+		// 退避：首次失败 5s 后重试；持续失败超过 30s 升级到 60s 档，避免空转。
+		delay := 5 * time.Second
+		if last, ok := m.retry[name]; ok && time.Since(last) > 30*time.Second {
+			delay = 60 * time.Second
+		}
+		m.retry[name] = time.Now().Add(delay)
+		return
+	}
+	delete(m.errs, name)
+	delete(m.retry, name)
+	_ = s
 }
 
 // Reset 关闭全部 MCP server 并清空连接（配置变更后调用，下次请求重新连接）。
@@ -94,20 +162,30 @@ func (p *Proxy) MCPStatuses() map[string]MCPStatus {
 	return p.mcps.Statuses(p.store.Settings().Mcps)
 }
 
+// StartMCP 启动 MCP supervisor：常驻连接全部配置 server，断开自动重连。
+func (p *Proxy) StartMCP() {
+	p.mcps.Start(p.store)
+}
+
 // ResetMCP 断开全部 MCP server（配置变更后调用）。
 func (p *Proxy) ResetMCP() {
 	p.mcps.Reset()
 }
 
-// Statuses 返回全部配置 MCP server 的状态（配置但未连接时也返回占位）。
+// Statuses 返回全部配置 MCP server 的状态（配置但未连接时返回占位 + 最近错误）。
 func (m *mcpManager) Statuses(cfg map[string]store.MCPServer) map[string]MCPStatus {
 	out := map[string]MCPStatus{}
 	for name := range cfg {
 		m.mu.Lock()
 		s, ok := m.servers[name]
+		errStr := m.errs[name]
 		m.mu.Unlock()
 		if !ok || !s.connected() {
-			out[name] = MCPStatus{Connected: false}
+			st := MCPStatus{Connected: false}
+			if errStr != "" {
+				st.Err = errStr
+			}
+			out[name] = st
 			continue
 		}
 		out[name] = MCPStatus{Connected: true, Tools: s.toolNames(), ToolDetails: s.toolDetails()}

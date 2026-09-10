@@ -47,25 +47,10 @@ const DRAFT_KEY = 'llm-router.playground.draft';
     </div>
 
     <div class="banner error" *ngIf="errorMsg()">{{ errorMsg() }}</div>
-    <div class="banner ok" *ngIf="mockMsg()">{{ mockMsg() }}</div>
 
     <div class="pg-grid">
       <div class="card pg-form">
         <h2>请求</h2>
-
-        <!-- 联调：一键配置 mock provider + 调试 key -->
-        <div class="pg-mock">
-          <div class="pg-mock-head">
-            <span>本机联调（无需真实 Key）</span>
-            <button class="ghost" (click)="ensureMock()" [disabled]="mockBusy() || !api.loggedIn">
-              {{ mockBusy() ? '配置中…' : '一键配置 Mock 联调' }}
-            </button>
-          </div>
-          <div class="muted small">
-            点击后会自动建好指向 <code>localhost:8799</code> 的 provider 与调试 Key，并填入下方 Token Key。
-            需先在本机启动 mock 上游：<code>make mock-run</code>
-          </div>
-        </div>
 
         <div class="form-row">
           <div>
@@ -170,21 +155,6 @@ const DRAFT_KEY = 'llm-router.playground.draft';
       .pg-grid { grid-template-columns: 1fr; }
     }
     .pg-form textarea { min-height: 84px; }
-    .pg-mock {
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 12px 14px;
-      margin-bottom: 14px;
-    }
-    .pg-mock-head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      flex-wrap: wrap;
-    }
-    .pg-mock-head > span { font-weight: 600; font-size: 13px; }
     .small { font-size: 12px; }
     .pg-md {
       background: #0d1117;
@@ -254,8 +224,6 @@ export class PlaygroundComponent implements OnInit {
   readonly output = signal('');
   readonly meta = signal<PgMeta | null>(null);
   readonly errorMsg = signal('');
-  readonly mockBusy = signal(false);
-  readonly mockMsg = signal('');
   readonly draftSaved = signal(false);
 
   private lastUsage: any = null;
@@ -512,34 +480,10 @@ export class PlaygroundComponent implements OnInit {
     this.draftSaved.set(false);
   }
 
-  ensureMock(): void {
-    if (this.mockBusy() || !this.api.loggedIn) return;
-    this.mockBusy.set(true);
-    this.mockMsg.set('');
-    this.errorMsg.set('');
-    this.api.ensureMockLocal().subscribe({
-      next: (key) => {
-        this.keyText = key;
-        if (!this.model) this.model = 'mock-model';
-        this.stream = true;
-        this.user = this.user || '你好';
-        this.loadModels(); // 刷新模型下拉，让 mock 模型可选
-        this.saveDraft();
-        this.mockBusy.set(false);
-        this.mockMsg.set('已配置指向 localhost:8799 的 provider 与调试 Key，并已填入 Token Key。请先运行 make mock-run 启动 mock 上游，然后点「发送」。');
-      },
-      error: (e) => {
-        this.mockBusy.set(false);
-        this.errorMsg.set('Mock 联调配置失败: ' + (e?.message || e));
-      },
-    });
-  }
-
   async send(): Promise<void> {
     if (!this.keyText || !this.user || this.busy()) return;
     this.busy.set(true);
     this.errorMsg.set('');
-    this.mockMsg.set('');
     this.output.set('');
     this.meta.set(null);
     this.lastUsage = null;
