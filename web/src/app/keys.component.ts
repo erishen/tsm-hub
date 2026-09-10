@@ -1,4 +1,6 @@
 import { Component, OnInit, signal, HostListener } from '@angular/core';
+import { effect, OnDestroy } from '@angular/core';
+import { lockBody, unlockBody } from './scroll-lock';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ApiService, compact, usd } from './api.service';
@@ -228,7 +230,7 @@ import { ApiKey, Quota, SkillSummary } from './models';
     .api-item .path { font-weight:600; min-width:110px; }
   `],
 })
-export class KeysComponent implements OnInit {
+export class KeysComponent implements OnInit, OnDestroy {
   readonly keys = signal<ApiKey[]>([]);
   readonly error = signal('');
   readonly creating = signal(false);
@@ -262,7 +264,17 @@ export class KeysComponent implements OnInit {
 
   private static readonly BASE_URL_KEY = 'llm-router.public-base-url';
 
-  constructor(private api: ApiService) {}
+  
+  /** 弹窗滚动锁：打开时锁 body，关闭/销毁时恢复（防止滚动穿透母页面）。 */
+  private readonly bodyLock = effect(() => {
+    lockBody(!!(this.creating() || this.editing()));
+  });
+
+  ngOnDestroy(): void {
+    unlockBody();
+  }
+
+constructor(private api: ApiService) {}
 
   ngOnInit(): void {
     const saved = localStorage.getItem(KeysComponent.BASE_URL_KEY);

@@ -1,4 +1,6 @@
 import { Component, OnInit, signal } from '@angular/core';
+import { effect, OnDestroy } from '@angular/core';
+import { lockBody, unlockBody } from './scroll-lock';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from './api.service';
@@ -262,7 +264,7 @@ import { McpServer } from './models';
     @keyframes skel { 0% {background-position:100% 0;} 100% {background-position:0 0;} }
   `],
 })
-export class McpsComponent implements OnInit {
+export class McpsComponent implements OnInit, OnDestroy {
   mcps = signal<McpServer[]>([]);
   candidates = signal<{ server: string; calls: number; key_count: number; tools: { name: string; calls: number }[]; suggested_command?: string }[]>([]);
   error = signal('');
@@ -350,7 +352,17 @@ export class McpsComponent implements OnInit {
     },
   ];
 
-  constructor(private api: ApiService) {}
+  
+  /** 弹窗滚动锁：打开时锁 body，关闭/销毁时恢复（防止滚动穿透母页面）。 */
+  private readonly bodyLock = effect(() => {
+    lockBody(!!(this.editing()));
+  });
+
+  ngOnDestroy(): void {
+    unlockBody();
+  }
+
+constructor(private api: ApiService) {}
 
   ngOnInit(): void {
     this.load();

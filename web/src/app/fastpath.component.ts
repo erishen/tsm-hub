@@ -1,4 +1,5 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, signal, effect, OnDestroy } from '@angular/core';
+import { lockBody, unlockBody } from './scroll-lock';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from './api.service';
@@ -80,13 +81,13 @@ interface FastPlugin { name: string; trigger: string; source: string; promoted: 
       </details>
 
       <!-- 晋升模式选择弹窗 -->
-      <div class="modal-backdrop" *ngIf="promoteTarget">
+      <div class="modal-backdrop" *ngIf="promoteTarget()">
         <div class="modal" (click)="$event.stopPropagation()">
         <div class="modal-head">
           <span class="modal-icon">⚡</span>
           <div class="modal-titles">
             <h2>晋升插件</h2>
-            <div class="sub">{{ promoteTarget.name }} · {{ promoteTarget.trigger || '无触发词' }}</div>
+            <div class="sub">{{ promoteTarget()!.name }} · {{ promoteTarget()!.trigger || '无触发词' }}</div>
           </div>
           <button class="icon" (click)="closePromote()" aria-label="关闭">×</button>
         </div>
@@ -128,7 +129,7 @@ interface FastPlugin { name: string; trigger: string; source: string; promoted: 
     .radio-row input { margin-top:3px; }
   `]
 })
-export class FastpathComponent implements OnInit {
+export class FastpathComponent implements OnInit, OnDestroy {
   builtin: FastMatcher[] = [];
   plugins: FastPlugin[] = [];
   testQuery = '';
@@ -138,7 +139,17 @@ export class FastpathComponent implements OnInit {
   testing = false;
   genMsg = '';
 
-  constructor(private api: ApiService) {}
+  
+  /** 弹窗滚动锁：打开时锁 body，关闭/销毁时恢复（防止滚动穿透母页面）。 */
+  private readonly bodyLock = effect(() => {
+    lockBody(!!(this.promoteTarget()));
+  });
+
+  ngOnDestroy(): void {
+    unlockBody();
+  }
+
+constructor(private api: ApiService) {}
 
   ngOnInit(): void {
     this.reload();
@@ -199,7 +210,7 @@ export class FastpathComponent implements OnInit {
     });
   }
 
-  promoteTarget: FastPlugin | null = null;
+  promoteTarget = signal<FastPlugin | null>(null);
   promoteMode = 'fastpath';
 
   modeLabel(mode?: string): string {
@@ -209,20 +220,20 @@ export class FastpathComponent implements OnInit {
   }
 
   openPromote(p: FastPlugin): void {
-    this.promoteTarget = p;
+    this.promoteTarget.set(p);
     this.promoteMode = 'fastpath';
   }
 
   closePromote(): void {
-    this.promoteTarget = null;
+    this.promoteTarget.set(null);
   }
 
   doPromote(): void {
-    const p = this.promoteTarget;
+    const p = this.promoteTarget();
     if (!p) return;
     this.genMsg = '';
     this.api.promoteFastpath(p.name, this.promoteMode).subscribe({
-      next: () => { this.promoteTarget = null; this.reload(); },
+      next: () => { this.promoteTarget.set(null); this.reload(); },
       error: (e: Error) => (this.genMsg = '晋升失败：' + e.message),
     });
   }
