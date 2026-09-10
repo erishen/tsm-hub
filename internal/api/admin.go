@@ -353,6 +353,7 @@ func parseOpenRouterKey(body []byte) map[string]any {
 		"kind":         "openrouter",
 		"usage":        d.Usage,
 		"is_free_tier": d.IsFreeTier,
+		"url":          "https://openrouter.ai",
 	}
 	if d.Limit != nil {
 		m["limit"] = *d.Limit
@@ -382,6 +383,7 @@ func parseOpenRouterCredits(body []byte) map[string]any {
 		"kind":          "openrouter",
 		"total_credits": raw.Data.TotalCredits,
 		"total_usage":   raw.Data.TotalUsage,
+		"url":           "https://openrouter.ai",
 	}
 }
 
@@ -1254,6 +1256,7 @@ func parseMoonshotBalance(body []byte) map[string]any {
 		"available": raw.Data.Available,
 		"voucher":   raw.Data.Voucher,
 		"cash":      raw.Data.Cash,
+		"url":       "https://platform.moonshot.cn",
 	}
 }
 
@@ -1304,6 +1307,7 @@ func parseDeepSeekBalance(body []byte) map[string]any {
 		"total":     float64(b.TotalBalance),
 		"granted":   float64(b.GrantedBalance),
 		"topped_up": float64(b.ToppedUp),
+		"url":       "https://platform.deepseek.com",
 	}
 }
 
@@ -1316,7 +1320,7 @@ func parseOpenAISubscription(body []byte) map[string]any {
 	if err := json.Unmarshal(body, &raw); err != nil || raw.HardLimitUSD <= 0 || raw.HardLimitUSD >= 1e7 {
 		return nil
 	}
-	return map[string]any{"kind": "openai", "hard_limit_usd": raw.HardLimitUSD}
+	return map[string]any{"kind": "openai", "hard_limit_usd": raw.HardLimitUSD, "url": "https://platform.openai.com"}
 }
 
 // parseOpenAIUsage: {"total_usage":123.45}（单位 0.01 USD）
@@ -1327,7 +1331,7 @@ func parseOpenAIUsage(body []byte) map[string]any {
 	if err := json.Unmarshal(body, &raw); err != nil || raw.TotalUsage == 0 {
 		return nil
 	}
-	return map[string]any{"kind": "openai", "total_usage_usd": raw.TotalUsage / 100}
+	return map[string]any{"kind": "openai", "total_usage_usd": raw.TotalUsage / 100, "url": "https://platform.openai.com"}
 }
 
 func (s *Server) handleUpsertProvider(w http.ResponseWriter, r *http.Request) {
