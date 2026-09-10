@@ -14,6 +14,7 @@ const routes: Routes = [
   { path: 'recommendations', loadComponent: () => import('./app/recommendations.component').then((m) => m.RecommendationsComponent) },
   { path: 'usage', loadComponent: () => import('./app/usage.component').then((m) => m.UsageComponent) },
   { path: 'observability', loadComponent: () => import('./app/observability.component').then((m) => m.ObservabilityComponent) },
+  { path: 'audit-logs', loadComponent: () => import('./app/audit-logs.component').then((m) => m.AuditLogsComponent) },
   { path: 'skills', loadComponent: () => import('./app/skills.component').then((m) => m.SkillsComponent) },
   { path: 'mcps', loadComponent: () => import('./app/mcps.component').then((m) => m.McpsComponent) },
   { path: 'tools', loadComponent: () => import('./app/tools.component').then((m) => m.ToolsComponent) },

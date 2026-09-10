@@ -8,6 +8,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -464,6 +465,45 @@ func (r *Recorder) Clear() error {
 	r.clientToolCalls = map[string]int{}
 	r.keyClientTools = map[string]map[string]int{}
 	return nil
+}
+
+// Purge 清理超过 retentionDays 天的用量流水文件（不重置内存聚合，只删过期文件）。
+// retentionDays <= 0 时不清理。返回删除的文件数。
+func (r *Recorder) Purge(retentionDays int) (int, error) {
+	if retentionDays <= 0 {
+		return 0, nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	cutoff := time.Now().AddDate(0, 0, -retentionDays)
+	entries, err := os.ReadDir(r.dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("read usage dir: %w", err)
+	}
+	deleted := 0
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".jsonl") {
+			continue
+		}
+		// 文件名格式：YYYY-MM-DD.jsonl
+		name := strings.TrimSuffix(e.Name(), ".jsonl")
+		t, err := time.Parse("2006-01-02", name)
+		if err != nil {
+			continue // 非日期命名的文件跳过
+		}
+		if t.Before(cutoff) {
+			if err := os.Remove(filepath.Join(r.dir, e.Name())); err == nil {
+				deleted++
+			}
+		}
+	}
+	if deleted > 0 {
+		log.Printf("[usage] purged %d expired files (retention: %d days)", deleted, retentionDays)
+	}
+	return deleted, nil
 }
 
 // Total 返回某个 Key 的历史累计用量。

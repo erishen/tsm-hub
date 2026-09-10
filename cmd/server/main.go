@@ -84,6 +84,14 @@ func run(cfg config.Config) error {
 		return err
 	}
 	defer rec.Close()
+	// 启动时清理过期用量流水（usage_retention_days 配置，<=0 不清理）
+	if settings.UsageRetentionDays > 0 {
+		if n, err := rec.Purge(settings.UsageRetentionDays); err != nil {
+			logger.Warn("purge expired usage failed", "error", err)
+		} else if n > 0 {
+			logger.Info("purged expired usage files", "count", n, "retention_days", settings.UsageRetentionDays)
+		}
+	}
 
 	limiter := quota.NewLimiter(rec)
 	tracker := router.NewTracker(settings.FailThreshold, settings.CooldownSec)
