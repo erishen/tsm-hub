@@ -52,6 +52,30 @@ a:hover { text-decoration: underline; }
 .nav a:hover { background: var(--bg); text-decoration: none; }
 .nav a.active { background: var(--primary-soft); color: var(--primary); font-weight: 500; }
 
+.nav-group { margin-bottom: 2px; }
+.nav-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .4px;
+  text-transform: uppercase;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+  border-radius: 6px;
+}
+.nav-group-head:hover { color: var(--text); }
+.nav-group-head .arrow {
+  font-size: 9px;
+  transition: transform .15s ease;
+}
+.nav-group.open .nav-group-head .arrow { transform: rotate(90deg); }
+.nav-group a { padding-left: 18px; }
+.nav-group + .nav-group { margin-top: 6px; }
+
 .main { flex: 1; padding: 24px 28px 48px; overflow-x: hidden; }
 .page-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 18px; }
 .page-head h1 { font-size: 20px; margin: 0; }

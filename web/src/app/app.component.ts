@@ -33,20 +33,17 @@ import { ApiService } from './api.service';
         </div>
         <nav class="nav">
           <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{exact:true}">概览</a>
-          <a routerLink="/providers" routerLinkActive="active">Providers</a>
-          <a routerLink="/routes" routerLinkActive="active">路由表</a>
-          <a routerLink="/keys" routerLinkActive="active">Token Keys</a>
-          <a routerLink="/balances" routerLinkActive="active">额度</a>
-          <a routerLink="/models" routerLinkActive="active">模型</a>
-          <a routerLink="/usage" routerLinkActive="active">用量</a>
-          <a routerLink="/observability" routerLinkActive="active">监控</a>
-          <a routerLink="/skills" routerLinkActive="active">技能库</a>
-          <a routerLink="/mcps" routerLinkActive="active">MCP</a>
-          <a routerLink="/tools" routerLinkActive="active">工具</a>
-          <a routerLink="/memory" routerLinkActive="active">记忆</a>
-          <a routerLink="/sandbox" routerLinkActive="active">沙箱</a>
-          <a routerLink="/fastpath" routerLinkActive="active">快路径</a>
-          <a routerLink="/playground" routerLinkActive="active">测试</a>
+          <ng-container *ngFor="let group of navGroups">
+            <div class="nav-group" [class.open]="!collapsed[group.name]">
+              <div class="nav-group-head" (click)="toggleGroup(group.name)">
+                <span>{{ group.name }}</span><span class="arrow">▶</span>
+              </div>
+              <ng-container *ngIf="!collapsed[group.name]">
+                <a *ngFor="let item of group.items" [routerLink]="item.route"
+                   routerLinkActive="active">{{ item.label }}</a>
+              </ng-container>
+            </div>
+          </ng-container>
         </nav>
         <div style="margin-top:24px">
           <button class="small" (click)="logout()">退出</button>
@@ -62,6 +59,52 @@ export class AppComponent {
   token = '';
   error = '';
   loading = false;
+
+  navGroups = [
+    {
+      name: '网关',
+      items: [
+        { label: 'Providers', route: '/providers' },
+        { label: '路由表', route: '/routes' },
+        { label: 'Token Keys', route: '/keys' },
+      ],
+    },
+    {
+      name: '模型与额度',
+      items: [
+        { label: '模型', route: '/models' },
+        { label: '额度', route: '/balances' },
+      ],
+    },
+    {
+      name: '能力池',
+      items: [
+        { label: '技能库', route: '/skills' },
+        { label: 'MCP', route: '/mcps' },
+        { label: '工具', route: '/tools' },
+        { label: '记忆', route: '/memory' },
+        { label: '沙箱', route: '/sandbox' },
+        { label: '快路径', route: '/fastpath' },
+      ],
+    },
+    {
+      name: '观测',
+      items: [
+        { label: '用量', route: '/usage' },
+        { label: '监控', route: '/observability' },
+      ],
+    },
+    {
+      name: '调试',
+      items: [{ label: '测试', route: '/playground' }],
+    },
+  ];
+
+  collapsed: Record<string, boolean> = {};
+
+  toggleGroup(name: string): void {
+    this.collapsed[name] = !this.collapsed[name];
+  }
 
   constructor(public api: ApiService) {}
 
