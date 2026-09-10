@@ -63,6 +63,9 @@ func (s *Server) adminMux() http.Handler {
 	m.HandleFunc("DELETE /api/admin/external-tools/{name}", s.admin(s.handleDeleteExternalTool))
 	m.HandleFunc("GET /api/admin/external-mcps/candidates", s.admin(s.handleListExternalMcpCandidates))
 	m.HandleFunc("POST /api/admin/external-mcps/{server}/adopt", s.admin(s.handleAdoptExternalMcp))
+	m.HandleFunc("GET /api/admin/sandbox/status", s.admin(s.handleSandboxStatus))
+	m.HandleFunc("GET /api/admin/memory", s.admin(s.handleListMemory))
+	m.HandleFunc("DELETE /api/admin/memory", s.admin(s.handleClearMemory))
 	return m
 }
 
@@ -1881,6 +1884,22 @@ func (s *Server) handleAdoptExternalMcp(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	s.proxy.ResetMCP()
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// handleSandboxStatus 返回 Docker 沙箱（execute_code）状态：配置 + docker 可用性 + 支持语言。
+func (s *Server) handleSandboxStatus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, s.proxy.SandboxStatus())
+}
+
+// handleListMemory 返回会话记忆（remember/recall 内容，ns 形如 mem:<keyID>:<key>）。
+func (s *Server) handleListMemory(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"entries": s.proxy.ListMemory()})
+}
+
+// handleClearMemory 清空全部会话记忆。
+func (s *Server) handleClearMemory(w http.ResponseWriter, r *http.Request) {
+	s.proxy.ClearMemory()
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
