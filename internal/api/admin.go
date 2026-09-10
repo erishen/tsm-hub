@@ -1492,8 +1492,9 @@ func (s *Server) handleListMcps(w http.ResponseWriter, r *http.Request) {
 			"env":       c.Env,
 			"transport": c.Transport,
 			"url":       c.URL,
-			"connected": st.Connected,
-			"tools":     st.Tools,
+			"connected":     st.Connected,
+			"tools":         st.Tools,
+			"tool_details":  st.ToolDetails,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"mcps": out})

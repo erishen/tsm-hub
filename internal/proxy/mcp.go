@@ -74,11 +74,19 @@ func (m *mcpManager) Reset() {
 	}
 }
 
+// MCPToolDetail 是单个 MCP 工具的能力定义（描述 + 参数 schema）。
+type MCPToolDetail struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	InputSchema map[string]any `json:"input_schema"`
+}
+
 // MCPStatus 是单个 MCP server 的连接状态快照。
 type MCPStatus struct {
-	Connected bool     `json:"connected"`
-	Err       string   `json:"err,omitempty"`
-	Tools     []string `json:"tools"`
+	Connected   bool            `json:"connected"`
+	Err         string          `json:"err,omitempty"`
+	Tools       []string        `json:"tools"`
+	ToolDetails []MCPToolDetail `json:"tool_details,omitempty"`
 }
 
 // MCPStatuses 返回全部配置 MCP server 的状态（供管理台展示）。
@@ -102,8 +110,20 @@ func (m *mcpManager) Statuses(cfg map[string]store.MCPServer) map[string]MCPStat
 			out[name] = MCPStatus{Connected: false}
 			continue
 		}
-		out[name] = MCPStatus{Connected: true, Tools: s.toolNames()}
+		out[name] = MCPStatus{Connected: true, Tools: s.toolNames(), ToolDetails: s.toolDetails()}
 	}
+	return out
+}
+
+// toolDetails 返回该 server 的工具能力定义（描述 + 参数 schema，按名排序）。
+func (s *mcpServer) toolDetails() []MCPToolDetail {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]MCPToolDetail, 0, len(s.tools))
+	for _, t := range s.tools {
+		out = append(out, MCPToolDetail{Name: t.Name, Description: t.Description, InputSchema: t.InputSchema})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
 }
 

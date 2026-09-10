@@ -51,7 +51,8 @@ import { McpServer, ToolInfo } from './models';
           </tr>
         </thead>
         <tbody>
-          <tr *ngFor="let m of mcps()">
+          <ng-container *ngFor="let m of mcps()">
+          <tr>
             <td class="col-name"><span class="mono">{{ m.name }}</span></td>
             <td class="col-cmd"><span class="mono small ellipsis" [title]="m.transport === 'http' ? (m.url || '') : (m.command || '')">{{ m.transport === 'http' ? (m.url || '—') : (m.command || '—') }}</span></td>
             <td class="col-args"><span class="mono small ellipsis" [title]="m.transport === 'http' ? 'HTTP' : ((m.args || []).join(' ') || '')">{{ m.transport === 'http' ? 'HTTP' : ((m.args || []).join(' ') || '—') }}</span></td>
@@ -68,6 +69,19 @@ import { McpServer, ToolInfo } from './models';
               </div>
             </td>
           </tr>
+          <tr *ngIf="expanded() === m.name" class="detail-row">
+            <td colspan="6">
+              <div class="mcp-detail" *ngIf="(m.tool_details || []).length; else noDetail">
+                <div class="tool-detail" *ngFor="let d of m.tool_details">
+                  <div class="td-head"><span class="mono">{{ d.name }}</span></div>
+                  <div class="muted td-desc">{{ d.description || '（无描述）' }}</div>
+                  <pre class="schema" *ngIf="schemaJson(d.input_schema)">{{ schemaJson(d.input_schema) }}</pre>
+                </div>
+              </div>
+              <ng-template #noDetail><div class="empty">该 server 未提供工具 schema</div></ng-template>
+            </td>
+          </tr>
+          </ng-container>
           <tr *ngIf="loadingMcps()">
             <td colspan="6" style="padding:6px 0">
               <div class="skel-row"></div>
@@ -216,6 +230,17 @@ import { McpServer, ToolInfo } from './models';
     </div>
   `,
   styles: [`
+    .mcp-chips { display:flex; flex-wrap:wrap; gap:4px; }
+    .chip { border:1px solid var(--border,#e4e3dd); border-radius:999px; padding:2px 10px; font-size:12px; cursor:pointer; background:transparent; color:inherit; }
+    .chip:hover { background:rgba(0,0,0,0.04); }
+    .chip.active { border-color:#3b82f6; color:#3b82f6; background:rgba(59,130,246,0.08); }
+    .detail-row td { background:rgba(0,0,0,0.015); }
+    .mcp-detail { display:flex; flex-direction:column; gap:10px; padding:4px 0; }
+    .tool-detail { border:1px solid var(--border,#e4e3dd); border-radius:10px; padding:8px 12px; }
+    .td-head { font-weight:600; margin-bottom:2px; }
+    .td-desc { font-size:12px; margin-bottom:6px; }
+    pre.schema { background:rgba(0,0,0,0.03); border:1px solid var(--border,#e4e3dd); border-radius:8px; padding:8px 10px; font-size:11px; overflow:auto; max-height:240px; margin:0; }
+    .tool-schema summary { cursor:pointer; font-size:12px; color:#3b82f6; margin-top:6px; user-select:none; }
     .tool-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:10px; }
     .tool-card { border:1px solid var(--border,#e4e3dd); border-radius:10px; padding:10px 12px; }
     .tool-name { display:flex; align-items:center; gap:8px; font-weight:600; }
@@ -260,6 +285,22 @@ export class McpsComponent implements OnInit {
   loadingTools = signal(false);
   editing = signal<{ mode: 'add' | 'edit'; server?: McpServer } | null>(null);
   testing = signal<ToolInfo | null>(null);
+  /** 当前展开的 MCP server（工具详情） */
+  expanded = signal<string | null>(null);
+
+  toggleExpanded(name: string): void {
+    this.expanded.set(this.expanded() === name ? null : name);
+  }
+
+  toolDesc(m: McpServer, toolName: string): string {
+    const d = (m.tool_details || []).find((x) => x.name === toolName);
+    return d && d.description ? d.description : toolName;
+  }
+
+  schemaJson(o: Record<string, unknown> | undefined): string {
+    if (!o || !Object.keys(o).length) return '';
+    try { return JSON.stringify(o, null, 2); } catch { return ''; }
+  }
   testArgs: Record<string, string> = {};
   testResult = signal<string | null>(null);
   testError = signal('');

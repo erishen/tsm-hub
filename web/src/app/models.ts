@@ -249,6 +249,8 @@ export interface McpServer {
   url?: string;
   connected: boolean;
   tools: string[];
+  /** 每个 MCP 工具的能力定义（描述 + 参数 schema） */
+  tool_details?: { name: string; description: string; input_schema: Record<string, unknown> }[];
 }
 
 /** 工具池目录：内置 / 条件 / MCP 工具。 */
