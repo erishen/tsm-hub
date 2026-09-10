@@ -630,6 +630,10 @@ func (s *Server) buildCatalog() map[string]any {
 		} `json:"pricing,omitempty"`
 		// Unavailable 非空表示该模型曾在上游 404（model not found），冷却期内标灰、路由跳过。
 		Unavailable string `json:"unavailable,omitempty"`
+		// RouteScore 是路由综合评分（免费+健康+延迟+在路由里-不可用扣分），越高越优先被选中。
+		RouteScore int `json:"route_score"`
+		// InRoute 表示该 (provider, model) 是否在某条路由的 targets 里（未接入路由的模型不会被外部调用命中）。
+		InRoute bool `json:"in_route"`
 	}
 	out := make([]*item, 0)
 	var latestProbe time.Time
@@ -690,12 +694,47 @@ func (s *Server) buildCatalog() map[string]any {
 				// OpenRouter :free 后缀约定（id 层面即表示免费）。
 				it.Free = true
 			}
+			// 路由综合评分：免费+100、健康+30、延迟分、在路由里+50、不可用-100。
+			score := 0
+			if it.Free {
+				score += 100
+			}
+			if it.Unavailable != "" {
+				score -= 100
+			} else if s.health.Available(p.ID) {
+				score += 30
+				if lat := s.health.Latency(p.ID); lat > 0 {
+					if lat < 3000 {
+						score += 20
+					} else if lat < 10000 {
+						score += 10
+					}
+				}
+			}
+			// 是否在某条路由的 targets 里
+			for _, rt := range s.store.ListRoutes() {
+				for _, tg := range rt.Targets {
+					if tg.ProviderID == p.ID && (tg.Model == id || tg.Model == "*") {
+						it.InRoute = true
+						score += 50
+						break
+					}
+				}
+				if it.InRoute {
+					break
+				}
+			}
+			it.RouteScore = score
 			out = append(out, it)
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].ID != out[j].ID {
 			return out[i].ID < out[j].ID
+		}
+		// 同模型不同 Provider：按路由评分降序（高分在前，免费/健康/低延迟优先）
+		if out[i].RouteScore != out[j].RouteScore {
+			return out[i].RouteScore > out[j].RouteScore
 		}
 		return out[i].Provider < out[j].Provider
 	})
