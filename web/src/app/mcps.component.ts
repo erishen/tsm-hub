@@ -11,7 +11,7 @@ import { McpServer } from './models';
   template: `
     <div class="page-head">
       <div>
-        <h1>MCP · 工具池</h1>
+        <h1>MCP</h1>
         <div class="sub">stdio 型 MCP server 注册进网关 agent 工具池（mcp_&lt;server&gt;_&lt;tool&gt;），工具由网关服务端执行</div>
       </div>
       <button class="primary" (click)="openEdit(null)">+ 添加 MCP Server</button>
