@@ -323,6 +323,17 @@ func (p *Proxy) attempt(w http.ResponseWriter, r *http.Request, c router.Candida
 	// 免费包到期）同样可重试：换到下一候选（failover 路由会因此自动降级）。
 	// 并立即给该 provider 记冷却（默认 60s），期间不再被 smart/健康过滤选中，
 	// 避免免费家限流后每次请求都先白吃一次 4xx。
+	// 402（余额不足 / Payment Required）：付费模型额度耗尽，failover 到下一候选，
+	// 并长冷却 1 小时（余额耗尽需用户充值才会恢复，避免每次请求都先白吃一次 402）。
+	if resp.StatusCode == http.StatusPaymentRequired {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
+		slog.Warn("upstream payment required (balance exhausted)", "provider", c.ProviderID, "model", req.Model,
+			"upstream_model", c.UpstreamModel, "status", resp.StatusCode, "body", compact(string(b)))
+		p.health.ReportThrottle(c.ProviderID, "balance exhausted: "+compact(string(b)), time.Hour)
+		return Result{ProviderID: c.ProviderID, UpstreamModel: c.UpstreamModel, Status: resp.StatusCode,
+			Stream: req.Stream, Latency: time.Since(started),
+			Err: fmt.Sprintf("upstream %d: %s", resp.StatusCode, compact(string(b))), ProviderFault: true}, true
+	}
 	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusForbidden {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
 		slog.Warn("upstream throttled", "provider", c.ProviderID, "model", req.Model, "upstream_model", c.UpstreamModel,
