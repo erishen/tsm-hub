@@ -331,6 +331,15 @@ func (s *Server) skillsList() []skills.Summary {
 }
 
 func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
+	// 入口必打：任何 /v1 请求（含被后续拒绝的）都会在这里记录，便于定位 4xx 来源。
+	keyPfx := auth.Extract(r.Header.Get("Authorization"))
+	if keyPfx == "" {
+		keyPfx = auth.Extract(r.Header.Get("X-Api-Key"))
+	}
+	if len(keyPfx) > 12 {
+		keyPfx = keyPfx[:12]
+	}
+	s.logger.Info("openai req", "path", r.URL.Path, "key", keyPfx)
 	if r.URL.Path == "/v1/models" && r.Method == http.MethodGet {
 		s.requireKey(w, r, func(w http.ResponseWriter, r *http.Request, key store.APIKey) {
 			s.handleModels(w, r, key)

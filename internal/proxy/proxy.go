@@ -164,6 +164,7 @@ func (p *Proxy) Handle(w http.ResponseWriter, r *http.Request, key store.APIKey,
 	clientTools := clientTools(req.Tools)
 	// key 模型白名单只约束具体模型；场景路由（chat/fast/reason/code 等显式路由）对所有 key 放行。
 	if len(key.Models) > 0 && !allowsModel(key.Models, req.Model) && !p.router.HasRoute(req.Model) {
+		slog.Warn("request forbidden", "key", key.Prefix, "model", req.Model, "allowed", key.Models)
 		return p.fail(w, started, key, req.Model, http.StatusForbidden,
 			fmt.Sprintf("key is not allowed to use model %q", req.Model), scene)
 	}
@@ -178,6 +179,7 @@ func (p *Proxy) Handle(w http.ResponseWriter, r *http.Request, key store.APIKey,
 
 	cands, err := p.router.Pick(req.Model)
 	if err != nil {
+		slog.Warn("no candidate for route", "model", req.Model, "err", err.Error())
 		return p.fail(w, started, key, req.Model, http.StatusBadGateway, err.Error(), scene)
 	}
 
@@ -298,6 +300,7 @@ func (p *Proxy) attempt(w http.ResponseWriter, r *http.Request, c router.Candida
 
 	resp, err := p.client.Do(upReq)
 	if err != nil {
+		slog.Warn("upstream request failed", "provider", c.ProviderID, "model", req.Model, "upstream_model", c.UpstreamModel, "err", err.Error())
 		return Result{ProviderID: c.ProviderID, UpstreamModel: c.UpstreamModel, Status: http.StatusBadGateway,
 			Stream: req.Stream, Latency: time.Since(started),
 			Err: fmt.Sprintf("upstream request failed: %v", err), ProviderFault: true}, true
@@ -307,39 +310,52 @@ func (p *Proxy) attempt(w http.ResponseWriter, r *http.Request, c router.Candida
 	// 5xx 视为可重试（尚未向客户端写任何字节），并计入上游故障。
 	if resp.StatusCode >= 500 {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
+		slog.Warn("upstream 5xx", "provider", c.ProviderID, "model", req.Model, "upstream_model", c.UpstreamModel,
+			"status", resp.StatusCode, "body", compact(string(b)))
 		return Result{ProviderID: c.ProviderID, UpstreamModel: c.UpstreamModel, Status: resp.StatusCode,
 			Stream: req.Stream, Latency: time.Since(started),
 			Err: fmt.Sprintf("upstream %d: %s", resp.StatusCode, compact(string(b))), ProviderFault: true}, true
 	}
 
-	// 429（限流 / 免费额度耗尽）同样可重试：换到下一候选（failover 路由会因此自动降级）。
-	// 并立即给该 provider 记 429 冷却（默认 60s），期间不再被 smart/健康过滤选中，
-	// 避免免费家限流后每次请求都先白吃一次 429。
-	if resp.StatusCode == http.StatusTooManyRequests {
+	// 429（限流 / 免费额度耗尽）与 403（免费额度耗尽 / key 无权限，如阿里云百炼
+	// 免费包到期）同样可重试：换到下一候选（failover 路由会因此自动降级）。
+	// 并立即给该 provider 记冷却（默认 60s），期间不再被 smart/健康过滤选中，
+	// 避免免费家限流后每次请求都先白吃一次 4xx。
+	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusForbidden {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
+		slog.Warn("upstream throttled", "provider", c.ProviderID, "model", req.Model, "upstream_model", c.UpstreamModel,
+			"status", resp.StatusCode, "body", compact(string(b)))
+		// 429（tpm/rpm 限流）通常秒级恢复，短冷却即可；403（免费额度耗尽 /
+		// key 无权限）持续较久，用配置的长冷却（默认 120s）。避免限流家被
+		// 长时间摘除后只剩同样不可用的候选。
 		throttleSec := p.store.Settings().Smart.ThrottleSec
 		if throttleSec <= 0 {
-			throttleSec = 60
+			throttleSec = 120
+		}
+		if resp.StatusCode == http.StatusTooManyRequests {
+			throttleSec = 15
 		}
 		p.health.ReportThrottle(c.ProviderID, compact(string(b)), time.Duration(throttleSec)*time.Second)
 		return Result{ProviderID: c.ProviderID, UpstreamModel: c.UpstreamModel, Status: resp.StatusCode,
 			Stream: req.Stream, Latency: time.Since(started),
-			Err: fmt.Sprintf("upstream 429: %s", compact(string(b))), ProviderFault: true}, true
+			Err: fmt.Sprintf("upstream %d: %s", resp.StatusCode, compact(string(b))), ProviderFault: true}, true
 	}
 
 	// 非流式且上游返回 2xx/3xx 但 body 带 OpenAI error（部分供应商过载时如此）：
 	// 视为上游故障换下一候选，避免把坏响应当成功透传给客户端。
+	// 注意：只 peek 前 8KB 判断结构，完整 body 仍要透传，不能把响应截断给客户端。
 	if !req.Stream && resp.StatusCode < 400 {
-		b, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
+		peek, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
 		var eb struct {
 			Error map[string]any `json:"error"`
 		}
-		if json.Unmarshal(b, &eb) == nil && eb.Error != nil {
+		if json.Unmarshal(peek, &eb) == nil && eb.Error != nil {
 			return Result{ProviderID: c.ProviderID, UpstreamModel: c.UpstreamModel, Status: http.StatusBadGateway,
 				Stream: req.Stream, Latency: time.Since(started),
-				Err: fmt.Sprintf("upstream error: %s", compact(string(b))), ProviderFault: true}, true
+				Err: fmt.Sprintf("upstream error: %s", compact(string(peek))), ProviderFault: true}, true
 		}
-		resp.Body = io.NopCloser(bytes.NewReader(b))
+		rest, _ := io.ReadAll(resp.Body)
+		resp.Body = io.NopCloser(bytes.NewReader(append(peek, rest...)))
 	}
 
 	// 上游 4xx 直接透传；记日志便于定位（如上游 "model is not found" 是哪家、哪个模型）。

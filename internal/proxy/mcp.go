@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
@@ -23,6 +24,25 @@ import (
 
 	"github.com/erishen/llm-router/internal/store"
 )
+
+// stderrLog 把 MCP 子进程的 stderr 记入网关日志（原为丢弃，排查脚本崩溃全靠它）。
+type stderrLog struct {
+	name string
+	buf  bytes.Buffer
+}
+
+func (l *stderrLog) Write(p []byte) (int, error) {
+	if len(l.buf.Bytes()) > 4<<10 {
+		l.buf.Reset()
+	}
+	l.buf.Write(p)
+	if n := bytes.LastIndexByte(p, '\n'); n >= 0 {
+		slog.Info("mcp stderr", "server", l.name, "line", strings.TrimSpace(string(p[:n])))
+	}
+	return len(p), nil
+}
+
+func (l *stderrLog) String() string { return l.buf.String() }
 
 // mcpTool 是 MCP tools/list 返回的单个工具定义。
 type mcpTool struct {
@@ -256,7 +276,7 @@ func (s *mcpServer) connectStdio() error {
 	if err != nil {
 		return err
 	}
-	cmd.Stderr = io.Discard
+	cmd.Stderr = &stderrLog{name: s.name}
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start mcp server: %w", err)
 	}
@@ -505,12 +525,15 @@ func (s *mcpServer) readLoop() {
 		}
 		if err != nil {
 			if err == io.EOF {
-				// server 退出：清空 pending 并标记断开。
+				// server 退出：清空 pending 并标记断开。子进程已死，必须把
+				// cmd/stdin 置 nil 让 connected() 返回 false，否则下次调用
+				// 会复用它写 broken pipe（而 ensure 以为它还活着）。
 				s.mu.Lock()
 				for id, ch := range s.pending {
 					ch <- json.RawMessage(`{"__error__":"mcp server exited"}`)
 					delete(s.pending, id)
 				}
+				s.cmd, s.stdin, s.read = nil, nil, nil
 				s.mu.Unlock()
 			}
 			return
