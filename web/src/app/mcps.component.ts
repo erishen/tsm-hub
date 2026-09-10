@@ -51,8 +51,7 @@ import { McpServer, ToolInfo } from './models';
           </tr>
         </thead>
         <tbody>
-          <ng-container *ngFor="let m of mcps()">
-          <tr>
+          <tr *ngFor="let m of mcps()">
             <td class="col-name"><span class="mono">{{ m.name }}</span></td>
             <td class="col-cmd"><span class="mono small ellipsis" [title]="m.transport === 'http' ? (m.url || '') : (m.command || '')">{{ m.transport === 'http' ? (m.url || '—') : (m.command || '—') }}</span></td>
             <td class="col-args"><span class="mono small ellipsis" [title]="m.transport === 'http' ? 'HTTP' : ((m.args || []).join(' ') || '')">{{ m.transport === 'http' ? 'HTTP' : ((m.args || []).join(' ') || '—') }}</span></td>
@@ -61,7 +60,13 @@ import { McpServer, ToolInfo } from './models';
                 {{ m.connected ? '已连接' : '未连接' }}
               </span>
             </td>
-            <td class="col-tools"><span class="mono small ellipsis" [title]="(m.tools || []).join(', ')">{{ m.tools.length ? m.tools.join(', ') : '—' }}</span></td>
+            <td class="col-tools">
+              <div class="mcp-chips" *ngIf="(m.tools || []).length">
+                <button class="chip" *ngFor="let t of m.tools" (click)="toggleExpanded(m.name)"
+                        [class.active]="expandedName() === m.name" [title]="toolDesc(m, t)">{{ t }}</button>
+              </div>
+              <span *ngIf="!(m.tools || []).length">—</span>
+            </td>
             <td>
               <div style="display:flex;gap:6px">
                 <button class="small" (click)="openEdit(m)">编辑</button>
@@ -69,19 +74,6 @@ import { McpServer, ToolInfo } from './models';
               </div>
             </td>
           </tr>
-          <tr *ngIf="expanded() === m.name" class="detail-row">
-            <td colspan="6">
-              <div class="mcp-detail" *ngIf="(m.tool_details || []).length; else noDetail">
-                <div class="tool-detail" *ngFor="let d of m.tool_details">
-                  <div class="td-head"><span class="mono">{{ d.name }}</span></div>
-                  <div class="muted td-desc">{{ d.description || '（无描述）' }}</div>
-                  <pre class="schema" *ngIf="schemaJson(d.input_schema)">{{ schemaJson(d.input_schema) }}</pre>
-                </div>
-              </div>
-              <ng-template #noDetail><div class="empty">该 server 未提供工具 schema</div></ng-template>
-            </td>
-          </tr>
-          </ng-container>
           <tr *ngIf="loadingMcps()">
             <td colspan="6" style="padding:6px 0">
               <div class="skel-row"></div>
@@ -100,6 +92,21 @@ import { McpServer, ToolInfo } from './models';
           </tr>
         </tbody>
       </table>
+      <div class="mcp-detail" *ngIf="expandedName() && detailServer()">
+        <div class="detail-head">
+          <span class="mono">{{ expandedName() }}</span>
+          <span class="muted" style="font-size:12px">工具详情（{{ (detailServer()?.tool_details || []).length }}）</span>
+          <button class="small" style="margin-left:auto" (click)="closeExpanded()">收起</button>
+        </div>
+        <div class="mcp-detail" *ngIf="(detailServer()?.tool_details || []).length; else noDetail">
+          <div class="tool-detail" *ngFor="let d of detailServer()!.tool_details">
+            <div class="td-head"><span class="mono">{{ d.name }}</span></div>
+            <div class="muted td-desc">{{ d.description || '（无描述）' }}</div>
+            <pre class="schema" *ngIf="schemaJson(d.input_schema)">{{ schemaJson(d.input_schema) }}</pre>
+          </div>
+        </div>
+        <ng-template #noDetail><div class="empty">该 server 未提供工具 schema</div></ng-template>
+      </div>
     </div>
 
     <div class="card">
@@ -299,11 +306,21 @@ export class McpsComponent implements OnInit {
   loadingTools = signal(true);
   editing = signal<{ mode: 'add' | 'edit'; server?: McpServer } | null>(null);
   testing = signal<ToolInfo | null>(null);
-  /** 当前展开的 MCP server（工具详情） */
-  expanded = signal<string | null>(null);
+  /** 当前展开详情（工具 chips 点击）的 MCP server 名 */
+  expandedName = signal<string | null>(null);
 
   toggleExpanded(name: string): void {
-    this.expanded.set(this.expanded() === name ? null : name);
+    this.expandedName.set(this.expandedName() === name ? null : name);
+  }
+
+  closeExpanded(): void {
+    this.expandedName.set(null);
+  }
+
+  detailServer(): McpServer | null {
+    const n = this.expandedName();
+    if (!n) return null;
+    return this.mcps().find((m) => m.name === n) || null;
   }
 
   toolDesc(m: McpServer, toolName: string): string {
