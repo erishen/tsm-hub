@@ -2,7 +2,7 @@ import { Component, OnInit, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ApiService, compact, usd } from './api.service';
-import { AggView, ObservabilityResponse } from './models';
+import { AggView, DailyPoint, ObservabilityResponse } from './models';
 
 function pct(n: number): string {
   return (n * 100).toFixed(1) + '%';
@@ -150,7 +150,7 @@ function rateClass(rate: number): string {
 
     <div class="card">
       <h2>按天趋势</h2>
-      <table *ngIf="data() && data()!.trend.length; else none3">
+      <table *ngIf="visibleTrend().length; else none3">
         <thead>
           <tr>
             <th>日期</th><th class="num">请求</th><th class="num">错误率</th>
@@ -158,7 +158,7 @@ function rateClass(rate: number): string {
           </tr>
         </thead>
         <tbody>
-          <tr *ngFor="let d of data()!.trend">
+          <tr *ngFor="let d of visibleTrend()">
             <td class="mono">{{ d.date }}</td>
             <td class="num">{{ d.requests }}</td>
             <td class="num">{{ pct(d.requests ? d.errors / d.requests : 0) }}</td>
@@ -240,6 +240,13 @@ export class ObservabilityComponent implements OnInit {
       next: (d) => this.data.set(d),
       error: (e) => this.error.set(e?.message || '加载失败'),
     });
+  }
+
+  /** 按天趋势只展示有数据的日期，清空后不残留 0 行。 */
+  visibleTrend(): DailyPoint[] {
+    return (this.data()?.trend || []).filter(
+      (d) => d.requests > 0 || d.total_tokens > 0 || d.cost_usd > 0 || d.errors > 0,
+    );
   }
 
   // ---- 外部工具录用 ----
