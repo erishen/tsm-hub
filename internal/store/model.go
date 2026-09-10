@@ -269,6 +269,10 @@ type UsageRecord struct {
 	// Failover 是 failover 链：按顺序记录每个失败候选（不含最终命中的那个）。
 	// 旧流水无此字段，兼容。
 	Failover []FailoverStep `json:"failover,omitempty"`
+	// ClientTools 是请求里客户端声明的工具名（去重，最多 20 个）。
+	ClientTools []string `json:"client_tools,omitempty"`
+	// ExecTools 是网关 agent 实际执行过的工具名（含 skill-run 的 skill、mcp_* 工具，按执行序）。
+	ExecTools []string `json:"exec_tools,omitempty"`
 }
 
 // FailoverStep 是 failover 链中的一个失败候选。

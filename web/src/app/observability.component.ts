@@ -130,6 +130,25 @@ function rateClass(rate: number): string {
     </div>
 
     <div class="card">
+      <h2>工具使用 <span class="muted" style="font-weight:400;font-size:12px">（网关 agent 实际执行过的工具 TOP，含 mcp_* 与 skill 名）</span></h2>
+      <table *ngIf="data() && data()!.tools.length; else noneTools">
+        <thead>
+          <tr>
+            <th>工具</th><th class="num">调用次数</th><th class="num">使用方（key 数）</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let t of data()!.tools">
+            <td><span class="mono">{{ t.name }}</span></td>
+            <td class="num">{{ t.calls }}</td>
+            <td class="num">{{ t.key_count }}</td>
+          </tr>
+        </tbody>
+      </table>
+      <ng-template #noneTools><div class="empty">暂无工具调用</div></ng-template>
+    </div>
+
+    <div class="card">
       <h2>按天趋势</h2>
       <table *ngIf="data() && data()!.trend.length; else none3">
         <thead>

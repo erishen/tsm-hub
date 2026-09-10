@@ -81,6 +81,10 @@ type Result struct {
 	Attempt int
 	// Failover 是 failover 链：按顺序记录每个失败候选（不含最终命中的那个）。
 	Failover []store.FailoverStep
+	// ClientTools 请求里客户端声明的工具名（去重截断）。
+	ClientTools []string
+	// ExecTools agent 循环实际执行的工具名（含 skill-run 的 skill、mcp_*）。
+	ExecTools []string
 }
 
 type usageObj struct {
@@ -89,9 +93,41 @@ type usageObj struct {
 	TotalTokens      int `json:"total_tokens"`
 }
 
+// toolDecl 兼容 OpenAI 两种 tools 声明格式：
+// {type:"function", function:{name}} 与 {type, name}。
+type toolDecl struct {
+	Type     string `json:"type"`
+	Name     string `json:"name"`
+	Function struct {
+		Name string `json:"name"`
+	} `json:"function"`
+}
+
 type chatRequest struct {
-	Model  string `json:"model"`
-	Stream bool   `json:"stream"`
+	Model  string     `json:"model"`
+	Stream bool       `json:"stream"`
+	Tools  []toolDecl `json:"tools"`
+}
+
+// clientTools 提取请求里声明的工具名（去重，最多 20 个）。
+func clientTools(tools []toolDecl) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(tools))
+	for _, t := range tools {
+		n := t.Function.Name
+		if n == "" {
+			n = t.Name
+		}
+		if n == "" || seen[n] {
+			continue
+		}
+		seen[n] = true
+		out = append(out, n)
+		if len(out) >= 20 {
+			break
+		}
+	}
+	return out
 }
 
 // Handle 处理一个代理请求。path 是 /v1/xxx 形式的 OpenAI 路径。
@@ -114,6 +150,7 @@ func (p *Proxy) Handle(w http.ResponseWriter, r *http.Request, key store.APIKey,
 	if req.Model == "" {
 		return p.fail(w, started, key, req.Model, http.StatusBadRequest, "model is required", scene)
 	}
+	clientTools := clientTools(req.Tools)
 	// key 模型白名单只约束具体模型；场景路由（chat/fast/reason/code 等显式路由）对所有 key 放行。
 	if len(key.Models) > 0 && !allowsModel(key.Models, req.Model) && !p.router.HasRoute(req.Model) {
 		return p.fail(w, started, key, req.Model, http.StatusForbidden,
@@ -139,6 +176,7 @@ func (p *Proxy) Handle(w http.ResponseWriter, r *http.Request, key store.APIKey,
 		res, retryable := p.attempt(w, r, c, path, body, req)
 		res.Scene = scene
 		res.Attempt = i + 1
+		res.ClientTools = clientTools
 		if retryable {
 			lastErr = res.Err
 			failChain = append(failChain, store.FailoverStep{
@@ -545,6 +583,8 @@ func (p *Proxy) account(key store.APIKey, model string, res Result) {
 		Model:           model,
 		ProviderID:      res.ProviderID,
 		UpstreamModel:   res.UpstreamModel,
+		ClientTools:     res.ClientTools,
+		ExecTools:       res.ExecTools,
 		PromptTokens:    res.PromptTokens,
 		CompletionToken: res.CompletionToken,
 		TotalTokens:     total,

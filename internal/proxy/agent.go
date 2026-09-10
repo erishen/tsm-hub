@@ -65,6 +65,8 @@ type agentResult struct {
 	err string
 	// provider 最终响应的 provider。
 	provider string
+	// execTools 本轮实际执行过的工具名（含 skill 名、mcp_*，按执行序）。
+	execTools []string
 	// stream 回放用的响应 id。
 	id string
 	// model 上游模型名。
@@ -207,6 +209,7 @@ func (p *Proxy) agentRun(w http.ResponseWriter, r *http.Request, key store.APIKe
 				args = toolArgs{}
 			}
 			id, _ := tc["id"].(string)
+			res.execTools = append(res.execTools, name)
 			out := p.execTool(key.ID, name, args)
 			msgs = append(msgs, chatMessage{
 				"role":         "tool",
@@ -229,6 +232,8 @@ func (p *Proxy) agentRun(w http.ResponseWriter, r *http.Request, key store.APIKe
 		PromptTokens:   res.usage.prompt,
 		CompletionToken: res.usage.completion,
 		TotalTokens:    res.usage.total,
+		ClientTools:    clientTools(req.Tools),
+		ExecTools:      res.execTools,
 	}
 	if res.err != "" {
 		result.Status = http.StatusBadGateway

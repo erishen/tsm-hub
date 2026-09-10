@@ -112,6 +112,10 @@ export interface UsageRecord {
   attempt?: number;
   /** failover 链：按顺序记录每个失败候选（不含最终命中的那个）。 */
   failover?: FailoverStep[];
+  /** 请求里客户端声明的工具名。 */
+  client_tools?: string[];
+  /** 网关 agent 实际执行过的工具名。 */
+  exec_tools?: string[];
 }
 
 export interface FailoverStep {
@@ -134,6 +138,7 @@ export interface ObservabilityResponse {
   providers: { id: string; name: string; usage: AggView; skipped: number }[];
   scenes: { scene: string; usage: AggView }[];
   trend: DailyPoint[];
+  tools: { name: string; calls: number; key_count: number }[];
 }
 
 export interface ProviderHealth {
