@@ -113,7 +113,8 @@ import { McpServer } from './models';
 
     <div class="card">
       <h2>外部 MCP 候选（{{ candidates().length }}）<span class="muted" style="font-weight:400;font-size:12px">（调用方声明过的 server__tool 风格工具，尚未接入网关；可一键接入并常驻连接）</span></h2>
-      <table class="tbl" *ngIf="candidates().length; else noneCand">
+      <div class="skel-row" *ngIf="loadingCandidates()" style="max-width:640px;margin:10px 0"></div>
+      <table class="tbl" *ngIf="!loadingCandidates() && candidates().length; else noneCand">
         <thead>
           <tr>
             <th>Server</th><th class="num">调用次数</th><th class="num">使用方（key 数）</th><th>高频工具</th><th style="width:130px">操作</th>
@@ -274,6 +275,7 @@ import { McpServer } from './models';
 export class McpsComponent implements OnInit, OnDestroy {
   mcps = signal<McpServer[]>([]);
   candidates = signal<{ server: string; calls: number; key_count: number; tools: { name: string; calls: number }[]; suggested_command?: string }[]>([]);
+  loadingCandidates = signal(true); // 外部候选独立 loading（统计查询较慢，避免被误判为"无候选"）
   error = signal('');
   saved = signal('');
   loadingMcps = signal(true);
@@ -378,9 +380,10 @@ constructor(private api: ApiService) {}
 
 
   loadCandidates(): void {
+    this.loadingCandidates.set(true);
     this.api.externalMcpCandidates().subscribe({
-      next: (r) => this.candidates.set(r.candidates || []),
-      error: () => this.candidates.set([]),
+      next: (r) => { this.candidates.set(r.candidates || []); this.loadingCandidates.set(false); },
+      error: () => { this.candidates.set([]); this.loadingCandidates.set(false); },
     });
   }
 

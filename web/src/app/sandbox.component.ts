@@ -64,6 +64,7 @@ import { ApiService } from './api.service';
 export class SandboxComponent implements OnInit {
   sandbox = signal<{ enabled: boolean; docker_ok: boolean; timeout_sec: number; memory_mb: number; cpus: number; max_output_kb: number; languages: string[] } | null>(null);
   error = signal('');
+  readonly loading = signal(true);
 
   constructor(private api: ApiService, private router: Router) {}
 
@@ -73,9 +74,10 @@ export class SandboxComponent implements OnInit {
 
   loadSandbox(): void {
     this.error.set('');
+    this.loading.set(true);
     this.api.sandboxStatus().subscribe({
-      next: (r) => this.sandbox.set(r),
-      error: (e: Error) => this.error.set('加载失败：' + e.message),
+      next: (r) => { this.sandbox.set(r); this.loading.set(false); },
+      error: (e: Error) => { this.error.set('加载失败：' + e.message); this.loading.set(false); },
     });
   }
 

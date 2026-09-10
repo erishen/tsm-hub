@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/erishen/llm-router/internal/api"
 	"github.com/erishen/llm-router/internal/config"
 	"github.com/erishen/llm-router/internal/proxy"
@@ -110,6 +111,9 @@ func run(cfg config.Config) error {
 		IdleTimeout: 120 * time.Second,
 	}
 
+	// config.json 热加载：Provider/Route/Key 变更即时生效，无需重启。
+	go watchConfig(st, logger)
+
 	// 优雅退出。
 	errCh := make(chan error, 1)
 	go func() {
@@ -165,4 +169,65 @@ func newLogger(level string) *slog.Logger {
 		lv = slog.LevelInfo
 	}
 	return slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: lv}))
+}
+
+// watchConfig 监听 config.json 变更并热重载。
+// 覆盖 provider/route/key/settings 中参与路由的配置；MCP、skills 等
+// 启动期装配的能力仍需要重启生效。
+func watchConfig(st *store.Store, logger *slog.Logger) {
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		logger.Warn("config hot-reload disabled", "err", err)
+		return
+	}
+	defer watcher.Close()
+	path := st.Path()
+	if err := watcher.Add(path); err != nil {
+		logger.Warn("config hot-reload disabled", "err", err)
+		return
+	}
+	debounce := time.NewTimer(time.Hour)
+	if !debounce.Stop() {
+		select {
+		case <-debounce.C:
+		default:
+		}
+	}
+	pending := false
+	reload := func() {
+		if err := st.Reload(); err != nil {
+			// 编辑器原子替换可能短暂出现半写/空文件：重读失败则稍后重试。
+			logger.Warn("config reload failed, keeping previous config", "err", err)
+			pending = true
+			debounce.Reset(300 * time.Millisecond)
+			return
+		}
+		logger.Info("config reloaded", "path", path)
+	}
+	for {
+		select {
+		case ev, ok := <-watcher.Events:
+			if !ok {
+				return
+			}
+			if ev.Op&(fsnotify.Write|fsnotify.Create|fsnotify.Rename) == 0 {
+				continue
+			}
+			if !pending {
+				pending = true
+				debounce.Reset(300 * time.Millisecond)
+			}
+		case err, ok := <-watcher.Errors:
+			if !ok {
+				return
+			}
+			logger.Warn("config watcher error", "err", err)
+		case <-debounce.C:
+			if !pending {
+				continue
+			}
+			pending = false
+			reload()
+		}
+	}
 }

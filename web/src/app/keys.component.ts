@@ -21,6 +21,7 @@ import { ApiKey, Quota, SkillSummary } from './models';
 
     <div class="banner error" *ngIf="error()">{{ error() }}</div>
 
+    <div class="page-loading" *ngIf="loading()">加载中…</div>
     <!-- 外部接入说明 -->
     <div class="card">
       <h2>外部怎么连</h2>
@@ -114,6 +115,22 @@ import { ApiKey, Quota, SkillSummary } from './models';
     </div>
 
     <!-- 签发弹窗 -->
+    <!-- 补看明文弹窗（创建后 2 分钟窗口内可用） -->
+    <div class="modal-backdrop" *ngIf="revealPlain()">
+      <div class="modal card" style="max-width:560px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <h2 style="margin:0">Key 明文</h2>
+          <span class="muted" style="font-size:12px">{{ revealName() }} · 仅本次展示，关闭后无法再查看</span>
+          <button class="small" style="margin-left:auto" (click)="closeReveal()">关闭</button>
+        </div>
+        <div class="mono" style="margin:14px 0;padding:12px;background:#f6f4ef;border-radius:8px;word-break:break-all;user-select:all">{{ revealPlain() }}</div>
+        <div style="display:flex;gap:8px">
+          <button class="primary" (click)="copy(revealPlain(), 'key')">复制 Key</button>
+          <span class="muted" style="font-size:12px;align-self:center" *ngIf="copied() === 'key'">已复制 ✓</span>
+        </div>
+      </div>
+    </div>
+
     <div class="modal-backdrop" *ngIf="creating() || editing()">
       <div class="modal" (click)="$event.stopPropagation()">
         <div class="modal-head">
@@ -214,6 +231,7 @@ import { ApiKey, Quota, SkillSummary } from './models';
             <td style="white-space:nowrap">
               <button class="small" (click)="startEdit(k)">编辑</button>
               <button class="small" style="margin-left:6px" (click)="toggle(k)">{{ k.enabled ? '停用' : '启用' }}</button>
+              <button class="small" style="margin-left:6px" *ngIf="k.revealable" (click)="reveal(k)">补看明文</button>
               <button class="small danger" style="margin-left:6px" (click)="remove(k)">删除</button>
             </td>
           </tr>
@@ -233,8 +251,12 @@ import { ApiKey, Quota, SkillSummary } from './models';
 export class KeysComponent implements OnInit, OnDestroy {
   readonly keys = signal<ApiKey[]>([]);
   readonly error = signal('');
+  readonly loading = signal(true);
   readonly creating = signal(false);
   readonly editing = signal<ApiKey | null>(null);
+  readonly revealing = signal('');
+  readonly revealPlain = signal('');
+  readonly revealName = signal('');
   readonly saving = signal(false);
   /** 复制的目标标记：'' = 无；'key' | 'curl' | 'py' | 'curlKey' */
   readonly copied = signal('');
@@ -342,9 +364,10 @@ constructor(private api: ApiService) {}
   }
 
   load(): void {
+    this.loading.set(true);
     this.api.listKeys().subscribe({
-      next: (r) => this.keys.set(r.keys ?? []),
-      error: (e: Error) => this.error.set(e.message),
+      next: (r) => { this.keys.set(r.keys ?? []); this.loading.set(false); },
+      error: (e: Error) => { this.error.set(e.message); this.loading.set(false); },
     });
   }
 
@@ -445,6 +468,23 @@ constructor(private api: ApiService) {}
         this.error.set(e.message);
       },
     });
+  }
+
+  /** 补看新建 key 的明文（仅创建后 2 分钟窗口内有效）。 */
+  reveal(k: ApiKey): void {
+    this.revealing.set(k.id);
+    this.api.revealKey(k.id).subscribe({
+      next: (r) => {
+        this.revealPlain.set(r.key);
+        this.revealName.set(`${k.name}（${k.prefix}）`);
+        this.revealing.set('');
+      },
+      error: (e: Error) => { this.error.set(e.message || '补看失败（可能已超过 2 分钟窗口）'); this.revealing.set(''); },
+    });
+  }
+
+  closeReveal(): void {
+    this.revealPlain.set('');
   }
 
   toggle(k: ApiKey): void {

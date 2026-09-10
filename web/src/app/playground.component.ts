@@ -48,6 +48,7 @@ const DRAFT_KEY = 'llm-router.playground.draft';
 
     <div class="banner error" *ngIf="errorMsg()">{{ errorMsg() }}</div>
 
+    <div class="page-loading" *ngIf="loading()">加载中…</div>
     <div class="pg-grid">
       <div class="card pg-form">
         <h2>请求</h2>
@@ -220,6 +221,7 @@ export class PlaygroundComponent implements OnInit {
   private availIds = new Set<string>();
   /** 最近请求记录（组件内，最多 10 条）。 */
   readonly recent = signal<PgRecent[]>([]);
+  readonly loading = signal(true);
   readonly busy = signal(false);
   readonly output = signal('');
   readonly meta = signal<PgMeta | null>(null);
@@ -248,9 +250,11 @@ export class PlaygroundComponent implements OnInit {
     this.freeIds.clear();
     this.unavailById.clear();
     this.availIds.clear();
+    this.loading.set(true);
     let pending = 3;
     const done = () => {
       if (--pending !== 0) return;
+      this.loading.set(false);
       // auto：外部无脑调用入口，恒置顶并作为默认选中（网关按内容自动分流）。
       const arr = ['auto', ...[...all].filter((x) => x !== 'auto')];
       this.models.set(arr);

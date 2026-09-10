@@ -46,6 +46,7 @@ function rateClass(rate: number): string {
 
     <div class="banner error" *ngIf="error()">{{ error() }}</div>
 
+    <div class="page-loading" *ngIf="loading()">加载中…</div>
     <div class="grid" *ngIf="data()">
       <div class="stat">
         <div class="label">今日请求</div>
@@ -314,6 +315,7 @@ export class ObservabilityComponent implements OnInit, OnDestroy {
   days = 14;
   data = signal<ObservabilityResponse | null>(null);
   error = signal('');
+  readonly loading = signal(true);
   Math = Math;
 
   
@@ -334,9 +336,10 @@ constructor(private api: ApiService) {}
 
   load(): void {
     this.error.set('');
+    this.loading.set(true);
     this.api.observability(this.days).subscribe({
-      next: (d) => this.data.set(d),
-      error: (e) => this.error.set(e?.message || '加载失败'),
+      next: (d) => { this.data.set(d); this.loading.set(false); },
+      error: (e) => { this.error.set(e?.message || '加载失败'); this.loading.set(false); },
     });
   }
 

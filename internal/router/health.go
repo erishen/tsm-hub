@@ -11,16 +11,17 @@ import (
 
 // ProviderHealth 是单个 provider 的运行时健康状态。
 type ProviderHealth struct {
-	ProviderID string    `json:"provider_id"`
-	Healthy    bool      `json:"healthy"`
-	Failures   int       `json:"failures"`
-	LastError  string    `json:"last_error,omitempty"`
-	LastOKAt   time.Time `json:"last_ok_at,omitempty"`
-	LastFailAt time.Time `json:"last_fail_at,omitempty"`
-	DownUntil  time.Time `json:"down_until,omitempty"`
-	LatencyMS  int64     `json:"latency_ms"`
-	Requests   int64     `json:"requests"`
-	Errors     int64     `json:"errors"`
+	ProviderID    string    `json:"provider_id"`
+	Healthy       bool      `json:"healthy"`
+	Failures      int       `json:"failures"`
+	LastError     string    `json:"last_error,omitempty"`
+	LastOKAt      time.Time `json:"last_ok_at,omitempty"`
+	LastFailAt    time.Time `json:"last_fail_at,omitempty"`
+	DownUntil     time.Time `json:"down_until,omitempty"`
+	ThrottleUntil time.Time `json:"throttle_until,omitempty"`
+	LatencyMS     int64     `json:"latency_ms"`
+	Requests      int64     `json:"requests"`
+	Errors        int64     `json:"errors"`
 }
 
 type state struct {
@@ -37,10 +38,11 @@ type state struct {
 
 // Tracker 记录所有 provider 的健康状态。
 type Tracker struct {
-	mu      sync.RWMutex
-	states  map[string]*state
-	failMax int
-	cool    time.Duration
+	mu       sync.RWMutex
+	states   map[string]*state
+	failMax  int
+	cool     time.Duration
+	persistFn func() // 状态变更后的持久化回调（由调用方注入）
 }
 
 // NewTracker 创建健康跟踪器。
@@ -88,7 +90,6 @@ func (s *state) availableLocked(now time.Time) bool {
 // ReportSuccess 上报一次成功，重置失败计数并更新延迟 EWMA。
 func (t *Tracker) ReportSuccess(id string, latency time.Duration) {
 	t.mu.Lock()
-	defer t.mu.Unlock()
 	s := t.get(id)
 	s.failures = 0
 	s.lastErr = ""
@@ -102,12 +103,14 @@ func (t *Tracker) ReportSuccess(id string, latency time.Duration) {
 	} else {
 		s.latencyMS = (s.latencyMS*7 + ms*3) / 10
 	}
+	t.mu.Unlock()
+	// persist 必须在锁外调用：RLock 会与上面的写锁互斥（同 goroutine 死锁）。
+	t.persist()
 }
 
 // ReportFailure 上报一次失败；连续失败达到阈值则摘除并冷却。
 func (t *Tracker) ReportFailure(id, errMsg string) {
 	t.mu.Lock()
-	defer t.mu.Unlock()
 	s := t.get(id)
 	s.failures++
 	s.lastErr = errMsg
@@ -117,6 +120,8 @@ func (t *Tracker) ReportFailure(id, errMsg string) {
 	if s.failures >= t.failMax {
 		s.downUntil = time.Now().Add(t.cool)
 	}
+	t.mu.Unlock()
+	t.persist()
 }
 
 // ReportThrottle 上报一次上游 429（限流/免费额度耗尽）：
@@ -124,7 +129,6 @@ func (t *Tracker) ReportFailure(id, errMsg string) {
 // 避免免费家被 429 后每次请求都先白吃一次限流再降级。
 func (t *Tracker) ReportThrottle(id, errMsg string, cool time.Duration) {
 	t.mu.Lock()
-	defer t.mu.Unlock()
 	s := t.get(id)
 	s.failures++
 	s.lastErr = errMsg
@@ -136,6 +140,8 @@ func (t *Tracker) ReportThrottle(id, errMsg string, cool time.Duration) {
 		s.downUntil = until
 	}
 	s.throttleUntil = until
+	t.mu.Unlock()
+	t.persist()
 }
 
 // Throttled 判断 provider 是否处于 429 冷却期。
@@ -163,10 +169,11 @@ func (t *Tracker) Snapshot() []ProviderHealth {
 			LastError:  s.lastErr,
 			LastOKAt:   s.lastOK,
 			LastFailAt: s.lastFail,
-			DownUntil:  s.downUntil,
-			LatencyMS:  s.latencyMS,
-			Requests:   s.requests,
-			Errors:     s.errors,
+			DownUntil:     s.downUntil,
+			ThrottleUntil: s.throttleUntil,
+			LatencyMS:     s.latencyMS,
+			Requests:      s.requests,
+			Errors:        s.errors,
 		})
 	}
 	return out
@@ -224,4 +231,40 @@ func (t *Tracker) Latency(id string) int64 {
 		return s.latencyMS
 	}
 	return 0
+}
+
+// SetPersist 注册状态变更后的持久化回调；变更合并由调用方负责。
+func (t *Tracker) SetPersist(fn func()) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.persistFn = fn
+}
+
+func (t *Tracker) persist() {
+	t.mu.RLock()
+	fn := t.persistFn
+	t.mu.RUnlock()
+	if fn != nil {
+		fn()
+	}
+}
+
+// Restore 从持久化快照恢复健康状态（重启后保留冷却/失败计数/延迟 EWMA）。
+// 只恢复已观测过的 provider；时间类字段原样恢复，是否可用由 availableLocked
+// 结合当前时间自然判断（已过期的冷却自动进入半开）。
+func (t *Tracker) Restore(ps []ProviderHealth) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for _, p := range ps {
+		s := t.get(p.ProviderID)
+		s.failures = p.Failures
+		s.lastErr = p.LastError
+		s.lastOK = p.LastOKAt
+		s.lastFail = p.LastFailAt
+		s.downUntil = p.DownUntil
+		s.throttleUntil = p.ThrottleUntil
+		s.latencyMS = p.LatencyMS
+		s.requests = p.Requests
+		s.errors = p.Errors
+	}
 }

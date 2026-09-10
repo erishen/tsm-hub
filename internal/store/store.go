@@ -580,3 +580,23 @@ func (s *Store) LookupKeyHash(hash string) (APIKey, bool) {
 	}
 	return s.cfg.Keys[i], true
 }
+
+// Reload 从磁盘重新读取 config.json 并重建索引（热加载入口）。
+// 解析失败时保持原配置不变并返回错误；成功则 Provider/Route/Key 立即生效。
+func (s *Store) Reload() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	raw, err := os.ReadFile(s.path)
+	if err != nil {
+		return err
+	}
+	var cfg Config
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return fmt.Errorf("parse config %s: %w", s.path, err)
+	}
+	cfg.Version = CurrentVersion
+	s.cfg = cfg
+	s.applyDefaults()
+	s.reindex()
+	return nil
+}

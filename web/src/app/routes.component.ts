@@ -21,6 +21,7 @@ import { Provider, Route, RouteTarget } from './models';
 
     <div class="banner error" *ngIf="error()">{{ error() }}</div>
 
+    <div class="page-loading" *ngIf="loading()">加载中…</div>
     <!-- 编辑弹窗 -->
     <div class="modal-backdrop" *ngIf="editing()">
       <div class="modal" (click)="$event.stopPropagation()">
@@ -129,6 +130,7 @@ export class RoutesComponent implements OnInit, OnDestroy {
   readonly routes = signal<Route[]>([]);
   readonly providers = signal<Provider[]>([]);
   readonly error = signal('');
+  readonly loading = signal(true);
   readonly editing = signal(false);
   readonly saving = signal(false);
   editingModel = '';
@@ -156,9 +158,10 @@ constructor(private api: ApiService) {}
   }
 
   load(): void {
+    this.loading.set(true);
     this.api.listRoutes().subscribe({
-      next: (r) => this.routes.set(r.routes ?? []),
-      error: (e: Error) => this.error.set(e.message),
+      next: (r) => { this.routes.set(r.routes ?? []); this.loading.set(false); },
+      error: (e: Error) => { this.error.set(e.message); this.loading.set(false); },
     });
   }
 

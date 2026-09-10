@@ -40,6 +40,7 @@ func (s *Server) adminMux() http.Handler {
 	m.HandleFunc("GET /api/admin/keys", s.admin(s.handleListKeys))
 	m.HandleFunc("POST /api/admin/keys", s.admin(s.handleCreateKey))
 	m.HandleFunc("POST /api/admin/keys/{id}/toggle", s.admin(s.handleToggleKey))
+	m.HandleFunc("GET /api/admin/keys/{id}/plaintext", s.admin(s.handleRevealKey))
 	m.HandleFunc("PATCH /api/admin/keys/{id}", s.admin(s.handleUpdateKey))
 	m.HandleFunc("DELETE /api/admin/keys/{id}", s.admin(s.handleDeleteKey))
 	m.HandleFunc("GET /api/admin/usage", s.admin(s.handleUsage))
@@ -98,6 +99,15 @@ const (
 	loginMaxFails = 5
 	loginLockDur  = 10 * time.Minute
 )
+
+// keyRevealWindow 是新建 key 明文可重看的短窗口：创建后立即展示一次，
+// 若页面被误关，窗口内可从管理台补看；超窗后明文彻底消失（服务端只存哈希）。
+const keyRevealWindow = 2 * time.Minute
+
+type keyReveal struct {
+	plain string
+	until time.Time
+}
 
 // handleAdminLogin 用管理口令换取会话 token。
 func (s *Server) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
@@ -1152,6 +1162,8 @@ func (s *Server) handleListKeys(w http.ResponseWriter, r *http.Request) {
 			"inject_skills": k.InjectSkills,
 			"usage":         agg,
 			"rpm_current":   rpm[k.ID],
+			// 新建 key 的 2 分钟窗口内为 true，前端展示「补看」入口。
+			"revealable":    s.revealable(k.ID),
 			// 工具归因：该调用方实际执行过 + 声明过的工具（按次数降序）。
 			"tools_used":     topTools(s.rec.KeyTools(k.ID), 5),
 			"tools_declared": topTools(s.rec.KeyClientTools(k.ID), 5),
@@ -1202,11 +1214,48 @@ func (s *Server) handleCreateKey(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
-	// ⚠️ 明文只在这一次响应里出现，之后只能靠哈希校验。
+	// ⚠️ 明文只在创建响应与短窗口内可重看，之后只能靠哈希校验。
+	s.revealMu.Lock()
+	s.revealMap[k.ID] = keyReveal{plain: plaintext, until: time.Now().Add(keyRevealWindow)}
+	s.revealMu.Unlock()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok": true, "id": k.ID, "key": plaintext, "prefix": display,
-		"warning": "请立即保存该 key，服务端只保存哈希，遗失无法找回",
+		"warning": "请立即保存该 key；创建后 2 分钟内可从管理台补看，超窗后服务端只保存哈希",
 	})
+}
+
+// revealable 报告某个 key 是否仍在新签发的明文可重看窗口内。
+func (s *Server) revealable(id string) bool {
+	s.revealMu.Lock()
+	defer s.revealMu.Unlock()
+	rv, ok := s.revealMap[id]
+	if !ok {
+		return false
+	}
+	if time.Now().After(rv.until) {
+		delete(s.revealMap, id)
+		return false
+	}
+	return true
+}
+
+// handleRevealKey 在短窗口内重看新建 key 的明文（误关页面兜底）。
+// 只对创建后未过窗口的 key 生效；已查看/已过期/老 key 一律 404。
+func (s *Server) handleRevealKey(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	s.revealMu.Lock()
+	rv, ok := s.revealMap[id]
+	if ok && time.Now().After(rv.until) {
+		delete(s.revealMap, id)
+		ok = false
+	}
+	s.revealMu.Unlock()
+	if !ok {
+		writeError(w, http.StatusNotFound, "not_found",
+			"key 明文仅创建后 2 分钟内可重看，且只显示一次；服务端只保存哈希")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "id": id, "key": rv.plain})
 }
 
 func (s *Server) handleToggleKey(w http.ResponseWriter, r *http.Request) {

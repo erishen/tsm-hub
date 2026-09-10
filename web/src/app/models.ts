@@ -55,6 +55,7 @@ export interface Route {
 }
 
 export interface ApiKey {
+  revealable?: boolean;
   id: string;
   name: string;
   prefix: string;

@@ -18,6 +18,7 @@ import { Agg, DailyPoint, Overview, ProviderHealth } from './models';
     </div>
 
     <div class="banner error" *ngIf="error()">{{ error() }}</div>
+    <div class="page-loading" *ngIf="loading()">加载中…</div>
 
     <div class="grid">
       <div class="stat">
@@ -96,6 +97,7 @@ export class DashboardComponent implements OnInit {
   readonly days = signal<DailyPoint[]>([]);
   readonly health = signal<ProviderHealth[]>([]);
   readonly error = signal('');
+  readonly loading = signal(true);
 
   readonly compact = compact;
   readonly usd = usd;
@@ -114,19 +116,27 @@ export class DashboardComponent implements OnInit {
     this.load();
   }
 
+  // 多请求计数：全部完成后才收起 loading。
+  private pending = 0;
+  private begin(): void { this.pending++; this.loading.set(true); }
+  private end(): void { if (--this.pending <= 0) { this.pending = 0; this.loading.set(false); } }
+
   load(): void {
     this.error.set('');
+    this.begin();
     this.api.overview().subscribe({
-      next: (o) => this.overview.set(o),
-      error: (e: Error) => this.error.set(e.message),
+      next: (o) => { this.overview.set(o); this.end(); },
+      error: (e: Error) => { this.error.set(e.message); this.end(); },
     });
+    this.begin();
     this.api.usage(7, 10).subscribe({
-      next: (u) => this.days.set(u.days),
-      error: () => {},
+      next: (u) => { this.days.set(u.days); this.end(); },
+      error: () => this.end(),
     });
+    this.begin();
     this.api.health().subscribe({
-      next: (h) => this.health.set(h.providers ?? []),
-      error: () => {},
+      next: (h) => { this.health.set(h.providers ?? []); this.end(); },
+      error: () => this.end(),
     });
   }
 

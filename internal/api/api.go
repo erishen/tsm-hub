@@ -46,6 +46,9 @@ type Server struct {
 
 	loginMu    sync.Mutex
 	loginFails map[string]loginFail // ip -> 失败登录状态（暴力尝试防护）
+
+	revealMu  sync.Mutex
+	revealMap map[string]keyReveal // keyID -> 新建 key 明文（2 分钟窗口可补看）
 }
 
 // Options 构造 Server 的参数。
@@ -80,6 +83,7 @@ func New(o Options) *Server {
 		denyCounts:   map[string]int64{},
 
 		loginFails: map[string]loginFail{},
+		revealMap:  map[string]keyReveal{},
 	}
 	s.adminHandler = s.adminMux()
 	return s
