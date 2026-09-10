@@ -8,6 +8,7 @@ package proxy
 import (
 	"bufio"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -313,10 +314,10 @@ func (p *Proxy) attempt(w http.ResponseWriter, r *http.Request, c router.Candida
 	if resp.StatusCode >= 500 {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
 		slog.Warn("upstream 5xx", "provider", c.ProviderID, "model", req.Model, "upstream_model", c.UpstreamModel,
-			"status", resp.StatusCode, "body", compact(string(b)))
+			"status", resp.StatusCode, "body", decodeUpstreamBody(resp, b))
 		return Result{ProviderID: c.ProviderID, UpstreamModel: c.UpstreamModel, Status: resp.StatusCode,
 			Stream: req.Stream, Latency: time.Since(started),
-			Err: fmt.Sprintf("upstream %d: %s", resp.StatusCode, compact(string(b))), ProviderFault: true}, true
+			Err: fmt.Sprintf("upstream %d: %s", resp.StatusCode, decodeUpstreamBody(resp, b)), ProviderFault: true}, true
 	}
 
 	// 429（限流 / 免费额度耗尽）与 403（免费额度耗尽 / key 无权限，如阿里云百炼
@@ -328,16 +329,16 @@ func (p *Proxy) attempt(w http.ResponseWriter, r *http.Request, c router.Candida
 	if resp.StatusCode == http.StatusPaymentRequired {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
 		slog.Warn("upstream payment required (balance exhausted)", "provider", c.ProviderID, "model", req.Model,
-			"upstream_model", c.UpstreamModel, "status", resp.StatusCode, "body", compact(string(b)))
-		p.health.ReportThrottle(c.ProviderID, "balance exhausted: "+compact(string(b)), time.Hour)
+			"upstream_model", c.UpstreamModel, "status", resp.StatusCode, "body", decodeUpstreamBody(resp, b))
+		p.health.ReportThrottle(c.ProviderID, "balance exhausted: "+decodeUpstreamBody(resp, b), time.Hour)
 		return Result{ProviderID: c.ProviderID, UpstreamModel: c.UpstreamModel, Status: resp.StatusCode,
 			Stream: req.Stream, Latency: time.Since(started),
-			Err: fmt.Sprintf("upstream %d: %s", resp.StatusCode, compact(string(b))), ProviderFault: true}, true
+			Err: fmt.Sprintf("upstream %d: %s", resp.StatusCode, decodeUpstreamBody(resp, b)), ProviderFault: true}, true
 	}
 	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusForbidden {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
 		slog.Warn("upstream throttled", "provider", c.ProviderID, "model", req.Model, "upstream_model", c.UpstreamModel,
-			"status", resp.StatusCode, "body", compact(string(b)))
+			"status", resp.StatusCode, "body", decodeUpstreamBody(resp, b))
 		// 429（tpm/rpm 限流）通常秒级恢复，短冷却即可；403（免费额度耗尽 /
 		// key 无权限）持续较久，用配置的长冷却（默认 120s）。避免限流家被
 		// 长时间摘除后只剩同样不可用的候选。
@@ -348,10 +349,10 @@ func (p *Proxy) attempt(w http.ResponseWriter, r *http.Request, c router.Candida
 		if resp.StatusCode == http.StatusTooManyRequests {
 			throttleSec = 15
 		}
-		p.health.ReportThrottle(c.ProviderID, compact(string(b)), time.Duration(throttleSec)*time.Second)
+		p.health.ReportThrottle(c.ProviderID, decodeUpstreamBody(resp, b), time.Duration(throttleSec)*time.Second)
 		return Result{ProviderID: c.ProviderID, UpstreamModel: c.UpstreamModel, Status: resp.StatusCode,
 			Stream: req.Stream, Latency: time.Since(started),
-			Err: fmt.Sprintf("upstream %d: %s", resp.StatusCode, compact(string(b))), ProviderFault: true}, true
+			Err: fmt.Sprintf("upstream %d: %s", resp.StatusCode, decodeUpstreamBody(resp, b)), ProviderFault: true}, true
 	}
 
 	// 非流式且上游返回 2xx/3xx 但 body 带 OpenAI error（部分供应商过载时如此）：
@@ -365,7 +366,7 @@ func (p *Proxy) attempt(w http.ResponseWriter, r *http.Request, c router.Candida
 		if json.Unmarshal(peek, &eb) == nil && eb.Error != nil {
 			return Result{ProviderID: c.ProviderID, UpstreamModel: c.UpstreamModel, Status: http.StatusBadGateway,
 				Stream: req.Stream, Latency: time.Since(started),
-				Err: fmt.Sprintf("upstream error: %s", compact(string(peek))), ProviderFault: true}, true
+				Err: fmt.Sprintf("upstream error: %s", decodeUpstreamBody(resp, peek)), ProviderFault: true}, true
 		}
 		rest, _ := io.ReadAll(resp.Body)
 		resp.Body = io.NopCloser(bytes.NewReader(append(peek, rest...)))
@@ -377,7 +378,7 @@ func (p *Proxy) attempt(w http.ResponseWriter, r *http.Request, c router.Candida
 		resp.Body = io.NopCloser(bytes.NewReader(b))
 		slog.Info("upstream 4xx",
 			"provider", c.ProviderID, "model", req.Model, "upstream_model", c.UpstreamModel,
-			"status", resp.StatusCode, "body", compact(string(b)))
+			"status", resp.StatusCode, "body", decodeUpstreamBody(resp, b))
 		// 404 模型不存在（model not found / model route not found 等）：标记该 provider×模型
 		// 不可用（默认 30 分钟），并把本次请求交给下一个候选——同一模型其他家可能可用，
 		// 不用等用户手动排查（如 sensenova 探测到但实际不存在的模型）。
@@ -386,10 +387,10 @@ func (p *Proxy) attempt(w http.ResponseWriter, r *http.Request, c router.Candida
 			if unavailSec <= 0 {
 				unavailSec = 1800
 			}
-			p.store.MarkModelUnavailable(c.ProviderID, c.UpstreamModel, compact(string(b)), time.Duration(unavailSec)*time.Second)
+			p.store.MarkModelUnavailable(c.ProviderID, c.UpstreamModel, decodeUpstreamBody(resp, b), time.Duration(unavailSec)*time.Second)
 			return Result{ProviderID: c.ProviderID, UpstreamModel: c.UpstreamModel, Status: resp.StatusCode,
 				Stream: req.Stream, Latency: time.Since(started),
-				Err: fmt.Sprintf("upstream %d (model unavailable): %s", resp.StatusCode, compact(string(b))),
+				Err: fmt.Sprintf("upstream %d (model unavailable): %s", resp.StatusCode, decodeUpstreamBody(resp, b)),
 				ProviderFault: true, ModelFault: true}, true
 		}
 	}
@@ -434,7 +435,7 @@ func (p *Proxy) bufferedResponse(w http.ResponseWriter, resp *http.Response, c r
 		res.TotalTokens = payload.Usage.TotalTokens
 	}
 	if resp.StatusCode >= 400 {
-		res.Err = fmt.Sprintf("upstream %d: %s", resp.StatusCode, compact(string(data)))
+		res.Err = fmt.Sprintf("upstream %d: %s", resp.StatusCode, decodeUpstreamBody(resp, data))
 		// 5xx 在 attempt 里已按可重试处理，走到这里说明是 4xx 等客户端问题，
 		// 不置 ProviderFault，避免坏请求把健康上游熔断摘除。
 	}
@@ -598,6 +599,39 @@ func compact(s string) string {
 		return s[:300] + "…"
 	}
 	return s
+}
+
+// decodeUpstreamBody 读取上游错误响应体并格式化为人类可读的错误信息：
+//  1. 自动检测并解压 gzip 压缩响应体（上游返回 Content-Encoding: gzip 时
+//     http.Client 未自动解压的情况，直接存二进制会导致前端乱码）；
+//  2. 解析 JSON 错误响应，提取 error.message / message 字段，去掉冗长的
+//     JSON 结构（如 {"error":{"message":"...","type":"...","code":"..."}}）；
+//  3. 去掉换行，截断到 300 字符。
+func decodeUpstreamBody(resp *http.Response, b []byte) string {
+	body := b
+	// 检测 gzip：Content-Encoding 头或魔数 0x1f 0x8b
+	if resp != nil && strings.EqualFold(resp.Header.Get("Content-Encoding"), "gzip") ||
+		len(b) >= 2 && b[0] == 0x1f && b[1] == 0x8b {
+		if gr, err := gzip.NewReader(bytes.NewReader(b)); err == nil {
+			if decompressed, err := io.ReadAll(gr); err == nil {
+				body = decompressed
+			}
+			gr.Close()
+		}
+	}
+	s := string(body)
+	// 尝试解析 JSON，提取 error.message 或 message
+	var raw map[string]any
+	if err := json.Unmarshal(body, &raw); err == nil {
+		if errObj, ok := raw["error"].(map[string]any); ok {
+			if msg, ok := errObj["message"].(string); ok && msg != "" {
+				s = msg
+			}
+		} else if msg, ok := raw["message"].(string); ok && msg != "" {
+			s = msg
+		}
+	}
+	return compact(s)
 }
 
 // isFreeModel 判断一次上游调用是否免费：模型名带 :free/-free 后缀，或
