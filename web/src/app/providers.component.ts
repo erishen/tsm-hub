@@ -1,4 +1,6 @@
 import { Component, OnInit, signal, computed, HostListener } from '@angular/core';
+import { effect, OnDestroy } from '@angular/core';
+import { lockBody, unlockBody } from './scroll-lock';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from './api.service';
@@ -156,7 +158,7 @@ import { Balance, Provider, ProbeModel } from './models';
     </div>
   `,
 })
-export class ProvidersComponent implements OnInit {
+export class ProvidersComponent implements OnInit, OnDestroy {
   readonly providers = signal<Provider[]>([]);
   readonly error = signal('');
   readonly editing = signal(false);
@@ -177,7 +179,17 @@ export class ProvidersComponent implements OnInit {
   modelsText = '';
   modelSet = new Set<string>();
 
-  constructor(private api: ApiService) {}
+  
+  /** 弹窗滚动锁：打开时锁 body，关闭/销毁时恢复（防止滚动穿透母页面）。 */
+  private readonly bodyLock = effect(() => {
+    lockBody(!!(this.editing()));
+  });
+
+  ngOnDestroy(): void {
+    unlockBody();
+  }
+
+constructor(private api: ApiService) {}
 
   ngOnInit(): void {
     this.load();

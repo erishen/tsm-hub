@@ -1,4 +1,6 @@
 import { Component, OnInit, signal } from '@angular/core';
+import { effect, OnDestroy } from '@angular/core';
+import { lockBody, unlockBody } from './scroll-lock';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from './api.service';
@@ -112,7 +114,7 @@ import { ToolInfo } from './models';
     .err-text { color:#d33; font-size:13px; }
   `],
 })
-export class ToolsComponent implements OnInit {
+export class ToolsComponent implements OnInit, OnDestroy {
   tools = signal<ToolInfo[]>([]);
   error = signal('');
   saved = signal('');
@@ -123,7 +125,17 @@ export class ToolsComponent implements OnInit {
   testError = signal('');
   testRunning = signal(false);
 
-  constructor(private api: ApiService) {}
+  
+  /** 弹窗滚动锁：打开时锁 body，关闭/销毁时恢复（防止滚动穿透母页面）。 */
+  private readonly bodyLock = effect(() => {
+    lockBody(!!(this.testing()));
+  });
+
+  ngOnDestroy(): void {
+    unlockBody();
+  }
+
+constructor(private api: ApiService) {}
 
   ngOnInit(): void {
     this.loadTools();
