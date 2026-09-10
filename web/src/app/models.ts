@@ -176,6 +176,10 @@ export interface CatalogModel {
   pricing?: { prompt: string; completion: string };
   /** 非空表示该 Provider×模型曾被上游 404（model not found），冷却期内路由会跳过。 */
   unavailable?: string;
+  /** 路由综合评分（免费+健康+延迟+在路由里-不可用扣分），越高越优先被选中。 */
+  route_score?: number;
+  /** 是否在某条路由的 targets 里（未接入路由的模型不会被外部调用命中）。 */
+  in_route?: boolean;
 }
 
 /** 探测返回的模型元信息：上下文窗口（token 总量）与免费标记。 */

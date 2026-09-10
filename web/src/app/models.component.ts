@@ -47,15 +47,22 @@ const CATEGORY_LABEL: Record<string, string> = {
         </h3>
         <table>
           <thead>
-            <tr><th>模型</th><th>Provider</th><th>上下文</th><th>价格</th><th>用途</th></tr>
+            <tr><th>模型</th><th>Provider</th><th>评分</th><th>上下文</th><th>价格</th><th>用途</th></tr>
           </thead>
           <tbody>
             <tr *ngFor="let m of byCategory()[cat]" [style.opacity]="m.unavailable ? 0.55 : 1">
               <td class="mono">
                 {{ m.id }}
-                <span class="badge bad" *ngIf="m.unavailable" [title]="m.unavailable">不可用</span>
+                <span class="badge bad" *ngIf="m.unavailable" [title]="m.unavailable">不可用：{{ m.unavailable.length > 30 ? m.unavailable.slice(0,30)+'…' : m.unavailable }}</span>
               </td>
               <td><span class="badge ok">{{ m.provider }}</span></td>
+              <td style="white-space:nowrap">
+                <span class="badge" [class.free]="(m.route_score ?? 0) >= 150" [class.bad]="(m.route_score ?? 0) < 50"
+                      [title]="'免费+100 / 健康+30 / 延迟分 / 在路由+50 / 不可用-100'">
+                  {{ m.route_score ?? 0 }}
+                </span>
+                <span class="badge" *ngIf="!m.in_route" style="margin-left:4px;background:#f0f0f0;color:#888">未接入</span>
+              </td>
               <td class="muted">{{ ctx(m) }}</td>
               <td>
                 <span class="badge free" *ngIf="m.free">FREE</span>
