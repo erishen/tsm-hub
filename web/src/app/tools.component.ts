@@ -41,9 +41,12 @@ import { ToolInfo } from './models';
           <div class="tool-name">
             <span class="mono tname" [title]="t.name">{{ t.name }}</span>
             <span class="badge" [class.ok]="t.source.startsWith('mcp:')">{{ srcLabel(t.source) }}</span>
-            <button class="small" style="margin-left:auto" (click)="openTest(t)" *ngIf="!t.source.startsWith('mcp:') || t.parameters">测试</button>
+            <div style="margin-left:auto;display:flex;gap:4px">
+              <button class="small" (click)="openDetail(t)">详情</button>
+              <button class="small" (click)="openTest(t)" *ngIf="!t.source.startsWith('mcp:') || t.parameters">测试</button>
+            </div>
           </div>
-          <div class="muted tool-desc">{{ t.description || '（无描述）' }}</div>
+          <div class="muted tool-desc" [title]="t.description || ''">{{ t.description || '（无描述）' }}</div>
         </div>
       </div>
       <ng-template #noTools>
@@ -93,12 +96,56 @@ import { ToolInfo } from './models';
         </div>
       </div>
     </div>
+
+    <!-- 工具详情弹窗 -->
+    <div class="modal-backdrop" *ngIf="detailTool()" (click)="closeDetail()">
+      <div class="modal" (click)="$event.stopPropagation()">
+        <div class="modal-head">
+          <div class="modal-icon">ℹ</div>
+          <div class="modal-titles">
+            <h2><span class="mono">{{ detailTool()!.name }}</span></h2>
+            <div class="sub">
+              <span class="badge" [class.ok]="detailTool()!.source.startsWith('mcp:')">{{ srcLabel(detailTool()!.source) }}</span>
+              <span class="muted small" style="margin-left:8px">{{ detailTool()!.source }}</span>
+            </div>
+          </div>
+          <button class="icon" (click)="closeDetail()" aria-label="关闭">×</button>
+        </div>
+        <div class="modal-body">
+          <div style="margin-bottom:14px">
+            <div class="muted small" style="margin-bottom:4px;font-weight:600">描述</div>
+            <div style="font-size:13px;line-height:1.6;white-space:pre-wrap;word-break:break-word">{{ detailTool()!.description || '（无描述）' }}</div>
+          </div>
+          <div *ngIf="detailParams().length">
+            <div class="muted small" style="margin-bottom:6px;font-weight:600">参数（{{ detailParams().length }}）</div>
+            <table class="tbl" style="font-size:12px">
+              <thead><tr><th>参数名</th><th>类型</th><th>必填</th><th>说明</th></tr></thead>
+              <tbody>
+                <tr *ngFor="let f of detailParams()">
+                  <td class="mono">{{ f.key }}</td>
+                  <td><span class="mono small">{{ f.type }}</span></td>
+                  <td><span [class.err-text]="f.required">{{ f.required ? '是' : '否' }}</span></td>
+                  <td style="max-width:280px">{{ f.desc || '—' }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div *ngIf="!detailParams().length" class="muted small">该工具无需参数。</div>
+        </div>
+        <div class="modal-foot">
+          <button (click)="closeDetail()">关闭</button>
+          <button class="primary" (click)="openTestFromDetail()" *ngIf="!detailTool()!.source.startsWith('mcp:') || detailTool()!.parameters">测试此工具</button>
+        </div>
+      </div>
+    </div>
   `,
   styles: [`
     .tool-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:10px; }
     .tool-card { border:1px solid var(--border,#e4e3dd); border-radius:10px; padding:10px 12px; }
     .tool-name { display:flex; align-items:center; gap:8px; font-weight:600; }
-    .tool-desc { margin-top:4px; font-size:12px; line-height:1.45; }
+    .tool-desc { margin-top:4px; font-size:12px; line-height:1.45;
+      display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical;
+      overflow:hidden; text-overflow:ellipsis; min-height:3.6em; }
     .tool-grid { grid-template-columns: repeat(auto-fill,minmax(240px,1fr)); }
     .tool-card { min-width: 0; overflow: hidden; }
     .tool-name .tname { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -120,6 +167,7 @@ export class ToolsComponent implements OnInit, OnDestroy {
   saved = signal('');
   loadingTools = signal(true);
   testing = signal<ToolInfo | null>(null);
+  detailTool = signal<ToolInfo | null>(null);
   testArgs: Record<string, string> = {};
   testResult = signal<string | null>(null);
   testError = signal('');
@@ -128,7 +176,7 @@ export class ToolsComponent implements OnInit, OnDestroy {
   
   /** 弹窗滚动锁：打开时锁 body，关闭/销毁时恢复（防止滚动穿透母页面）。 */
   private readonly bodyLock = effect(() => {
-    lockBody(!!(this.testing()));
+    lockBody(!!(this.testing() || this.detailTool()));
   });
 
   ngOnDestroy(): void {
@@ -187,6 +235,37 @@ constructor(private api: ApiService) {}
 
   closeTest(): void {
     this.testing.set(null);
+  }
+
+  /** 打开工具详情弹窗：展示完整描述 + 参数列表（只读）。 */
+  openDetail(t: ToolInfo): void {
+    this.detailTool.set(t);
+  }
+
+  closeDetail(): void {
+    this.detailTool.set(null);
+  }
+
+  /** 从详情弹窗跳转到测试弹窗：关闭详情，打开测试。 */
+  openTestFromDetail(): void {
+    const t = this.detailTool();
+    this.closeDetail();
+    if (t) this.openTest(t);
+  }
+
+  /** 详情弹窗的参数列表（基于 detailTool 而非 testing）。 */
+  detailParams(): { key: string; type: string; required: boolean; desc: string; enum?: string[] }[] {
+    const t = this.detailTool();
+    if (!t?.parameters?.properties) return [];
+    const props = t.parameters.properties;
+    const req = new Set(t.parameters.required || []);
+    return Object.keys(props).map((k) => ({
+      key: k,
+      type: props[k].type || 'string',
+      required: req.has(k),
+      desc: props[k].description || '',
+      enum: props[k].enum,
+    }));
   }
 
   paramFields(): { key: string; type: string; required: boolean; desc: string; enum?: string[] }[] {
