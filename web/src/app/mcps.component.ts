@@ -68,7 +68,10 @@ import { McpServer, ToolInfo } from './models';
               </div>
             </td>
           </tr>
-          <tr *ngIf="!mcps().length">
+          <tr *ngIf="loadingMcps()">
+            <td colspan="6" class="empty">加载中…</td>
+          </tr>
+          <tr *ngIf="!loadingMcps() && !mcps().length">
             <td colspan="6" class="empty">未配置 MCP server。示例：npx &#64;modelcontextprotocol/server-fetch</td>
           </tr>
         </tbody>
@@ -84,7 +87,10 @@ import { McpServer, ToolInfo } from './models';
         <button class="small" (click)="refreshTools()">刷新</button>
         <button class="small" (click)="loadTools()">加载</button>
       </div>
-      <div class="tool-grid" *ngIf="tools().length; else noTools">
+      <div class="tool-grid" *ngIf="loadingTools()">
+        <div class="empty" style="grid-column:1/-1">加载工具池中（MCP 进程可能较慢）…</div>
+      </div>
+      <div class="tool-grid" *ngIf="!loadingTools() && tools().length; else noTools">
         <div class="tool-card" *ngFor="let t of tools()">
           <div class="tool-name">
             <span class="mono tname" [title]="t.name">{{ t.name }}</span>
@@ -237,6 +243,8 @@ export class McpsComponent implements OnInit {
   tools = signal<ToolInfo[]>([]);
   error = signal('');
   saved = signal('');
+  loadingMcps = signal(false);
+  loadingTools = signal(false);
   editing = signal<{ mode: 'add' | 'edit'; server?: McpServer } | null>(null);
   testing = signal<ToolInfo | null>(null);
   testArgs: Record<string, string> = {};
@@ -303,29 +311,33 @@ export class McpsComponent implements OnInit {
   }
 
   load(): void {
+    this.loadingMcps.set(true);
     this.api.listMcps().subscribe({
-      next: (r) => this.mcps.set(r.mcps || []),
-      error: (e) => this.error.set(e.error?.error?.message || '加载 MCP 配置失败'),
+      next: (r) => { this.mcps.set(r.mcps || []); this.loadingMcps.set(false); },
+      error: (e) => { this.error.set(e.error?.error?.message || '加载 MCP 配置失败'); this.loadingMcps.set(false); },
     });
   }
 
   loadTools(): void {
+    this.loadingTools.set(true);
     this.api.listTools().subscribe({
-      next: (r) => this.tools.set(r.tools || []),
-      error: (e) => this.error.set(e.error?.error?.message || '加载工具池失败'),
+      next: (r) => { this.tools.set(r.tools || []); this.loadingTools.set(false); },
+      error: (e) => { this.error.set(e.error?.error?.message || '加载工具池失败'); this.loadingTools.set(false); },
     });
   }
 
   refreshTools(): void {
     this.error.set('');
     this.saved.set('');
+    this.loadingTools.set(true);
     this.api.listTools().subscribe({
       next: (r) => {
         this.tools.set(r.tools || []);
+        this.loadingTools.set(false);
         this.saved.set('工具池已刷新');
         this.load();
       },
-      error: (e) => this.error.set(e.error?.error?.message || '刷新失败'),
+      error: (e) => { this.loadingTools.set(false); this.error.set(e.error?.error?.message || '刷新失败'); },
     });
   }
 
