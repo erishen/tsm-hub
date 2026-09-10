@@ -19,7 +19,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 )
@@ -232,16 +231,20 @@ func (p *Proxy) execTool(keyID, name string, args toolArgs) string {
 	case "read_file":
 		return p.toolReadFile(args)
 	case "remember":
+		if p.mem == nil {
+			return "error: memory store unavailable（记忆库打开失败，详见网关日志）"
+		}
 		ns := "mem:" + keyID + ":"
-		registry.mu.Lock()
-		registry.mem[ns+args.str("key")] = args.str("value")
-		registry.mu.Unlock()
+		if err := p.mem.Set(ns+args.str("key"), args.str("value")); err != nil {
+			return "error: remember failed: " + err.Error()
+		}
 		return "remembered"
 	case "recall":
+		if p.mem == nil {
+			return "error: memory store unavailable（记忆库打开失败，详见网关日志）"
+		}
 		ns := "mem:" + keyID + ":"
-		registry.mu.RLock()
-		v, ok := registry.mem[ns+args.str("key")]
-		registry.mu.RUnlock()
+		v, ok := p.mem.Get(ns + args.str("key"))
 		if !ok {
 			return fmt.Sprintf("error: nothing remembered for %q", args.str("key"))
 		}
@@ -596,31 +599,29 @@ func isPrivateIP(ip net.IP) bool {
 		(ip.To4() != nil && ip[0] == 169 && ip[1] == 254)
 }
 
-// toolRegistry 保存 remember/recall 的会话记忆。
-type toolRegistry struct {
-	mu  sync.RWMutex
-	mem map[string]string
-}
-
-var registry = &toolRegistry{mem: map[string]string{}}
-
 // ListMemory 返回全部会话记忆（ns 形如 mem:<keyID>:<key>，value 为记忆内容）。
 func (p *Proxy) ListMemory() []map[string]string {
-	registry.mu.RLock()
-	defer registry.mu.RUnlock()
-	out := make([]map[string]string, 0, len(registry.mem))
-	for k, v := range registry.mem {
-		out = append(out, map[string]string{"ns": k, "value": v})
+	if p.mem == nil {
+		return nil
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i]["ns"] < out[j]["ns"] })
+	out, err := p.mem.List()
+	if err != nil {
+		return nil
+	}
 	return out
 }
 
-// ClearMemory 清空全部会话记忆（remember/recall 数据，重启本就会丢）。
+// ClearMemory 清空全部会话记忆（remember/recall 数据，SQLite 持久化）。
 func (p *Proxy) ClearMemory() {
-	registry.mu.Lock()
-	defer registry.mu.Unlock()
-	registry.mem = map[string]string{}
+	if p.mem == nil {
+		return
+	}
+	_ = p.mem.Clear()
+}
+
+// CloseMemory 关闭记忆库。
+func (p *Proxy) CloseMemory() {
+	_ = p.mem.Close()
 }
 
 // reqTimeout 构造带超时的 context。

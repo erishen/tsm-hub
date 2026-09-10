@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"testing"
 )
 
@@ -93,8 +94,14 @@ func TestParseAgentResponse(t *testing.T) {
 }
 
 func TestExecToolBasic(t *testing.T) {
-	// 纯函数工具不需要 Proxy
+	// 纯函数工具不需要 Proxy；remember/recall 需要 SQLite 记忆库。
 	p := &Proxy{}
+	mem, err := openMemory(filepath.Join(t.TempDir(), "memory.db"))
+	if err != nil {
+		t.Fatalf("open memory: %v", err)
+	}
+	defer mem.Close()
+	p.mem = mem
 	if got := p.execTool("k1", "get_time", toolArgs{}); got == "" {
 		t.Fatal("get_time empty")
 	}

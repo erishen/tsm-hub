@@ -155,7 +155,7 @@ import { McpServer, ToolInfo } from './models';
     </div>
 
     <div class="card">
-      <h2>会话记忆 <span class="muted" style="font-weight:400;font-size:12px">（内置 remember/recall，按 key 隔离；进程内存，重启清空）</span></h2>
+      <h2>会话记忆 <span class="muted" style="font-weight:400;font-size:12px">（内置 remember/recall，按 key 隔离；SQLite 持久化，重启保留）</span></h2>
       <table class="tbl" *ngIf="memory().length; else noneMem">
         <thead>
           <tr>
