@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"runtime/debug"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -301,6 +302,27 @@ func (s *Server) skillsDir() string {
 	return s.skills.Dir()
 }
 
+// mcpsPublicView 返回 MCP server 的只读视图（不含 command/env/url 等敏感配置）。
+func (s *Server) mcpsPublicView() []map[string]any {
+	cfg := s.store.Settings().Mcps
+	names := make([]string, 0, len(cfg))
+	for n := range cfg {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	out := make([]map[string]any, 0, len(names))
+	for _, name := range names {
+		st := s.proxy.MCPStatuses()[name]
+		out = append(out, map[string]any{
+			"name":      name,
+			"transport": cfg[name].Transport,
+			"connected": st.Connected,
+			"tools":     st.Tools,
+		})
+	}
+	return out
+}
+
 func (s *Server) skillsList() []skills.Summary {
 	if s.skills == nil {
 		return nil
@@ -321,6 +343,22 @@ func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 	if strings.HasPrefix(r.URL.Path, "/v1/skills") && r.Method == http.MethodGet {
 		s.requireKey(w, r, func(w http.ResponseWriter, r *http.Request, key store.APIKey) {
 			s.handleClientSkills(w, r, key)
+		})
+		return
+	}
+	// 客户端工具池：任意自制 key 可 GET 网关工具目录（内置 + 条件 + MCP）。
+	// 使用方拿到 tools 后可直接声明给客户端模型，或用来了解网关能执行什么。
+	if r.URL.Path == "/v1/tools" && r.Method == http.MethodGet {
+		s.requireKey(w, r, func(w http.ResponseWriter, r *http.Request, key store.APIKey) {
+			writeJSON(w, http.StatusOK, map[string]any{"object": "list", "tools": s.proxy.ToolCatalog()})
+		})
+		return
+	}
+	// 客户端 MCP 清单：任意自制 key 可 GET 网关挂载的 MCP server（名称/状态/工具）。
+	// 只读视图，不暴露 command/env/url 等敏感配置字段。
+	if r.URL.Path == "/v1/mcps" && r.Method == http.MethodGet {
+		s.requireKey(w, r, func(w http.ResponseWriter, r *http.Request, key store.APIKey) {
+			writeJSON(w, http.StatusOK, map[string]any{"object": "list", "mcps": s.mcpsPublicView()})
 		})
 		return
 	}

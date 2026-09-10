@@ -70,6 +70,23 @@ import { ApiKey, Quota, SkillSummary } from './models';
           </div>
         </div>
       </div>
+
+      <div class="step">
+        <div class="step-num">4</div>
+        <div style="flex:1">
+          <label>可编程接口（用同一个 Key 查询网关能力）</label>
+          <div class="muted small" style="margin-top:2px;margin-bottom:8px">
+            带 <span class="mono">Authorization: Bearer &lt;你的Key&gt;</span> 即可读取；用于让调用方程序动态发现网关挂了什么。
+          </div>
+          <div class="api-grid">
+            <div class="api-item" *ngFor="let a of apiEndpoints">
+              <span class="mono method">{{ a.method }}</span>
+              <span class="mono path">{{ a.path }}</span>
+              <span class="muted small">{{ a.desc }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- 一次性明文展示 -->
@@ -194,6 +211,13 @@ import { ApiKey, Quota, SkillSummary } from './models';
       <ng-template #none><div class="empty">还没有 Key</div></ng-template>
     </div>
   `,
+  styles: [`
+    .api-grid { display:flex; flex-direction:column; gap:6px; max-width:720px; }
+    .api-item { display:flex; align-items:baseline; gap:10px; padding:6px 10px; background:#fbfaf7;
+                border:1px solid var(--border,#e4e3dd); border-radius:8px; }
+    .api-item .method { font-weight:600; color:#8BC8EA; min-width:38px; font-size:12px; }
+    .api-item .path { font-weight:600; min-width:110px; }
+  `],
 })
 export class KeysComponent implements OnInit {
   readonly keys = signal<ApiKey[]>([]);
@@ -204,6 +228,14 @@ export class KeysComponent implements OnInit {
   /** 复制的目标标记：'' = 无；'key' | 'curl' | 'py' | 'curlKey' */
   readonly copied = signal('');
   justCreated: { id: string; key: string; prefix: string } | null = null;
+
+  /** 可编程接口：用同一个 Key 读取网关能力（发现 tools / mcps / skills / models）。 */
+  readonly apiEndpoints = [
+    { method: 'GET', path: '/v1/models', desc: '可用模型与路由别名' },
+    { method: 'GET', path: '/v1/tools', desc: '网关工具池（内置 + MCP，OpenAI function schema）' },
+    { method: 'GET', path: '/v1/mcps', desc: '挂载的 MCP server（名称 / 状态 / 工具）' },
+    { method: 'GET', path: '/v1/skills', desc: '技能库清单；/v1/skills/&lt;name&gt; 取单个技能全文' },
+  ];
 
   readonly compact = compact;
   readonly usd = usd;

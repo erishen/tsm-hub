@@ -260,10 +260,29 @@ javascript / shell / java / go / rust / c / cpp）。沙箱安全边界：禁网
 
 ---
 
+## 对外可编程接口
+
+给**调用方程序**的只读能力发现接口：用任意自制 Key（`Authorization: Bearer sk-tr-…`）即可读取，
+让客户端动态发现网关挂了什么模型、工具、MCP、技能，无需本地扫描：
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/v1/models` | 可用模型与路由别名（OpenAI 兼容）|
+| GET | `/v1/tools` | 网关工具池目录：内置 + 条件 + MCP（OpenAI function schema）|
+| GET | `/v1/mcps` | 挂载的 MCP server：名称 / 传输 / 连接状态 / 工具（只读，不含 env/command 等敏感配置）|
+| GET | `/v1/skills` | 技能库清单；`/v1/skills/<name>` 取单个技能全文 |
+
+```bash
+curl http://localhost:9070/v1/tools -H "Authorization: Bearer <你的Key>"
+curl http://localhost:9070/v1/mcps  -H "Authorization: Bearer <你的Key>"
+curl http://localhost:9070/v1/skills -H "Authorization: Bearer <你的Key>"
+```
+
+---
+
 ## 管理 API
 
 全部需要 `X-Admin-Token: <admin_token>`（或先 `POST /api/admin/login` 换 `X-Session-Token`）。
-
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | POST | `/api/admin/login` | 用 admin token 换会话 token（同 IP 错 5 次锁 10 分钟）|
