@@ -52,17 +52,15 @@ import { McpServer, ToolInfo } from './models';
         </thead>
         <tbody>
           <tr *ngFor="let m of mcps()">
-            <td><span class="mono">{{ m.name }}</span></td>
-            <td><span class="mono small">{{ m.transport === 'http' ? (m.url || '—') : (m.command || '—') }}</span></td>
-            <td><span class="mono small">{{ m.transport === 'http' ? 'HTTP' : ((m.args || []).join(' ') || '—') }}</span></td>
-            <td>
-              <span class="badge" [class.ok]="m.connected" [class.err]="!m.connected">
+            <td class="col-name"><span class="mono">{{ m.name }}</span></td>
+            <td class="col-cmd"><span class="mono small ellipsis" [title]="m.transport === 'http' ? (m.url || '') : (m.command || '')">{{ m.transport === 'http' ? (m.url || '—') : (m.command || '—') }}</span></td>
+            <td class="col-args"><span class="mono small ellipsis" [title]="m.transport === 'http' ? 'HTTP' : ((m.args || []).join(' ') || '')">{{ m.transport === 'http' ? 'HTTP' : ((m.args || []).join(' ') || '—') }}</span></td>
+            <td class="col-status">
+              <span class="badge nowrap" [class.ok]="m.connected" [class.err]="!m.connected">
                 {{ m.connected ? '已连接' : '未连接' }}
               </span>
             </td>
-            <td>
-              <span class="mono small">{{ m.tools.length ? m.tools.join(', ') : '—' }}</span>
-            </td>
+            <td class="col-tools"><span class="mono small ellipsis" [title]="(m.tools || []).join(', ')">{{ m.tools.length ? m.tools.join(', ') : '—' }}</span></td>
             <td>
               <div style="display:flex;gap:6px">
                 <button class="small" (click)="openEdit(m)">编辑</button>
@@ -89,7 +87,7 @@ import { McpServer, ToolInfo } from './models';
       <div class="tool-grid" *ngIf="tools().length; else noTools">
         <div class="tool-card" *ngFor="let t of tools()">
           <div class="tool-name">
-            <span class="mono">{{ t.name }}</span>
+            <span class="mono tname" [title]="t.name">{{ t.name }}</span>
             <span class="badge" [class.ok]="t.source.startsWith('mcp:')">{{ srcLabel(t.source) }}</span>
             <button class="small" style="margin-left:auto" (click)="openTest(t)" *ngIf="!t.source.startsWith('mcp:') || t.parameters">测试</button>
           </div>
@@ -212,6 +210,18 @@ import { McpServer, ToolInfo } from './models';
     .tool-desc { margin-top:4px; font-size:12px; line-height:1.45; }
     .req { color:#d33; }
     .test-result { margin-top:12px; }
+    table.tbl { table-layout: fixed; }
+    table.tbl th:nth-child(1), table.tbl td:nth-child(1) { width: 11%; }
+    table.tbl th:nth-child(2), table.tbl td:nth-child(2) { width: 24%; }
+    table.tbl th:nth-child(3), table.tbl td:nth-child(3) { width: 21%; }
+    table.tbl th:nth-child(4), table.tbl td:nth-child(4) { width: 9%; }
+    table.tbl th:nth-child(5), table.tbl td:nth-child(5) { width: 23%; }
+    .nowrap { white-space: nowrap; }
+    .ellipsis { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .tool-grid { grid-template-columns: repeat(auto-fill,minmax(240px,1fr)); }
+    .tool-card { min-width: 0; overflow: hidden; }
+    .tool-name .tname { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .tool-desc { word-break: break-word; }
     .test-result pre { background:#f6f5f1; border:1px solid var(--border,#e4e3dd); border-radius:8px; padding:10px; font-size:12px; white-space:pre-wrap; word-break:break-all; max-height:220px; overflow:auto; margin:0; }
     .tpl-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:10px; }
     .tpl-card { border:1px solid var(--border,#e4e3dd); border-radius:10px; padding:10px 12px; background:#fbfaf7; }
