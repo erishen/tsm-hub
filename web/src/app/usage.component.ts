@@ -147,7 +147,7 @@ import { Agg, DailyPoint, UsageRecord, UsageResponse } from './models';
               <span *ngIf="r.attempt && r.attempt > 1">
                 <span class="badge warn" [title]="failTitle(r)" style="cursor:help">↻{{ r.attempt }}</span>
                 <span class="muted" style="font-size:12px" *ngIf="r.failover?.length"
-                      [title]="failTitle(r)">{{ r.failover!.map(f => f.provider_id).join(' → ') }}</span>
+                      [title]="failTitle(r)">{{ failChain(r) }}</span>
               </span>
             </td>
           </tr>
@@ -169,6 +169,11 @@ export class UsageComponent implements OnInit {
     if (!r.failover?.length) return '发生过 failover，实际第 ' + r.attempt + ' 个候选命中';
     return r.failover.map((f, i) =>
       (i + 1) + '. ' + f.provider_id + (f.model ? ' (' + f.model + ')' : '') + (f.error ? ' — ' + f.error : '')).join('\n');
+  }
+
+  failChain(r: UsageRecord): string {
+    if (!r.failover?.length) return '';
+    return r.failover.map(f => f.provider_id).join(' → ');
   }
 
   constructor(private api: ApiService) {}
