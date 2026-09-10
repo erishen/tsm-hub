@@ -65,6 +65,8 @@ export interface ApiKey {
   expires_at?: string;
   usage?: Agg;
   rpm_current: number;
+  tools_used?: string[];
+  tools_declared?: string[];
   /** 技能注入：""=不注入；list=技能清单；all=全部技能；其他=单个技能名。 */
   inject_skills?: string;
 }

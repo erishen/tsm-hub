@@ -184,6 +184,16 @@ export class ApiService {
       .pipe(catchError(this.handleError));
   }
 
+  adoptExternalTool(name: string, body: { description?: string; impl_type: string; impl_source?: string }): Observable<unknown> {
+    return this.http.post(`/api/admin/external-tools/${encodeURIComponent(name)}/adopt`, body, { headers: this.headers() })
+      .pipe(catchError(this.handleError));
+  }
+
+  deleteExternalTool(name: string): Observable<unknown> {
+    return this.http.delete(`/api/admin/external-tools/${encodeURIComponent(name)}`, { headers: this.headers() })
+      .pipe(catchError(this.handleError));
+  }
+
   deleteFastpath(name: string): Observable<unknown> {
     return this.http.delete(`/api/admin/fastpath/${encodeURIComponent(name)}`, { headers: this.headers() })
       .pipe(catchError(this.handleError));

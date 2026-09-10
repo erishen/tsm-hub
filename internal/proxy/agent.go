@@ -209,7 +209,14 @@ func (p *Proxy) agentRun(w http.ResponseWriter, r *http.Request, key store.APIKe
 				args = toolArgs{}
 			}
 			id, _ := tc["id"].(string)
-			res.execTools = append(res.execTools, name)
+			// 技能调用记录具体技能名（skill:<name>），便于按技能聚合归因。
+			execName := name
+			if name == "skill-run" {
+				if sk := args.str("skill"); sk != "" {
+					execName = "skill:" + sk
+				}
+			}
+			res.execTools = append(res.execTools, execName)
 			out := p.execTool(key.ID, name, args)
 			msgs = append(msgs, chatMessage{
 				"role":         "tool",

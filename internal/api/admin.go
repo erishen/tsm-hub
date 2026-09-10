@@ -57,6 +57,9 @@ func (s *Server) adminMux() http.Handler {
 	m.HandleFunc("POST /api/admin/fastpath/{name}/promote", s.admin(s.handlePromoteFastpath))
 	m.HandleFunc("DELETE /api/admin/fastpath/{name}", s.admin(s.handleDeleteFastpath))
 	m.HandleFunc("POST /api/admin/fastpath/generate", s.admin(s.handleFastpathGenerate))
+	m.HandleFunc("GET /api/admin/external-tools", s.admin(s.handleListExternalTools))
+	m.HandleFunc("POST /api/admin/external-tools/{name}/adopt", s.admin(s.handleAdoptExternalTool))
+	m.HandleFunc("DELETE /api/admin/external-tools/{name}", s.admin(s.handleDeleteExternalTool))
 	return m
 }
 
@@ -1094,6 +1097,24 @@ func (s *Server) handleDeleteRoute(w http.ResponseWriter, r *http.Request) {
 
 // ---------- keys ----------
 
+// topTools 把工具计数 map 转成按次数降序的名字列表（前 n 个）。
+func topTools(m map[string]int, n int) []string {
+	type kv struct{ k string; v int }
+	all := make([]kv, 0, len(m))
+	for k, v := range m {
+		all = append(all, kv{k, v})
+	}
+	sort.Slice(all, func(i, j int) bool { return all[i].v > all[j].v })
+	out := make([]string, 0, min(n, len(all)))
+	for i, it := range all {
+		if i >= n {
+			break
+		}
+		out = append(out, it.k)
+	}
+	return out
+}
+
 func (s *Server) handleListKeys(w http.ResponseWriter, r *http.Request) {
 	rpm := s.limiter.Snapshot()
 	per := s.rec.PerKey()
@@ -1108,6 +1129,9 @@ func (s *Server) handleListKeys(w http.ResponseWriter, r *http.Request) {
 			"inject_skills": k.InjectSkills,
 			"usage":         agg,
 			"rpm_current":   rpm[k.ID],
+			// 工具归因：该调用方实际执行过 + 声明过的工具（按次数降序）。
+			"tools_used":     topTools(s.rec.KeyTools(k.ID), 5),
+			"tools_declared": topTools(s.rec.KeyClientTools(k.ID), 5),
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"keys": out})
@@ -1309,6 +1333,62 @@ func (s *Server) handleObservability(w http.ResponseWriter, r *http.Request) {
 			"name": t.Name, "calls": t.Calls, "key_count": t.KeyCount,
 		})
 	}
+	// 技能维度：skill:<name> 前缀的执行统计。
+	skillStats := make([]map[string]any, 0)
+	for _, t := range s.rec.ToolStats() {
+		if !strings.HasPrefix(t.Name, "skill:") {
+			continue
+		}
+		skillStats = append(skillStats, map[string]any{
+			"skill": strings.TrimPrefix(t.Name, "skill:"), "calls": t.Calls, "key_count": t.KeyCount,
+		})
+	}
+	// MCP 维度：mcp_<server>_<tool> 按 server 聚合。
+	mcpCalls := map[string]int{}
+	mcpKeys := map[string]int{}
+	for _, t := range s.rec.ToolStats() {
+		if !strings.HasPrefix(t.Name, "mcp_") {
+			continue
+		}
+		server := strings.TrimPrefix(t.Name, "mcp_")
+		if i := strings.Index(server, "_"); i > 0 {
+			server = server[:i]
+		}
+		if server == "" {
+			server = "unknown"
+		}
+		mcpCalls[server] += t.Calls
+		if mcpKeys[server] < t.KeyCount {
+			mcpKeys[server] = t.KeyCount
+		}
+	}
+	mcpStats := make([]map[string]any, 0, len(mcpCalls))
+	for sv, calls := range mcpCalls {
+		mcpStats = append(mcpStats, map[string]any{"server": sv, "calls": calls, "key_count": mcpKeys[sv]})
+	}
+	sort.Slice(mcpStats, func(i, j int) bool { return mcpStats[i]["calls"].(int) > mcpStats[j]["calls"].(int) })
+	// 外部自创工具发现：客户端声明但不在网关目录里的工具（含录用状态）。
+	known := map[string]bool{}
+	for _, t := range s.proxy.ToolCatalog() {
+		known[t.Name] = true
+	}
+	adopted := map[string]bool{}
+	for _, t := range s.store.ListExternalTools() {
+		adopted[t.Name] = true
+	}
+	extStats := make([]map[string]any, 0)
+	for _, t := range s.rec.ClientToolStats() {
+		if known[t.Name] {
+			continue // 系统内已有能力，不算外部自创
+		}
+		extStats = append(extStats, map[string]any{
+			"name": t.Name, "calls": t.Calls, "key_count": t.KeyCount,
+			"adopted": adopted[t.Name],
+		})
+	}
+	if len(extStats) > 20 {
+		extStats = extStats[:20]
+	}
 	provs := make([]map[string]any, 0)
 	for id, a := range s.rec.Providers() {
 		if !validProviderID(id) {
@@ -1343,7 +1423,10 @@ func (s *Server) handleObservability(w http.ResponseWriter, r *http.Request) {
 		"providers": provs,
 		"scenes":    scenes,
 		"trend":     s.rec.Daily(days),
-		"tools":     toolStats,
+		"tools":        toolStats,
+		"skills":       skillStats,
+		"mcps":         mcpStats,
+		"external_tools": extStats,
 	})
 }
 
@@ -1536,6 +1619,93 @@ func (s *Server) handleFastpathGenerate(w http.ResponseWriter, r *http.Request) 
 // handleListTools 返回网关工具池目录（内置 + 条件 + MCP）。
 func (s *Server) handleListTools(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"tools": s.proxy.ToolCatalog()})
+}
+
+// handleListExternalTools 列出外部自创工具：声明统计 + 录用状态 + 已录用实现。
+func (s *Server) handleListExternalTools(w http.ResponseWriter, r *http.Request) {
+	known := map[string]bool{}
+	for _, t := range s.proxy.ToolCatalog() {
+		known[t.Name] = true
+	}
+	adopted := map[string]bool{}
+	impls := map[string]store.ExternalTool{}
+	for _, t := range s.store.ListExternalTools() {
+		adopted[t.Name] = true
+		impls[t.Name] = t
+	}
+	out := make([]map[string]any, 0)
+	for _, t := range s.rec.ClientToolStats() {
+		if known[t.Name] {
+			continue
+		}
+		item := map[string]any{
+			"name": t.Name, "calls": t.Calls, "key_count": t.KeyCount,
+			"adopted": adopted[t.Name],
+		}
+		if t2, ok := impls[t.Name]; ok {
+			item["impl_type"] = t2.ImplType
+			item["description"] = t2.Description
+		}
+		out = append(out, item)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"external_tools": out})
+}
+
+// handleAdoptExternalTool 录用（或更新）一个外部自创工具。
+// body: {description, impl_type(none/js/alias), impl_source}
+func (s *Server) handleAdoptExternalTool(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if name == "" || strings.ContainsAny(name, "/\\ ") {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid tool name")
+		return
+	}
+	var c struct {
+		Description string `json:"description"`
+		ImplType    string `json:"impl_type"`
+		ImplSource  string `json:"impl_source"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&c); err != nil && err.Error() != "EOF" {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid json: "+err.Error())
+		return
+	}
+	if c.ImplType == "" {
+		c.ImplType = "none"
+	}
+	if c.ImplType != "none" && c.ImplType != "js" && c.ImplType != "alias" {
+		writeError(w, http.StatusBadRequest, "bad_request", "impl_type must be none/js/alias")
+		return
+	}
+	if (c.ImplType == "js" || c.ImplType == "alias") && strings.TrimSpace(c.ImplSource) == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", "impl_source required for js/alias")
+		return
+	}
+	if c.ImplType == "js" {
+		if !s.proxy.ValidateJSDetector(c.ImplSource) {
+			writeError(w, http.StatusBadRequest, "bad_request", "js implementation must define detect(text)")
+			return
+		}
+	}
+	if err := s.store.AdoptExternalTool(store.ExternalTool{
+		Name:        name,
+		Description: c.Description,
+		ImplType:    c.ImplType,
+		ImplSource:  c.ImplSource,
+		AdoptedAt:   time.Now().Format("2006-01-02 15:04:05"),
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// handleDeleteExternalTool 取消录用一个外部工具。
+func (s *Server) handleDeleteExternalTool(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if err := s.store.DeleteExternalTool(name); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 // handleInvokeTool 一键测试工具：执行内置或 MCP 工具并返回结果文本。

@@ -149,7 +149,30 @@ func (p *Proxy) ToolCatalog() []ToolInfo {
 			},
 		})
 	}
+	// 从外部调用方录用的工具（external）。
+	for _, t := range p.store.ListExternalTools() {
+		params := map[string]any{"type": "object", "properties": map[string]any{}, "required": []string{}}
+		if t.ImplType == "js" || t.ImplType == "none" {
+			params["properties"].(map[string]any)["query"] = map[string]any{
+				"type": "string", "description": "要检测/回答的问题文本",
+			}
+			params["required"] = []string{"query"}
+		}
+		out = append(out, ToolInfo{
+			Name:        t.Name,
+			Description: orDesc(t.Description, "外部调用方声明并录用的工具"),
+			Source:      "external:" + t.ImplType,
+			Parameters:  params,
+		})
+	}
 	return out
+}
+
+func orDesc(d, fallback string) string {
+	if d == "" {
+		return fallback
+	}
+	return d
 }
 
 // InvokeTool 手动调用一个工具（管理台一键测试用，keyID 用 admin 命名空间）。
@@ -248,6 +271,26 @@ func (p *Proxy) execTool(keyID, name string, args toolArgs) string {
 		}
 		return fmt.Sprintf("error: fastpath tool %q not promoted", name)
 	}
+	if p.store != nil {
+		if t, ok := p.store.ExternalTool(name); ok {
+			// 录用的外部工具：按实现方式执行。
+			switch t.ImplType {
+		case "js":
+			q := args.str("query")
+			if q == "" {
+				return "error: missing 'query'"
+			}
+			if ans, hit := runJSDetector(t.ImplSource, q); hit {
+				return ans
+			}
+			return fmt.Sprintf("no match: external tool %s 未命中问题", name)
+		case "alias":
+			return p.execTool(keyID, t.ImplSource, args)
+			default:
+				return fmt.Sprintf("error: external tool %q 无网关实现（由调用方侧执行）", name)
+			}
+		}
+	}
 	return fmt.Sprintf("error: unknown tool %q", name)
 }
 
@@ -271,6 +314,9 @@ func (p *Proxy) toolSchemas() []map[string]any {
 			desc = "FastPath 检测器：" + pl.Trigger
 		}
 		out = append(out, toolSchema(pl.Name, desc))
+	}
+	for _, t := range p.store.ListExternalTools() {
+		out = append(out, toolSchema(t.Name, orDesc(t.Description, "外部调用方声明并录用的工具")))
 	}
 	return out
 }

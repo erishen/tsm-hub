@@ -94,8 +94,12 @@ type Recorder struct {
 	failoverBy map[string]int
 	// toolCalls 统计每个工具（内置/mcp_*/skill 名）被执行的总次数。
 	toolCalls map[string]int
-	// keyTools 统计每个 key 用过哪些工具（keyID -> 工具 -> 次数）。
+	// keyTools 统计每个 key 实际执行过哪些工具（keyID -> 工具 -> 次数）。
 	keyTools map[string]map[string]int
+	// clientToolCalls 统计调用方在请求里声明的工具（含系统外的自创工具）。
+	clientToolCalls map[string]int
+	// keyClientTools 统计每个 key 声明过哪些工具（keyID -> 工具 -> 次数）。
+	keyClientTools map[string]map[string]int
 }
 
 // NewRecorder 打开用量目录并回放历史（默认最近 90 天）。
@@ -111,8 +115,10 @@ func NewRecorder(dir string) (*Recorder, error) {
 		providers:  map[string]*Agg{},
 		scenes:     map[string]*Agg{},
 		failoverBy: map[string]int{},
-		toolCalls:  map[string]int{},
-		keyTools:   map[string]map[string]int{},
+		toolCalls:      map[string]int{},
+		keyTools:       map[string]map[string]int{},
+		clientToolCalls: map[string]int{},
+		keyClientTools:  map[string]map[string]int{},
 	}
 	if err := r.replay(90); err != nil {
 		return nil, err
@@ -220,7 +226,7 @@ func (r *Recorder) accumulate(rec store.UsageRecord) {
 	for _, f := range rec.Failover {
 		r.failoverBy[f.ProviderID]++
 	}
-	// 工具执行归因：客户端声明 + 网关实际执行。
+	// 工具执行归因：网关实际执行。
 	for _, t := range rec.ExecTools {
 		r.toolCalls[t]++
 		if km := r.keyTools[rec.KeyID]; km != nil {
@@ -229,6 +235,49 @@ func (r *Recorder) accumulate(rec store.UsageRecord) {
 			r.keyTools[rec.KeyID] = map[string]int{t: 1}
 		}
 	}
+	// 客户端声明归因（可能含系统外的自创工具）。
+	for _, t := range rec.ClientTools {
+		r.clientToolCalls[t]++
+		if km := r.keyClientTools[rec.KeyID]; km != nil {
+			km[t]++
+		} else {
+			r.keyClientTools[rec.KeyID] = map[string]int{t: 1}
+		}
+	}
+}
+
+// ClientToolStats 返回调用方声明的工具统计（按次数降序；含系统外自创工具）。
+func (r *Recorder) ClientToolStats() []ToolStat {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]ToolStat, 0, len(r.clientToolCalls))
+	for name, calls := range r.clientToolCalls {
+		kc := 0
+		for _, km := range r.keyClientTools {
+			if km[name] > 0 {
+				kc++
+			}
+		}
+		out = append(out, ToolStat{Name: name, Calls: calls, KeyCount: kc})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Calls != out[j].Calls {
+			return out[i].Calls > out[j].Calls
+		}
+		return out[i].Name < out[j].Name
+	})
+	return out
+}
+
+// KeyClientTools 返回某 key 声明过的工具（工具 -> 次数）。
+func (r *Recorder) KeyClientTools(keyID string) map[string]int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := map[string]int{}
+	for k, v := range r.keyClientTools[keyID] {
+		out[k] = v
+	}
+	return out
 }
 
 // ToolStat 是工具使用统计条目。

@@ -370,6 +370,29 @@ func (p *Proxy) DeleteFastPlugin(name string) error {
 	return nil
 }
 
+// ValidateJSDetector 校验一段 JS 是否是可执行的 detect(text) 检测器（外部工具录用时用）。
+func (p *Proxy) ValidateJSDetector(source string) bool {
+	return validateDetectorSource(source)
+}
+
+// validateDetectorSource 只验证 JS 能执行且定义了 detect 函数（不要求命中文本）。
+func validateDetectorSource(source string) bool {
+	vm := goja.New()
+	vm.SetFieldNameMapper(goja.UncapFieldNameMapper())
+	_ = vm.Set("require", goja.Undefined())
+	_ = vm.Set("process", goja.Undefined())
+	_ = vm.Set("console", goja.Undefined())
+	_ = vm.Set("eval", goja.Undefined())
+	_ = vm.Set("Function", goja.Undefined())
+	timer := time.AfterFunc(3*time.Second, func() { vm.Interrupt("detector timeout") })
+	defer timer.Stop()
+	if _, err := vm.RunString(source); err != nil {
+		return false
+	}
+	_, ok := goja.AssertFunction(vm.Get("detect"))
+	return ok
+}
+
 // FastToolPlugins 返回晋升模式为 tool/both 的插件（注册进工具池、可被 LLM 调用）。
 func (p *Proxy) FastToolPlugins() []*fastPlugin {
 	out := make([]*fastPlugin, 0)
