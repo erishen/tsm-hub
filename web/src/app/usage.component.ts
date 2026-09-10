@@ -1,4 +1,4 @@
-import { Component, OnInit, signal } from '@angular/core';
+import { Component, OnInit, OnDestroy, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ApiService, compact, usd } from './api.service';
@@ -23,7 +23,17 @@ import { Agg, DailyPoint, UsageRecord, UsageResponse } from './models';
             <option [ngValue]="30">30 天</option>
           </select>
         </div>
+        <div style="flex:0 0 110px">
+          <label>自动刷新</label>
+          <select [(ngModel)]="autoRefreshSec" (ngModelChange)="setupAutoRefresh()">
+            <option [ngValue]="0">关闭</option>
+            <option [ngValue]="5">5 秒</option>
+            <option [ngValue]="10">10 秒</option>
+            <option [ngValue]="30">30 秒</option>
+          </select>
+        </div>
         <button (click)="load()">刷新</button>
+        <button (click)="exportCsv()" [disabled]="!data()?.recent?.length">导出 CSV</button>
         <button class="danger" (click)="clear()" [disabled]="clearing()">{{ clearing() ? '清空中…' : '清空' }}</button>
       </div>
     </div>
@@ -161,12 +171,14 @@ import { Agg, DailyPoint, UsageRecord, UsageResponse } from './models';
     </div>
   `,
 })
-export class UsageComponent implements OnInit {
+export class UsageComponent implements OnInit, OnDestroy {
   readonly data = signal<UsageResponse | null>(null);
   readonly error = signal('');
   readonly loading = signal(true);
   readonly clearing = signal(false);
   days = 7;
+  autoRefreshSec = 0;
+  private autoTimer: ReturnType<typeof setInterval> | null = null;
 
   readonly compact = compact;
   readonly usd = usd;
@@ -217,6 +229,42 @@ export class UsageComponent implements OnInit {
         this.error.set('清空失败: ' + e.message);
       },
     });
+  }
+
+  /** 自动刷新：设置定时器定期调用 load()，关闭时清理。 */
+  setupAutoRefresh(): void {
+    if (this.autoTimer) { clearInterval(this.autoTimer); this.autoTimer = null; }
+    if (this.autoRefreshSec > 0) {
+      this.autoTimer = setInterval(() => this.load(), this.autoRefreshSec * 1000);
+    }
+  }
+
+  /** 导出最近请求为 CSV 文件（时间/模型/状态/Provider/延迟/错误）。 */
+  exportCsv(): void {
+    const rows = this.data()?.recent || [];
+    if (!rows.length) return;
+    const header = ['时间', '模型', '状态', 'Provider', '上游模型', 'Prompt Tokens', 'Completion Tokens', '延迟(ms)', '流式', '错误'];
+    const lines = [header.join(',')];
+    for (const r of rows) {
+      const esc = (v: unknown) => '"' + String(v ?? '').replace(/"/g, '""') + '"';
+      lines.push([
+        esc(r.ts), esc(r.model), esc(r.status), esc(r.provider_id),
+        esc(r.upstream_model || ''), esc(r.prompt_tokens || 0),
+        esc(r.completion_tokens || 0), esc(r.latency_ms || 0),
+        esc(r.stream ? '是' : '否'), esc(r.error || ''),
+      ].join(','));
+    }
+    const blob = new Blob(['\uFEFF' + lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `usage_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  ngOnDestroy(): void {
+    if (this.autoTimer) clearInterval(this.autoTimer);
   }
 
   /** 按天表格只展示有请求/用量/成本的日期，清空后不残留 0 行。 */
