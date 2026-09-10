@@ -1849,6 +1849,26 @@ func (s *Server) handleDeleteExternalTool(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
+// 常见 MCP server 的 npx 启动命令（与前端常用模板一致）：外部候选接入时自动预填。
+// 调用方声明只包含工具名（server__tool），不含连接配置，命中此表即可一键预填。
+var knownMcpCommands = map[string]string{
+	"fs":         "npx -y @modelcontextprotocol/server-filesystem",
+	"memory":     "npx -y @modelcontextprotocol/server-memory",
+	"serena":     "npx -y serena-mcp",
+	"think":      "npx -y @modelcontextprotocol/server-think",
+	"fetch":      "npx -y mcp-server-fetch",
+	"github":     "npx -y @modelcontextprotocol/server-github",
+	"git":        "npx -y @modelcontextprotocol/server-git",
+	"sqlite":     "npx -y @modelcontextprotocol/server-sqlite",
+	"time":       "npx -y @modelcontextprotocol/server-time",
+	"context7":   "npx -y @upstash/context7-mcp",
+	"puppeteer":  "npx -y @modelcontextprotocol/server-puppeteer",
+	"playwright": "npx -y @executeautomation/playwright-mcp-server",
+	"google-maps": "npx -y @modelcontextprotocol/server-google-maps",
+	"brave-search": "npx -y @modelcontextprotocol/server-brave-search",
+	"firecrawl":  "npx -y firecrawl-mcp",
+}
+
 // handleListExternalMcpCandidates 返回外部 MCP server 候选：
 // 调用方声明的 server__tool 风格工具（未命中网关能力、未在网关 MCP 配置）按 server 聚合，
 // 供管理员择优接入网关（一键写入 Settings.Mcps 并常驻连接）。
@@ -1896,7 +1916,8 @@ func (s *Server) handleListExternalMcpCandidates(w http.ResponseWriter, r *http.
 		})
 		out = append(out, map[string]any{
 			"server": sv, "calls": serverCalls[sv], "key_count": serverKeys[sv],
-			"tools": toolList,
+			"tools":             toolList,
+			"suggested_command": knownMcpCommands[sv],
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {

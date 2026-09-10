@@ -129,6 +129,10 @@ import { McpServer } from './models';
               <span *ngIf="!c.tools.length">—</span>
             </td>
             <td>
+              <span class="mono small ellipsis" *ngIf="c.suggested_command" [title]="c.suggested_command">{{ c.suggested_command }}</span>
+              <span class="badge" *ngIf="!c.suggested_command" title="调用方声明只含工具名，无连接配置，需手动填写">需手动填连接</span>
+            </td>
+            <td>
               <button class="small primary" (click)="openAdoptMcp(c)">接入</button>
             </td>
           </tr>
@@ -144,7 +148,7 @@ import { McpServer } from './models';
           <div class="modal-icon">{{ editing()!.mode === 'edit' ? '✎' : editing()!.mode === 'adopt' ? '⇪' : '+' }}</div>
           <div class="modal-titles">
             <h2>{{ editing()!.mode === 'edit' ? '编辑 MCP Server' : editing()!.mode === 'adopt' ? '接入外部 MCP' : '添加 MCP Server' }}</h2>
-            <div class="sub">{{ editing()!.mode === 'edit' ? '修改后立即重建连接，配置持久化到 settings.mcps' : editing()!.mode === 'adopt' ? '外部调用方声明的 server，提供连接信息后接入网关常驻' : '连接 stdio 本地进程或 Streamable HTTP 远程的 MCP server' }}</div>
+            <div class="sub">{{ editing()!.mode === 'edit' ? '修改后立即重建连接，配置持久化到 settings.mcps' : editing()!.mode === 'adopt' ? '调用方声明只含工具名，连接命令无法自动捕获；命中常见 MCP 包已自动预填，未命中请手动补充后接入' : '连接 stdio 本地进程或 Streamable HTTP 远程的 MCP server' }}</div>
           </div>
           <button class="icon" (click)="closeEdit()" aria-label="关闭">×</button>
         </div>
@@ -251,7 +255,7 @@ import { McpServer } from './models';
 })
 export class McpsComponent implements OnInit {
   mcps = signal<McpServer[]>([]);
-  candidates = signal<{ server: string; calls: number; key_count: number; tools: { name: string; calls: number }[] }[]>([]);
+  candidates = signal<{ server: string; calls: number; key_count: number; tools: { name: string; calls: number }[]; suggested_command?: string }[]>([]);
   error = signal('');
   saved = signal('');
   loadingMcps = signal(true);
@@ -349,9 +353,9 @@ export class McpsComponent implements OnInit {
     });
   }
 
-  /** 从外部候选一键接入：预填 server 名为候选名，保存走 adopt 路径。 */
-  openAdoptMcp(c: { server: string }): void {
-    this.form = { name: c.server, transport: 'stdio', command: '', argsText: '', envText: '', url: '' };
+  /** 从外部候选一键接入：预填 server 名；命中常见 MCP 包映射时自动预填启动命令，保存走 adopt 路径。 */
+  openAdoptMcp(c: { server: string; suggested_command?: string }): void {
+    this.form = { name: c.server, transport: 'stdio', command: c.suggested_command || '', argsText: '', envText: '', url: '' };
     this.editing.set({ mode: 'adopt' });
   }
 
