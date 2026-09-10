@@ -62,7 +62,8 @@ import { ApiService } from './api.service';
             </div>
           </ng-container>
         </nav>
-        <div style="margin-top:24px">
+        <div style="margin-top:24px;display:flex;flex-direction:column;gap:8px">
+          <button class="small" (click)="toggleTheme()">{{ isDark ? '☀ 浅色模式' : '🌙 深色模式' }}</button>
           <button class="small" (click)="logout()">退出</button>
         </div>
       </aside>
@@ -76,6 +77,28 @@ export class AppComponent {
   token = '';
   error = '';
   loading = false;
+  isDark = false;
+
+  constructor(public api: ApiService) {
+    // 初始化主题：从 localStorage 读取，默认跟随系统
+    const saved = localStorage.getItem('theme');
+    if (saved === 'dark' || (!saved && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+      this.isDark = true;
+      document.documentElement.setAttribute('data-theme', 'dark');
+    }
+  }
+
+  /** 切换深色/浅色主题，保存到 localStorage。 */
+  toggleTheme(): void {
+    this.isDark = !this.isDark;
+    if (this.isDark) {
+      document.documentElement.setAttribute('data-theme', 'dark');
+      localStorage.setItem('theme', 'dark');
+    } else {
+      document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('theme', 'light');
+    }
+  }
 
   navGroups = [
     {
@@ -192,8 +215,6 @@ export class AppComponent {
   toggleGroup(name: string): void {
     this.collapsed[name] = !this.collapsed[name];
   }
-
-  constructor(public api: ApiService) {}
 
   login(): void {
     if (!this.token) return;
