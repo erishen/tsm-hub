@@ -12,10 +12,12 @@ interface FastPlugin { name: string; trigger: string; source: string; promoted: 
   standalone: true,
   imports: [CommonModule, FormsModule],
   template: `
-    <h2>快路径 · Fast Path</h2>
-    <p class="muted">确定性快路径：能用纯代码回答的问题（算术 / 时间 / 日期 / 单位换算 / 统计 / 进制 / 字数）直接返回，
-      零模型调用、零上游消耗。内置匹配器未命中时，可让模型生成 JS 检测器（codegen）并持久化为插件复用；
-      插件可一键「晋升」为正式检测器。</p>
+    <div class="page-head">
+      <div>
+        <h1>快路径</h1>
+        <div class="sub">确定性快路径：能用纯代码回答的问题（算术/时间/日期/单位换算/统计/进制/字数）直接返回，零模型调用、零上游消耗</div>
+      </div>
+    </div>
 
     <div class="card" style="margin-bottom:16px">
       <h3>试一下</h3>

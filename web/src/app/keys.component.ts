@@ -246,7 +246,7 @@ import { ApiKey, Quota, SkillSummary } from './models';
           </tr>
         </tbody>
       </table>
-      <ng-template #none><div class="empty">还没有 Key</div></ng-template>
+      <ng-template #none><div class="empty">还没有 Key，点击右上角「+ 签发」创建对外访问凭证（sk-tr- 开头）</div></ng-template>
     </div>
   `,
   styles: [`

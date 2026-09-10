@@ -1,4 +1,4 @@
-import { Component } from '@angular/core';
+import { Component, HostListener, ViewChild, ElementRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
@@ -32,8 +32,8 @@ import { ApiService } from './api.service';
           <small>自制 Key · 智能路由</small>
         </div>
         <div class="global-search">
-          <input type="text" [(ngModel)]="searchQuery" (ngModelChange)="onSearch()"
-                 placeholder="搜索模型/工具/技能/Provider…" autocomplete="off" />
+          <input #searchInput type="text" [(ngModel)]="searchQuery" (ngModelChange)="onSearch()"
+                 placeholder="搜索（Ctrl+K）…" autocomplete="off" />
           <div class="search-dropdown" *ngIf="searchOpen && searchResults.length">
             <ng-container *ngFor="let group of searchResults">
               <div class="search-group-title">{{ group.label }}（{{ group.items.length }}）</div>
@@ -78,6 +78,35 @@ export class AppComponent {
   error = '';
   loading = false;
   isDark = false;
+
+  @ViewChild('searchInput') searchInput!: ElementRef<HTMLInputElement>;
+
+  /** 全局键盘快捷键：Ctrl/Cmd+K 或 / 聚焦搜索框；Esc 关闭搜索下拉。 */
+  @HostListener('document:keydown', ['$event'])
+  handleKeyboard(ev: KeyboardEvent): void {
+    const target = ev.target as HTMLElement;
+    const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
+
+    // Ctrl/Cmd + K：聚焦搜索框
+    if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'k') {
+      ev.preventDefault();
+      this.searchInput?.nativeElement.focus();
+      this.searchInput?.nativeElement.select();
+      return;
+    }
+
+    // /：聚焦搜索框（仅当不在输入框时）
+    if (ev.key === '/' && !isInput && this.api.loggedIn) {
+      ev.preventDefault();
+      this.searchInput?.nativeElement.focus();
+      return;
+    }
+
+    // Esc：关闭搜索下拉
+    if (ev.key === 'Escape' && this.searchOpen) {
+      this.closeSearch();
+    }
+  }
 
   constructor(public api: ApiService) {
     // 初始化主题：从 localStorage 读取，默认跟随系统
