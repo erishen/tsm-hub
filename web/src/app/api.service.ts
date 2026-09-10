@@ -199,6 +199,21 @@ export class ApiService {
       .pipe(catchError(this.handleError));
   }
 
+  sandboxStatus(): Observable<{ enabled: boolean; docker_ok: boolean; timeout_sec: number; memory_mb: number; cpus: number; max_output_kb: number; languages: string[] }> {
+    return this.http.get<{ enabled: boolean; docker_ok: boolean; timeout_sec: number; memory_mb: number; cpus: number; max_output_kb: number; languages: string[] }>('/api/admin/sandbox/status', { headers: this.headers() })
+      .pipe(catchError(this.handleError));
+  }
+
+  listMemory(): Observable<{ entries: { ns: string; value: string }[] }> {
+    return this.http.get<{ entries: { ns: string; value: string }[] }>('/api/admin/memory', { headers: this.headers() })
+      .pipe(catchError(this.handleError));
+  }
+
+  clearMemory(): Observable<unknown> {
+    return this.http.delete('/api/admin/memory', { headers: this.headers() })
+      .pipe(catchError(this.handleError));
+  }
+
   deleteExternalTool(name: string): Observable<unknown> {
     return this.http.delete(`/api/admin/external-tools/${encodeURIComponent(name)}`, { headers: this.headers() })
       .pipe(catchError(this.handleError));

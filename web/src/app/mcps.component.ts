@@ -138,6 +138,45 @@ import { McpServer, ToolInfo } from './models';
     </div>
 
     <div class="card">
+      <h2>Sandbox <span class="muted" style="font-weight:400;font-size:12px">（execute_code · Docker 一次性容器隔离执行）</span></h2>
+      <div *ngIf="sandbox(); else sandboxLoading" style="display:flex;flex-direction:column;gap:10px">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <span class="badge" [class.ok]="sandbox()!.enabled">{{ sandbox()!.enabled ? '已启用' : '未启用' }}</span>
+          <span class="badge" [class.ok]="sandbox()!.docker_ok" [class.err]="!sandbox()!.docker_ok">{{ sandbox()!.docker_ok ? 'Docker 可用' : 'Docker 不可用' }}</span>
+          <span class="muted small" style="margin-left:auto">超时 {{ sandbox()!.timeout_sec }}s · 内存 {{ sandbox()!.memory_mb }}MB · CPU {{ sandbox()!.cpus }} · 输出上限 {{ sandbox()!.max_output_kb }}KB</span>
+        </div>
+        <div class="muted small">安全：--cap-drop ALL · --network none · 只读根文件系统（仅 /tmp 可写）· 超时自动 kill 清理。支持语言：</div>
+        <div class="mcp-chips">
+          <span class="chip" *ngFor="let l of sandbox()!.languages">{{ l }}</span>
+        </div>
+        <div class="muted small">在下方「网关工具池」找到 <span class="mono">execute_code</span> 可一键测试；配置位于 settings.sandbox（enabled/timeout/memory/cpu）。</div>
+      </div>
+      <ng-template #sandboxLoading><div class="empty">加载沙箱状态中…</div></ng-template>
+    </div>
+
+    <div class="card">
+      <h2>会话记忆 <span class="muted" style="font-weight:400;font-size:12px">（内置 remember/recall，按 key 隔离；进程内存，重启清空）</span></h2>
+      <table class="tbl" *ngIf="memory().length; else noneMem">
+        <thead>
+          <tr>
+            <th>作用域（Key ID）</th><th>Key</th><th>内容</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let e of memory()">
+            <td class="col-name"><span class="mono small">{{ memScope(e.ns) }}</span></td>
+            <td class="col-name"><span class="mono small">{{ memKey(e.ns) }}</span></td>
+            <td><span class="mono small ellipsis" [title]="e.value">{{ e.value }}</span></td>
+          </tr>
+        </tbody>
+      </table>
+      <ng-template #noneMem><div class="empty">暂无会话记忆 —— 调用方可经 remember 写入、recall 取回</div></ng-template>
+      <div style="margin-top:10px" *ngIf="memory().length">
+        <button class="small danger" (click)="clearMem()">清空全部记忆</button>
+      </div>
+    </div>
+
+    <div class="card">
       <h2>网关工具池（{{ tools().length }}）</h2>
       <div class="muted small" style="margin-bottom:10px">
         客户端不传 tools 时，网关自动附加以下工具并在服务端执行；点击「刷新」可重新探测 MCP 工具。
@@ -329,6 +368,8 @@ export class McpsComponent implements OnInit {
   mcps = signal<McpServer[]>([]);
   tools = signal<ToolInfo[]>([]);
   candidates = signal<{ server: string; calls: number; key_count: number; tools: { name: string; calls: number }[] }[]>([]);
+  sandbox = signal<{ enabled: boolean; docker_ok: boolean; timeout_sec: number; memory_mb: number; cpus: number; max_output_kb: number; languages: string[] } | null>(null);
+  memory = signal<{ ns: string; value: string }[]>([]);
   error = signal('');
   saved = signal('');
   loadingMcps = signal(true);
@@ -423,6 +464,42 @@ export class McpsComponent implements OnInit {
     this.load();
     this.loadTools();
     this.loadCandidates();
+    this.loadSandbox();
+    this.loadMemory();
+  }
+
+  loadSandbox(): void {
+    this.api.sandboxStatus().subscribe({
+      next: (r) => this.sandbox.set(r),
+      error: () => this.sandbox.set(null),
+    });
+  }
+
+  loadMemory(): void {
+    this.api.listMemory().subscribe({
+      next: (r) => this.memory.set(r.entries || []),
+      error: () => this.memory.set([]),
+    });
+  }
+
+  clearMem(): void {
+    if (!confirm('清空全部会话记忆（remember/recall 数据）？')) return;
+    this.api.clearMemory().subscribe({
+      next: () => this.loadMemory(),
+      error: (e: Error) => this.error.set('清空失败：' + e.message),
+    });
+  }
+
+  /** 从 ns "mem:<keyID>:<key>" 解析 keyID。 */
+  memScope(ns: string): string {
+    const p = ns.split(':');
+    return p.length >= 3 ? p[1] : ns;
+  }
+
+  /** 从 ns 解析 key。 */
+  memKey(ns: string): string {
+    const p = ns.split(':');
+    return p.length >= 3 ? p.slice(2).join(':') : ns;
   }
 
   loadCandidates(): void {

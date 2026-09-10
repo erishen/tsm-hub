@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -85,6 +86,38 @@ func dockerAvailable() bool {
 	dockerAvail.ok = err == nil
 	dockerAvail.checked = time.Now()
 	return dockerAvail.ok
+}
+
+// SandboxStatus 返回沙箱状态：配置 + docker 可用性 + 支持语言（管理台展示用）。
+func (p *Proxy) SandboxStatus() map[string]any {
+	cfg := p.store.Settings().Sandbox
+	timeoutSec, memMB, cpus, maxOutKB := cfg.TimeoutSec, cfg.MemoryMB, cfg.CPUs, cfg.MaxOutputKB
+	if timeoutSec <= 0 {
+		timeoutSec = 30
+	}
+	if memMB <= 0 {
+		memMB = 512
+	}
+	if cpus <= 0 {
+		cpus = 1
+	}
+	if maxOutKB <= 0 {
+		maxOutKB = 100
+	}
+	langs := make([]string, 0, len(sandboxLanguages))
+	for l := range sandboxLanguages {
+		langs = append(langs, l)
+	}
+	sort.Strings(langs)
+	return map[string]any{
+		"enabled":       cfg.Enabled,
+		"docker_ok":     dockerAvailable(),
+		"timeout_sec":   timeoutSec,
+		"memory_mb":     memMB,
+		"cpus":          cpus,
+		"max_output_kb": maxOutKB,
+		"languages":     langs,
+	}
 }
 
 // toolExecuteCode 在 Docker 沙箱中执行代码（execute_code 工具实现）。

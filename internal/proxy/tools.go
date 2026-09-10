@@ -604,6 +604,25 @@ type toolRegistry struct {
 
 var registry = &toolRegistry{mem: map[string]string{}}
 
+// ListMemory 返回全部会话记忆（ns 形如 mem:<keyID>:<key>，value 为记忆内容）。
+func (p *Proxy) ListMemory() []map[string]string {
+	registry.mu.RLock()
+	defer registry.mu.RUnlock()
+	out := make([]map[string]string, 0, len(registry.mem))
+	for k, v := range registry.mem {
+		out = append(out, map[string]string{"ns": k, "value": v})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i]["ns"] < out[j]["ns"] })
+	return out
+}
+
+// ClearMemory 清空全部会话记忆（remember/recall 数据，重启本就会丢）。
+func (p *Proxy) ClearMemory() {
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	registry.mem = map[string]string{}
+}
+
 // reqTimeout 构造带超时的 context。
 func (p *Proxy) reqTimeout(d time.Duration) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), d)
