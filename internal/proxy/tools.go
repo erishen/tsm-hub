@@ -131,6 +131,24 @@ func (p *Proxy) ToolCatalog() []ToolInfo {
 			})
 		}
 	}
+	// 晋升为工具的 fastpath 检测器（gen_*）。
+	for _, pl := range p.FastToolPlugins() {
+		desc := "FastPath 检测器（晋升为工具，由 LLM 生成）：输入问题文本，返回确定性答案。"
+		if pl.Trigger != "" {
+			desc = "FastPath 检测器：" + pl.Trigger
+		}
+		out = append(out, ToolInfo{
+			Name:        pl.Name,
+			Description: desc,
+			Source:      "fastpath:" + pl.Mode,
+			Parameters: map[string]any{
+				"type": "object", "required": []string{"query"},
+				"properties": map[string]any{"query": map[string]any{
+					"type": "string", "description": "要检测/回答的问题文本",
+				}},
+			},
+		})
+	}
 	return out
 }
 
@@ -213,6 +231,23 @@ func (p *Proxy) execTool(keyID, name string, args toolArgs) string {
 		}
 		return p.mcpExec(server, tool, args)
 	}
+	if strings.HasPrefix(name, "gen_") {
+		// 晋升为工具的 fastpath 检测器：参数 query -> detect(query)。
+		q := args.str("query")
+		if q == "" {
+			return "error: missing 'query'"
+		}
+		for _, pl := range p.FastToolPlugins() {
+			if pl.Name != name {
+				continue
+			}
+			if ans, hit := runJSDetector(pl.Source, q); hit {
+				return ans
+			}
+			return fmt.Sprintf("no match: 检测器 %s 未命中问题", name)
+		}
+		return fmt.Sprintf("error: fastpath tool %q not promoted", name)
+	}
 	return fmt.Sprintf("error: unknown tool %q", name)
 }
 
@@ -230,11 +265,32 @@ func (p *Proxy) toolSchemas() []map[string]any {
 		out = append(out, toolSchema("execute_code", toolDef("execute_code")))
 	}
 	out = append(out, p.mcpToolSchemas()...)
+	for _, pl := range p.FastToolPlugins() {
+		desc := "FastPath 检测器（晋升为工具，由 LLM 生成）：输入问题文本，返回确定性答案。"
+		if pl.Trigger != "" {
+			desc = "FastPath 检测器：" + pl.Trigger
+		}
+		out = append(out, toolSchema(pl.Name, desc))
+	}
 	return out
 }
 
 func toolSchema(name, desc string) map[string]any {
 	params := map[string]any{"type": "object", "properties": map[string]any{}, "required": []string{}}
+	if strings.HasPrefix(name, "gen_") {
+		params["properties"].(map[string]any)["query"] = map[string]any{
+			"type": "string", "description": "要检测/回答的问题文本",
+		}
+		params["required"] = []string{"query"}
+		return map[string]any{
+			"type": "function",
+			"function": map[string]any{
+				"name":        name,
+				"description": desc,
+				"parameters":  params,
+			},
+		}
+	}
 	switch name {
 	case "calc":
 		params["properties"].(map[string]any)["expression"] = map[string]any{

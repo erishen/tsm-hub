@@ -1489,9 +1489,17 @@ func (s *Server) handleListFastpath(w http.ResponseWriter, r *http.Request) {
 }
 
 // handlePromoteFastpath 把插件晋升为正式检测器（移入 promoted 目录）。
+// mode: fastpath（拦截，默认）/ tool（注册为工具，可被 LLM 与外部调用）/ both（两者）。
 func (s *Server) handlePromoteFastpath(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	if err := s.proxy.PromoteFastPlugin(name); err != nil {
+	var c struct {
+		Mode string `json:"mode"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&c); err != nil && err.Error() != "EOF" {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid json: "+err.Error())
+		return
+	}
+	if err := s.proxy.PromoteFastPlugin(name, c.Mode); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
