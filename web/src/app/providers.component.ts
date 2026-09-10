@@ -24,16 +24,25 @@ import { Balance, Provider, ProbeModel } from './models';
     <div class="page-loading" *ngIf="loading()">加载中…</div>
     <div class="card">
       <h2>已配置（{{ providers().length }}）</h2>
+      <div class="batch-bar" *ngIf="selectedCount()">
+        <span>已选 {{ selectedCount() }} 项</span>
+        <button class="small" (click)="batchToggle(true)">批量启用</button>
+        <button class="small" (click)="batchToggle(false)">批量禁用</button>
+        <button class="small danger" (click)="batchDelete()">批量删除</button>
+        <button class="small" style="margin-left:auto" (click)="clearSelection()">取消选择</button>
+      </div>
       <table *ngIf="providers().length; else none">
         <thead>
           <tr>
+            <th style="width:32px"><input type="checkbox" [checked]="allSelected()" (change)="toggleAll($event)" /></th>
             <th>ID / 名称</th><th>Base URL</th><th>模型</th>
             <th class="num">权重</th><th class="num">优先级</th>
             <th>状态</th><th class="num">延迟</th><th>操作</th>
           </tr>
         </thead>
         <tbody>
-          <tr *ngFor="let p of providers()">
+          <tr *ngFor="let p of providers()" [class.selected]="isSelected(p.id)">
+            <td><input type="checkbox" [checked]="isSelected(p.id)" (change)="toggleSelect(p.id, $event)" /></td>
             <td>
               <div class="mono">{{ p.id }}</div>
               <div class="muted">{{ p.name }}</div>
@@ -179,6 +188,53 @@ export class ProvidersComponent implements OnInit, OnDestroy {
 
   form: Provider = this.blank();
   modelsText = '';
+
+  // ---- 批量操作 ----
+  private selected = new Set<string>();
+  selectedCount(): number { return this.selected.size; }
+  isSelected(id: string): boolean { return this.selected.has(id); }
+  allSelected(): boolean { return this.providers().length > 0 && this.selected.size === this.providers().length; }
+  toggleSelect(id: string, ev: Event): void {
+    const checked = (ev.target as HTMLInputElement).checked;
+    if (checked) this.selected.add(id); else this.selected.delete(id);
+  }
+  toggleAll(ev: Event): void {
+    const checked = (ev.target as HTMLInputElement).checked;
+    if (checked) this.providers().forEach((p) => this.selected.add(p.id));
+    else this.selected.clear();
+  }
+  clearSelection(): void { this.selected.clear(); }
+
+  /** 批量启用/禁用：逐个调用保存 API，完成后刷新列表。 */
+  batchToggle(enabled: boolean): void {
+    const ids = [...this.selected];
+    if (!ids.length) return;
+    if (!confirm(`确认${enabled ? '启用' : '禁用'}选中的 ${ids.length} 个 Provider？`)) return;
+    let done = 0;
+    ids.forEach((id) => {
+      const p = this.providers().find((x) => x.id === id);
+      if (!p) { done++; return; }
+      const updated = { ...p, enabled };
+      this.api.saveProvider(updated).subscribe({
+        next: () => { if (++done === ids.length) { this.selected.clear(); this.load(); } },
+        error: () => { if (++done === ids.length) { this.selected.clear(); this.load(); } },
+      });
+    });
+  }
+
+  /** 批量删除：逐个调用删除 API，完成后刷新列表。 */
+  batchDelete(): void {
+    const ids = [...this.selected];
+    if (!ids.length) return;
+    if (!confirm(`确认删除选中的 ${ids.length} 个 Provider？同时会清掉路由表里指向它们的候选。此操作不可恢复。`)) return;
+    let done = 0;
+    ids.forEach((id) => {
+      this.api.deleteProvider(id).subscribe({
+        next: () => { if (++done === ids.length) { this.selected.clear(); this.load(); } },
+        error: () => { if (++done === ids.length) { this.selected.clear(); this.load(); } },
+      });
+    });
+  }
   modelSet = new Set<string>();
 
   
