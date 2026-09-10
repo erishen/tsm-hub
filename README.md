@@ -162,19 +162,25 @@ llm-router/
 
 **MCP server（stdio + Streamable HTTP）**：`settings.mcps` 配置后，网关启动/首请求时连接该 server，
 完成 MCP 握手并拉取工具列表，工具以 `mcp_<server>_<tool>` 命名加入 agent 工具池，
-由网关在服务端执行（懒连接 + 失败自动重建）：
+由网关在服务端执行（懒连接 + 失败自动重建）。常用 MCP（filesystem / sequential-thinking /
+memory / serena）已预装，先跑一次 `make install-mcps` 即可开箱即用：
 
 ```json
 "mcps": {
-  "fetch": {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-fetch"]},
-  "fs":    {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]},
+  "fs":     {"command": "./mcp/node_modules/.bin/mcp-server-filesystem", "args": ["/path/to/workspace"]},
+  "think":  {"command": "./mcp/node_modules/.bin/mcp-server-sequential-thinking"},
+  "memory": {"command": "./mcp/node_modules/.bin/mcp-server-memory"},
+  "serena": {"command": "<uv-tool-dir>/serena-agent/bin/serena", "args": ["start-mcp-server"]},
   "remote": {"transport": "http", "url": "http://127.0.0.1:8787/mcp"}
 }
 ```
 
-传输方式：`command`（stdio，本地子进程）或 `transport: "http"` + `url`（远程
-Streamable HTTP 端点，响应支持 application/json 与 SSE）。工具的能力边界由你
-配置的 MCP server 决定（如 filesystem 可读写配置的目录）。
+`make install-mcps` 会：① `npm install` 到 `mcp/`（filesystem / sequential-thinking / memory /
+github / brave-search / playwright）；② `uv tool install` serena（代码语义引擎，Python/uv）；
+③ 可选装 playwright 浏览器内核。serena 的 `uv-tool-dir` 可查 `uv tool dir`。传输方式：
+`command`（stdio，本地子进程）或 `transport: "http"` + `url`（远程 Streamable HTTP 端点，
+响应支持 application/json 与 SSE）。工具的能力边界由你配置的 MCP server 决定（如 filesystem
+可读写配置的目录）。
 
 **Docker 沙箱（execute_code）**：`settings.sandbox.enabled=true` 时网关注册
 `execute_code` 工具，把代码放入一次性 Docker 容器执行（支持 python /
