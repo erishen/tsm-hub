@@ -221,6 +221,7 @@ import { McpServer, ToolInfo } from './models';
     .tool-grid { grid-template-columns: repeat(auto-fill,minmax(240px,1fr)); }
     .tool-card { min-width: 0; overflow: hidden; }
     .tool-name .tname { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .tool-name .badge, .tool-name button { flex: 0 0 auto; white-space: nowrap; }
     .tool-desc { word-break: break-word; }
     .test-result pre { background:#f6f5f1; border:1px solid var(--border,#e4e3dd); border-radius:8px; padding:10px; font-size:12px; white-space:pre-wrap; word-break:break-all; max-height:220px; overflow:auto; margin:0; }
     .tpl-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:10px; }
