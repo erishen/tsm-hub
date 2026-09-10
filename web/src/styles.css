@@ -68,7 +68,7 @@ a:hover { text-decoration: underline; }
 .card h2 { font-size: 15px; margin: 0 0 14px; }
 .card h3 { font-size: 13px; margin: 18px 0 8px; color: var(--muted); font-weight: 600; }
 
-.grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+.grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); margin-bottom: 18px; }
 .stat { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
 .stat .label { color: var(--muted); font-size: 12px; }
 .stat .value { font-size: 22px; font-weight: 600; margin-top: 2px; }
