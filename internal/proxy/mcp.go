@@ -348,6 +348,12 @@ func (s *mcpServer) call(ctx context.Context, method string, params map[string]a
 		return s.httpCall(ctx, method, params)
 	}
 	s.mu.Lock()
+	if s.stdin == nil {
+		// 连接已被 Reset/close 中断（配置变更与重建竞态）：返回可恢复错误，
+		// 由 supervisor 退避重建，而不是 nil 指针 panic。
+		s.mu.Unlock()
+		return nil, fmt.Errorf("mcp %s: connection closed", s.name)
+	}
 	s.id++
 	id := s.id
 	ch := make(chan json.RawMessage, 1)
@@ -580,6 +586,15 @@ func (p *Proxy) mcpToolSchemas() []map[string]any {
 	return out
 }
 
+// mcpCallTimeout 返回某 MCP server 的工具调用超时：配置了 timeout_sec 用之，
+// 否则默认 30s。
+func (p *Proxy) mcpCallTimeout(srv store.MCPServer) time.Duration {
+	if srv.TimeoutSec > 0 {
+		return time.Duration(srv.TimeoutSec) * time.Second
+	}
+	return 30 * time.Second
+}
+
 // mcpExec 调用 MCP server 的工具并返回文本结果。
 func (p *Proxy) mcpExec(name, tool string, args toolArgs) string {
 	cfg := p.store.Settings().Mcps
@@ -591,7 +606,7 @@ func (p *Proxy) mcpExec(name, tool string, args toolArgs) string {
 	if err != nil {
 		return fmt.Sprintf("error: mcp server %s unavailable: %v", name, err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), p.mcpCallTimeout(srv))
 	defer cancel()
 	res, err := s.call(ctx, "tools/call", map[string]any{
 		"name":      tool,

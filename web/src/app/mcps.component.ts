@@ -209,6 +209,13 @@ import { McpServer } from './models';
                   <textarea [(ngModel)]="form.envText" rows="2" placeholder="如 GITHUB_TOKEN=ghp_xxx"></textarea>
                 </div>
               </div>
+              <div class="form-row">
+                <div>
+                  <label>调用超时（秒，0=默认30s）</label>
+                  <input type="number" min="0" [(ngModel)]="form.timeoutSec" placeholder="如 600（长任务数据管线）" />
+                  <div class="muted small">长任务类 MCP（如 portfolio-check / pse-review）需设 600s，避免工具调用中途超时</div>
+                </div>
+              </div>
             </ng-container>
           </div>
         </div>
@@ -301,7 +308,7 @@ export class McpsComponent implements OnInit, OnDestroy {
   suggestRunning = signal(false);
   suggestNotes = signal('');
   suggestError = signal('');
-  form = { name: '', transport: 'stdio', command: '', argsText: '', envText: '', url: '' };
+  form = { name: '', transport: 'stdio', command: '', argsText: '', envText: '', url: '', timeoutSec: 0 };
 
   // 常用 MCP 模板（参考 resolve-studio 的 MCP 接入清单；包名均已在本机验证可用）。
   templates: {
@@ -379,7 +386,7 @@ constructor(private api: ApiService) {}
 
   /** 从外部候选一键接入：预填 server 名；命中常见 MCP 包映射时自动预填启动命令，保存走 adopt 路径。 */
   openAdoptMcp(c: { server: string; suggested_command?: string }): void {
-    this.form = { name: c.server, transport: 'stdio', command: c.suggested_command || '', argsText: '', envText: '', url: '' };
+    this.form = { name: c.server, transport: 'stdio', command: c.suggested_command || '', argsText: '', envText: '', url: '', timeoutSec: 0 };
     this.suggestNotes.set('');
     this.suggestError.set('');
     this.editing.set({ mode: 'adopt' });
@@ -447,6 +454,7 @@ constructor(private api: ApiService) {}
       argsText: (m?.args || []).join(' '),
       envText: Object.entries(m?.env || {}).map(([k, v]) => `${k}=${v}`).join('\n'),
       url: m?.url || '',
+      timeoutSec: m?.timeout_sec || 0,
     };
   }
 
@@ -466,6 +474,7 @@ constructor(private api: ApiService) {}
       argsText: t.args.join(' '),
       envText: Object.entries(t.env || {}).map(([k, v]) => `${k}=${v}`).join('\n'),
       url: '',
+      timeoutSec: 0,
     };
   }
 
@@ -496,7 +505,7 @@ constructor(private api: ApiService) {}
       if (i <= 0) continue;
       env[l.slice(0, i).trim()] = l.slice(i + 1).trim();
     }
-    const body = { command, args, env, transport, url };
+    const body = { command, args, env, transport, url, timeout_sec: Number(this.form.timeoutSec) || 0 };
     const mode = this.editing()!.mode;
     const req = mode === 'adopt'
       ? this.api.adoptExternalMcp(name, body)

@@ -1560,11 +1560,12 @@ func (s *Server) handleUpsertMcp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var c struct {
-		Command   string            `json:"command"`
-		Args      []string          `json:"args"`
-		Env       map[string]string `json:"env"`
-		Transport string            `json:"transport"`
-		URL       string            `json:"url"`
+		Command    string            `json:"command"`
+		Args       []string          `json:"args"`
+		Env        map[string]string `json:"env"`
+		Transport  string            `json:"transport"`
+		URL        string            `json:"url"`
+		TimeoutSec int               `json:"timeout_sec"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&c); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid json: "+err.Error())
@@ -1590,7 +1591,7 @@ func (s *Server) handleUpsertMcp(w http.ResponseWriter, r *http.Request) {
 		if cfg.Settings.Mcps == nil {
 			cfg.Settings.Mcps = map[string]store.MCPServer{}
 		}
-		cfg.Settings.Mcps[name] = store.MCPServer{Command: c.Command, Args: c.Args, Env: c.Env, Transport: c.Transport, URL: c.URL}
+		cfg.Settings.Mcps[name] = store.MCPServer{Command: c.Command, Args: c.Args, Env: c.Env, Transport: c.Transport, URL: c.URL, TimeoutSec: c.TimeoutSec}
 		return nil
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", err.Error())
@@ -2045,11 +2046,12 @@ func (s *Server) handleAdoptExternalMcp(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	var c struct {
-		Transport string            `json:"transport"`
-		URL       string            `json:"url"`
-		Command   string            `json:"command"`
-		Args      []string          `json:"args"`
-		Env       map[string]string `json:"env"`
+		Transport  string            `json:"transport"`
+		URL        string            `json:"url"`
+		Command    string            `json:"command"`
+		Args       []string          `json:"args"`
+		Env        map[string]string `json:"env"`
+		TimeoutSec int               `json:"timeout_sec"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&c); err != nil && err.Error() != "EOF" {
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid json: "+err.Error())
@@ -2076,7 +2078,7 @@ func (s *Server) handleAdoptExternalMcp(w http.ResponseWriter, r *http.Request) 
 		if cfg.Settings.Mcps == nil {
 			cfg.Settings.Mcps = map[string]store.MCPServer{}
 		}
-		cfg.Settings.Mcps[server] = store.MCPServer{Transport: c.Transport, URL: c.URL, Command: c.Command, Args: c.Args, Env: c.Env}
+		cfg.Settings.Mcps[server] = store.MCPServer{Transport: c.Transport, URL: c.URL, Command: c.Command, Args: c.Args, Env: c.Env, TimeoutSec: c.TimeoutSec}
 		return nil
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", err.Error())
