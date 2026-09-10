@@ -110,6 +110,34 @@ import { McpServer, ToolInfo } from './models';
     </div>
 
     <div class="card">
+      <h2>外部 MCP 候选（{{ candidates().length }}）<span class="muted" style="font-weight:400;font-size:12px">（调用方声明过的 server__tool 风格工具，尚未接入网关；可一键接入并常驻连接）</span></h2>
+      <table class="tbl" *ngIf="candidates().length; else noneCand">
+        <thead>
+          <tr>
+            <th>Server</th><th class="num">调用次数</th><th class="num">使用方（key 数）</th><th>高频工具</th><th style="width:130px">操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let c of candidates()">
+            <td class="col-name"><span class="mono">{{ c.server }}</span></td>
+            <td class="num">{{ c.calls }}</td>
+            <td class="num">{{ c.key_count }}</td>
+            <td>
+              <div class="mcp-chips" *ngIf="c.tools.length">
+                <span class="chip" *ngFor="let t of c.tools.slice(0,5)" [title]="t.name">{{ t.name.split('__')[1] }} ×{{ t.calls }}</span>
+              </div>
+              <span *ngIf="!c.tools.length">—</span>
+            </td>
+            <td>
+              <button class="small primary" (click)="openAdoptMcp(c)">接入</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <ng-template #noneCand><div class="empty">暂无外部 MCP 候选 —— 调用方声明的 server__tool 风格工具（未命中网关能力）会出现在这里</div></ng-template>
+    </div>
+
+    <div class="card">
       <h2>网关工具池（{{ tools().length }}）</h2>
       <div class="muted small" style="margin-bottom:10px">
         客户端不传 tools 时，网关自动附加以下工具并在服务端执行；点击「刷新」可重新探测 MCP 工具。
@@ -186,10 +214,10 @@ import { McpServer, ToolInfo } from './models';
     <div class="modal-backdrop" *ngIf="editing()" (click)="closeEdit()">
       <div class="modal" (click)="$event.stopPropagation()">
         <div class="modal-head">
-          <div class="modal-icon">{{ editing()!.mode === 'edit' ? '✎' : '+' }}</div>
+          <div class="modal-icon">{{ editing()!.mode === 'edit' ? '✎' : editing()!.mode === 'adopt' ? '⇪' : '+' }}</div>
           <div class="modal-titles">
-            <h2>{{ editing()!.mode === 'edit' ? '编辑 MCP Server' : '添加 MCP Server' }}</h2>
-            <div class="sub">{{ editing()!.mode === 'edit' ? '修改后立即重建连接，配置持久化到 settings.mcps' : '连接 stdio 本地进程或 Streamable HTTP 远程的 MCP server' }}</div>
+            <h2>{{ editing()!.mode === 'edit' ? '编辑 MCP Server' : editing()!.mode === 'adopt' ? '接入外部 MCP' : '添加 MCP Server' }}</h2>
+            <div class="sub">{{ editing()!.mode === 'edit' ? '修改后立即重建连接，配置持久化到 settings.mcps' : editing()!.mode === 'adopt' ? '外部调用方声明的 server，提供连接信息后接入网关常驻' : '连接 stdio 本地进程或 Streamable HTTP 远程的 MCP server' }}</div>
           </div>
           <button class="icon" (click)="closeEdit()" aria-label="关闭">×</button>
         </div>
@@ -199,7 +227,7 @@ import { McpServer, ToolInfo } from './models';
             <div class="form-row">
               <div>
                 <label>名称 <span class="req">*</span></label>
-                <input [(ngModel)]="form.name" placeholder="如 fs / think / serena" [disabled]="editing()!.mode === 'edit'" />
+                <input [(ngModel)]="form.name" placeholder="如 fs / think / serena" [disabled]="editing()!.mode !== 'add'" />
                 <div class="muted small">唯一标识；工具名将形如 mcp_&lt;名称&gt;_&lt;tool&gt;</div>
               </div>
             </div>
@@ -300,11 +328,12 @@ import { McpServer, ToolInfo } from './models';
 export class McpsComponent implements OnInit {
   mcps = signal<McpServer[]>([]);
   tools = signal<ToolInfo[]>([]);
+  candidates = signal<{ server: string; calls: number; key_count: number; tools: { name: string; calls: number }[] }[]>([]);
   error = signal('');
   saved = signal('');
   loadingMcps = signal(true);
   loadingTools = signal(true);
-  editing = signal<{ mode: 'add' | 'edit'; server?: McpServer } | null>(null);
+  editing = signal<{ mode: 'add' | 'edit' | 'adopt'; server?: McpServer } | null>(null);
   testing = signal<ToolInfo | null>(null);
   /** 当前展开详情（工具 chips 点击）的 MCP server 名 */
   expandedName = signal<string | null>(null);
@@ -393,6 +422,20 @@ export class McpsComponent implements OnInit {
   ngOnInit(): void {
     this.load();
     this.loadTools();
+    this.loadCandidates();
+  }
+
+  loadCandidates(): void {
+    this.api.externalMcpCandidates().subscribe({
+      next: (r) => this.candidates.set(r.candidates || []),
+      error: () => this.candidates.set([]),
+    });
+  }
+
+  /** 从外部候选一键接入：预填 server 名为候选名，保存走 adopt 路径。 */
+  openAdoptMcp(c: { server: string }): void {
+    this.form = { name: c.server, transport: 'stdio', command: '', argsText: '', envText: '', url: '' };
+    this.editing.set({ mode: 'adopt' });
   }
 
   // 保证 loading 骨架至少可见 350ms，避免接口太快导致闪烁不可见。
@@ -501,11 +544,16 @@ export class McpsComponent implements OnInit {
       if (i <= 0) continue;
       env[l.slice(0, i).trim()] = l.slice(i + 1).trim();
     }
-    this.api.saveMcp(name, { command, args, env, transport, url }).subscribe({
+    const body = { command, args, env, transport, url };
+    const mode = this.editing()!.mode;
+    const req = mode === 'adopt'
+      ? this.api.adoptExternalMcp(name, body)
+      : this.api.saveMcp(name, body);
+    req.subscribe({
       next: () => {
         this.saving.set(false);
         this.editing.set(null);
-        this.saved.set('已保存，MCP server 已重建连接');
+        this.saved.set(mode === 'adopt' ? '外部 MCP ' + name + ' 已接入网关' : '已保存，MCP server 已重建连接');
         this.load();
         this.loadTools();
       },

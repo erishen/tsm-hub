@@ -254,6 +254,16 @@ func (p *Proxy) execTool(keyID, name string, args toolArgs) string {
 		}
 		return p.mcpExec(server, tool, args)
 	}
+	// MCP 客户端命名风格 server__tool（如 fs__read_file）：网关已配置该 server 时，
+	// 归一化到 mcp_server_tool 执行，保证外部调用方按自己习惯声明也能命中网关能力。
+	if p.store != nil {
+		if i := strings.Index(name, "__"); i > 0 {
+			server, tool := name[:i], name[i+2:]
+			if _, ok := p.store.Settings().Mcps[server]; ok && tool != "" {
+				return p.mcpExec(server, tool, args)
+			}
+		}
+	}
 	if strings.HasPrefix(name, "gen_") {
 		// 晋升为工具的 fastpath 检测器：参数 query -> detect(query)。
 		q := args.str("query")
@@ -483,14 +493,28 @@ func (p *Proxy) toolSkillRun(args toolArgs) (string, error) {
 	if name == "" {
 		return "", fmt.Errorf("missing 'skill'")
 	}
-	if p.skills == nil || p.skills.Dir() == "" {
-		return "", fmt.Errorf("skills library not configured")
+	// 1. 目录技能（SKILL.md），与历史行为一致。
+	if p.skills != nil && p.skills.Dir() != "" {
+		if body := p.skills.Render(name); body != "" {
+			return body, nil
+		}
 	}
-	body := p.skills.Render(name)
-	if body == "" {
-		return "", fmt.Errorf("unknown skill %q", name)
+	// 2. 录用的外部技能（kind=skill，技能说明模式）：技能说明/描述作为指令注入，
+	//    与目录技能行为一致（返回说明文本，由 agent 依据执行）。
+	if p.store != nil {
+		for _, cand := range []string{name, "skill:" + name} {
+			if t, ok := p.store.ExternalTool(cand); ok && t.Kind == "skill" {
+				if s := strings.TrimSpace(t.ImplSource); s != "" {
+					return s, nil
+				}
+				if t.Description != "" {
+					return t.Description, nil
+				}
+				return "", fmt.Errorf("skill %q 已录用但未配置说明", name)
+			}
+		}
 	}
-	return body, nil
+	return "", fmt.Errorf("unknown skill %q", name)
 }
 
 func (p *Proxy) toolReadFile(args toolArgs) string {

@@ -187,11 +187,11 @@ function rateClass(rate: number): string {
     </div>
 
     <div class="card">
-      <h2>外部自创工具 <span class="muted" style="font-weight:400;font-size:12px">（调用方声明、不在网关目录里的工具；可择优录用进网关）</span></h2>
+      <h2>外部自创工具 <span class="muted" style="font-weight:400;font-size:12px">（调用方声明、不在网关目录里的工具/技能；可择优录用进网关）</span></h2>
       <table *ngIf="data() && data()!.external_tools.length; else noneExt">
         <thead>
           <tr>
-            <th>工具</th><th class="num">调用次数</th><th class="num">使用方（key 数）</th><th>状态</th>
+            <th>名称</th><th class="num">调用次数</th><th class="num">使用方（key 数）</th><th>状态</th><th class="actions">操作</th>
           </tr>
         </thead>
         <tbody>
@@ -199,7 +199,14 @@ function rateClass(rate: number): string {
             <td><span class="mono">{{ t.name }}</span></td>
             <td class="num">{{ t.calls }}</td>
             <td class="num">{{ t.key_count }}</td>
-            <td><span [class]="t.adopted ? 'badge ok' : 'badge'">{{ t.adopted ? '已录用' : '未录用' }}</span></td>
+            <td>
+              <span *ngIf="t.adopted" class="badge ok">{{ t.kind === 'skill' ? '已录用·技能' : '已录用·工具' }}</span>
+              <span *ngIf="!t.adopted" class="badge">未录用</span>
+            </td>
+            <td class="actions">
+              <button *ngIf="!t.adopted" class="small primary" (click)="openAdopt(t)">录用</button>
+              <button *ngIf="t.adopted" class="small" (click)="unadopt(t)">取消</button>
+            </td>
           </tr>
         </tbody>
       </table>
@@ -244,10 +251,31 @@ function rateClass(rate: number): string {
           <div class="form-section">
             <h3>说明</h3>
             <div class="form-row">
-              <div><label>描述（模型可见）</label><input [(ngModel)]="adoptForm.description" placeholder="这个工具做什么用" /></div>
+              <div><label>描述（模型可见）</label><input [(ngModel)]="adoptForm.description" placeholder="这个能力做什么用" /></div>
             </div>
           </div>
           <div class="form-section">
+            <h3>类型</h3>
+            <label class="radio-row">
+              <input type="radio" [(ngModel)]="adoptForm.kind" value="tool" />
+              <span><b>工具</b><span class="muted" style="display:block;font-size:12px">可执行能力（JS 检测器 / 转发 / 仅登记）</span></span>
+            </label>
+            <label class="radio-row">
+              <input type="radio" [(ngModel)]="adoptForm.kind" value="skill" />
+              <span><b>技能</b><span class="muted" style="display:block;font-size:12px">技能说明，skill-run 可注入（适用于外部调用方自创的技能）</span></span>
+            </label>
+          </div>
+          <div *ngIf="adoptForm.kind === 'skill'" class="form-section">
+            <h3>技能说明（skill-run 注入内容）</h3>
+            <div class="form-row">
+              <div>
+                <label>指令说明（模型可见，可含执行步骤）</label>
+                <textarea [(ngModel)]="adoptForm.impl_source" rows="5" class="mono code-input"
+                          placeholder="技能说明：检查持仓与行情，输出周报（概览/收益/风险/建议）。"></textarea>
+              </div>
+            </div>
+          </div>
+          <div *ngIf="adoptForm.kind !== 'skill'" class="form-section">
             <h3>网关侧实现方式</h3>
             <label class="radio-row">
               <input type="radio" [(ngModel)]="adoptForm.impl_type" value="none" />
@@ -307,14 +335,14 @@ export class ObservabilityComponent implements OnInit {
     );
   }
 
-  // ---- 外部工具录用 ----
-  adoptTarget = signal<{ name: string; calls?: number; key_count?: number; adopted: boolean } | null>(null);
-  adoptForm = { description: '', impl_type: 'none', impl_source: '' };
+  // ---- 外部工具/技能录用 ----
+  adoptTarget = signal<{ name: string; calls?: number; key_count?: number; adopted: boolean; kind?: string } | null>(null);
+  adoptForm = { description: '', kind: 'tool', impl_type: 'none', impl_source: '' };
   adopting = signal(false);
 
-  openAdopt(t: { name: string; calls?: number; key_count?: number; adopted: boolean }): void {
+  openAdopt(t: { name: string; calls?: number; key_count?: number; adopted: boolean; kind?: string }): void {
     this.adoptTarget.set(t);
-    this.adoptForm = { description: '', impl_type: 'none', impl_source: '' };
+    this.adoptForm = { description: '', kind: t.kind === 'skill' ? 'skill' : 'tool', impl_type: 'none', impl_source: '' };
   }
 
   closeAdopt(): void {
@@ -328,7 +356,8 @@ export class ObservabilityComponent implements OnInit {
     this.adopting.set(true);
     this.api.adoptExternalTool(t.name, {
       description: this.adoptForm.description,
-      impl_type: this.adoptForm.impl_type,
+      kind: this.adoptForm.kind,
+      impl_type: this.adoptForm.kind === 'skill' ? 'none' : this.adoptForm.impl_type,
       impl_source: this.adoptForm.impl_source || undefined,
     }).subscribe({
       next: () => { this.adopting.set(false); this.adoptTarget.set(null); this.load(); },
