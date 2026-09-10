@@ -21,6 +21,23 @@ import { McpServer, ToolInfo } from './models';
     <div class="banner ok" *ngIf="saved()">{{ saved() }}</div>
 
     <div class="card">
+      <h2>常用模板</h2>
+      <div class="muted small" style="margin-bottom:10px">
+        参考 resolve-studio 的常用 MCP 接入清单。点「使用此模板」预填表单，确认路径 / Token 后保存。
+      </div>
+      <div class="tpl-grid">
+        <div class="tpl-card" *ngFor="let t of templates">
+          <div class="tpl-head">
+            <span class="mono tpl-id">{{ t.id }}</span>
+            <button class="small primary" (click)="useTemplate(t)">使用此模板</button>
+          </div>
+          <div class="muted small tpl-desc">{{ t.desc }}</div>
+          <div class="tpl-needs" *ngIf="t.needs">⚠ {{ t.needs }}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
       <h2>MCP Servers（{{ mcps().length }}）</h2>
       <table class="tbl">
         <thead>
@@ -166,6 +183,12 @@ import { McpServer, ToolInfo } from './models';
     .req { color:#d33; }
     .test-result { margin-top:12px; }
     .test-result pre { background:#f6f5f1; border:1px solid var(--border,#e4e3dd); border-radius:8px; padding:10px; font-size:12px; white-space:pre-wrap; word-break:break-all; max-height:220px; overflow:auto; margin:0; }
+    .tpl-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:10px; }
+    .tpl-card { border:1px solid var(--border,#e4e3dd); border-radius:10px; padding:10px 12px; background:#fbfaf7; }
+    .tpl-head { display:flex; align-items:center; gap:8px; justify-content:space-between; margin-bottom:4px; }
+    .tpl-id { font-weight:600; font-size:13px; }
+    .tpl-desc { font-size:12px; line-height:1.45; }
+    .tpl-needs { margin-top:6px; font-size:12px; color:#b58900; }
   `],
 })
 export class McpsComponent implements OnInit {
@@ -181,6 +204,49 @@ export class McpsComponent implements OnInit {
   testRunning = signal(false);
   saving = signal(false);
   form = { name: '', transport: 'stdio', command: '', argsText: '', envText: '', url: '' };
+
+  // 常用 MCP 模板（参考 resolve-studio 的 MCP 接入清单；包名均已在本机验证可用）。
+  templates: {
+    id: string; desc: string; needs?: string;
+    command: string; args: string[]; env?: Record<string, string>;
+  }[] = [
+    {
+      id: 'fs', command: 'npx',
+      args: ['-y', '@modelcontextprotocol/server-filesystem', '/Users/erishen/Workspace/CNB/individular-invest'],
+      desc: '文件系统读写：让 agent 读取/写入本地工作区文件',
+      needs: 'allowed directory 默认填了项目根，可改成你想让 agent 访问的目录',
+    },
+    {
+      id: 'think', command: 'npx',
+      args: ['-y', '@modelcontextprotocol/server-sequential-thinking'],
+      desc: '结构化推理：让 agent 分步骤推演复杂问题，零外部依赖',
+    },
+    {
+      id: 'memory', command: 'npx',
+      args: ['-y', '@modelcontextprotocol/server-memory'],
+      desc: '跨会话长期记忆（内置 remember/recall 已有类似能力）',
+    },
+    {
+      id: 'github', command: 'npx',
+      args: ['-y', '@modelcontextprotocol/server-github'],
+      env: { GITHUB_TOKEN: '' },
+      desc: 'GitHub：issues / PR / 仓库操作',
+      needs: '需要 GITHUB_TOKEN（表单已预填占位，填上再保存）',
+    },
+    {
+      id: 'playwright', command: 'npx',
+      args: ['-y', '@playwright/mcp@latest'],
+      desc: '浏览器自动化：让 agent 打开网页、点击、填表、截图',
+      needs: '需本机已装 playwright 浏览器内核（npx 首次会自动拉）',
+    },
+    {
+      id: 'brave', command: 'npx',
+      args: ['-y', '@modelcontextprotocol/server-brave-search'],
+      env: { BRAVE_API_KEY: '' },
+      desc: '网页搜索：Brave Search API',
+      needs: '需要 BRAVE_API_KEY（表单已预填占位，填上再保存）',
+    },
+  ];
 
   constructor(private api: ApiService) {}
 
@@ -232,6 +298,21 @@ export class McpsComponent implements OnInit {
 
   closeEdit(): void {
     this.editing.set(null);
+  }
+
+  // useTemplate 用常用模板预填添加表单。
+  useTemplate(t: { id: string; command: string; args: string[]; env?: Record<string, string> }): void {
+    this.error.set('');
+    this.saved.set('');
+    this.editing.set({ mode: 'add' });
+    this.form = {
+      name: t.id,
+      transport: 'stdio',
+      command: t.command,
+      argsText: t.args.join(' '),
+      envText: Object.entries(t.env || {}).map(([k, v]) => `${k}=${v}`).join('\n'),
+      url: '',
+    };
   }
 
   save(): void {
