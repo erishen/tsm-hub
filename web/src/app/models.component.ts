@@ -11,7 +11,8 @@ const CATEGORY_LABEL: Record<string, string> = {
   video: '视频生成',
   audio: '音频生成',
   embedding: '向量嵌入',
-  other: '专用 / 其他',
+  specialized: '专用能力（OCR/重排/笔记）',
+  other: '内容安全 / 其他',
 };
 
 @Component({
