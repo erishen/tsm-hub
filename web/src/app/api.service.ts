@@ -3,7 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { Observable, of, throwError } from 'rxjs';
 import { catchError, map, tap } from 'rxjs/operators';
 import {
-  Agg, ApiKey, Balance, CatalogModel, McpServer, ObservabilityResponse, Overview, ProbeModel, Provider, ProviderBalance, ProviderHealth, Quota, Route, SkillDetail, SkillSummary, ToolInfo, UsageResponse,
+  Agg, ApiKey, Balance, CatalogModel, McpServer, ObservabilityResponse, Overview, ProbeModel, Provider, ProviderBalance, ProviderHealth, Quota, RecommendationsResp, Route, SkillDetail, SkillSummary, ToolInfo, UsageResponse,
 } from './models';
 
 const SESSION_KEY = 'llm-router.session';
@@ -117,7 +117,12 @@ export class ApiService {
 
   /** 模型目录：所有 Provider 已配置模型的归类/用途/免费/定价聚合；probe_at=最近探测时间。 */
   modelsCatalog(): Observable<{ models: CatalogModel[]; probe_at?: string }> {
-    return this.http.get<{ models: CatalogModel[]; probe_at?: string }>('/api/admin/models/catalog', { headers: this.headers() })
+    return this.http.get<{ models: CatalogModel[]; probe_at?: string }>('/api/admin/models/catalog', { headers: this.headers() });
+  }
+
+  /** 应用开发场景推荐（根据当前模型池能力） */
+  getModelRecommendations(): Observable<RecommendationsResp> {
+    return this.http.get<RecommendationsResp>('/api/admin/models/recommendations', { headers: this.headers() })
       .pipe(catchError(this.handleError));
   }
 

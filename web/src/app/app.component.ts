@@ -73,6 +73,7 @@ export class AppComponent {
       name: '模型与额度',
       items: [
         { label: '模型', route: '/models' },
+        { label: '应用推荐', route: '/recommendations' },
         { label: '额度', route: '/balances' },
       ],
     },
