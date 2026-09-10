@@ -1,4 +1,4 @@
-import { Component, OnInit, signal } from '@angular/core';
+import { Component, OnInit, signal, computed } from '@angular/core';
 import { effect, OnDestroy } from '@angular/core';
 import { lockBody, unlockBody } from './scroll-lock';
 import { CommonModule } from '@angular/common';
@@ -45,12 +45,15 @@ interface SkillCandidate {
             <span *ngIf="detail()!.has_scripts"> · scripts: {{ (detail()!.scripts || []).join(', ') }}</span>
           </div>
         </div>
-        <div style="flex:0 0 auto;display:flex;gap:8px">
+        <div style="flex:0 0 auto;display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
+          <button (click)="previewMode.set('preview')" [class.primary]="previewMode()==='preview'">预览</button>
+          <button (click)="previewMode.set('raw')" [class.primary]="previewMode()==='raw'">原始</button>
           <button (click)="back()">← 返回列表</button>
           <button class="primary" (click)="copyRaw()">{{ copied() ? '已复制 ✓' : '复制 SKILL.md' }}</button>
         </div>
       </div>
-      <pre class="skill-md">{{ detail()!.raw }}</pre>
+      <div class="skill-md-preview" *ngIf="previewMode()==='preview'" [innerHTML]="renderedMd()"></div>
+      <pre class="skill-md" *ngIf="previewMode()==='raw'">{{ detail()!.raw }}</pre>
     </div>
 
     <div class="card" *ngIf="!detail()">
@@ -143,6 +146,29 @@ interface SkillCandidate {
       padding: 14px 16px; font-size: 12.5px; line-height: 1.6; overflow-x: auto;
       white-space: pre-wrap; word-break: break-word; max-height: 70vh; overflow-y: auto;
     }
+    .skill-md-preview {
+      margin-top: 14px; padding: 18px 22px; background: var(--card-color);
+      border: 1px solid var(--border); border-radius: 10px; max-height: 70vh; overflow-y: auto;
+      font-size: 13.5px; line-height: 1.7; color: var(--text-color);
+    }
+    .skill-md-preview .md-h1 { font-size: 22px; font-weight: 700; margin: 18px 0 10px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+    .skill-md-preview .md-h2 { font-size: 18px; font-weight: 700; margin: 16px 0 8px; }
+    .skill-md-preview .md-h3 { font-size: 15px; font-weight: 600; margin: 14px 0 6px; }
+    .skill-md-preview .md-h4, .skill-md-preview .md-h5, .skill-md-preview .md-h6 { font-size: 14px; font-weight: 600; margin: 12px 0 4px; }
+    .skill-md-preview .md-p { margin: 8px 0; }
+    .skill-md-preview .md-ul, .skill-md-preview .md-ol { margin: 8px 0; padding-left: 24px; }
+    .skill-md-preview .md-ul li, .skill-md-preview .md-ol li { margin: 4px 0; }
+    .skill-md-preview .md-quote { margin: 10px 0; padding: 8px 14px; border-left: 3px solid var(--primary); background: rgba(94,134,255,0.05); border-radius: 0 6px 6px 0; }
+    .skill-md-preview .md-quote p { margin: 4px 0; color: var(--text-secondary); }
+    .skill-md-preview .md-code { background: #0d1117; color: #e6edf3; border-radius: 8px; padding: 12px 14px; margin: 10px 0; overflow-x: auto; font-size: 12.5px; line-height: 1.6; }
+    .skill-md-preview .md-inline-code { background: rgba(94,134,255,0.1); color: var(--primary); padding: 1px 5px; border-radius: 4px; font-size: 12.5px; font-family: monospace; }
+    .skill-md-preview .md-table { border-collapse: collapse; margin: 10px 0; width: 100%; font-size: 12.5px; }
+    .skill-md-preview .md-table th, .skill-md-preview .md-table td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; }
+    .skill-md-preview .md-table th { background: rgba(0,0,0,0.03); font-weight: 600; }
+    .skill-md-preview .md-hr { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
+    .skill-md-preview a { color: var(--primary); text-decoration: none; }
+    .skill-md-preview a:hover { text-decoration: underline; }
+    .skill-md-preview strong { font-weight: 600; }
   `],
 })
 export class SkillsComponent implements OnInit, OnDestroy {
@@ -158,6 +184,8 @@ export class SkillsComponent implements OnInit, OnDestroy {
   readonly adopting = signal<SkillCandidate | null>(null);
   readonly adoptDesc = signal('');
   readonly adoptSaving = signal(false);
+  readonly previewMode = signal<'preview' | 'raw'>('preview');
+  readonly renderedMd = computed(() => this.renderMarkdown(this.detail()?.raw || ''));
 
   
   /** 弹窗滚动锁：打开时锁 body，关闭/销毁时恢复（防止滚动穿透母页面）。 */
@@ -247,5 +275,86 @@ constructor(private api: ApiService) {}
         () => {},
       );
     }
+  }
+
+  /** 轻量级 Markdown 渲染器（覆盖 SKILL.md 常见语法，无外部依赖） */
+  private renderMarkdown(md: string): string {
+    if (!md) return '';
+    // 1. 先提取代码块，保护里面的内容
+    const codeBlocks: string[] = [];
+    md = md.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
+      const idx = codeBlocks.length;
+      codeBlocks.push(`<pre class="md-code"><code class="language-${lang || 'text'}">${this.escapeHtml(code)}</code></pre>`);
+      return `\x00CODE${idx}\x00`;
+    });
+    // 2. 转义 HTML
+    md = this.escapeHtml(md);
+    // 3. 行内语法
+    md = md.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    md = md.replace(/(?<!\*)\*([^*\n]+?)\*(?!\*)/g, '<em>$1</em>');
+    md = md.replace(/`([^`]+)`/g, '<code class="md-inline-code">$1</code>');
+    md = md.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+    // 4. 按行处理块级语法
+    const lines = md.split('\n');
+    const html: string[] = [];
+    let inList = false; let listType = '';
+    let inQuote = false;
+    let inTable = false; let tableRows: string[] = [];
+    const closeList = () => { if (inList) { html.push(`</${listType}>`); inList = false; } };
+    const closeQuote = () => { if (inQuote) { html.push('</blockquote>'); inQuote = false; } };
+    const closeTable = () => {
+      if (inTable && tableRows.length >= 2) {
+        const header = tableRows[0].split('|').filter((c: string) => c.trim()).map((c: string) => `<th>${c.trim()}</th>`).join('');
+        const body = tableRows.slice(2).map((row: string) => {
+          const cells = row.split('|').filter((c: string) => c.trim()).map((c: string) => `<td>${c.trim()}</td>`).join('');
+          return `<tr>${cells}</tr>`;
+        }).join('');
+        html.push(`<table class="md-table"><thead><tr>${header}</tr></thead><tbody>${body}</tbody></table>`);
+      }
+      inTable = false; tableRows = [];
+    };
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) { closeList(); closeQuote(); closeTable(); continue; }
+      if (/^---+$/.test(trimmed) || /^\*\*\*+$/.test(trimmed)) {
+        closeList(); closeQuote(); closeTable(); html.push('<hr class="md-hr">'); continue;
+      }
+      const hm = trimmed.match(/^(#{1,6})\s+(.+)$/);
+      if (hm) {
+        closeList(); closeQuote(); closeTable();
+        html.push(`<h${hm[1].length} class="md-h${hm[1].length}">${hm[2]}</h${hm[1].length}>`);
+        continue;
+      }
+      if (trimmed.startsWith('>')) {
+        closeList(); closeTable();
+        if (!inQuote) { html.push('<blockquote class="md-quote">'); inQuote = true; }
+        html.push(`<p>${trimmed.replace(/^>\s?/, '')}</p>`); continue;
+      }
+      if (trimmed.startsWith('|') && trimmed.endsWith('|')) {
+        closeList(); closeQuote();
+        if (!inTable) { inTable = true; tableRows = []; }
+        tableRows.push(trimmed); continue;
+      }
+      if (/^[-*]\s+/.test(trimmed)) {
+        closeQuote(); closeTable();
+        if (!inList || listType !== 'ul') { closeList(); html.push('<ul class="md-ul">'); inList = true; listType = 'ul'; }
+        html.push(`<li>${trimmed.replace(/^[-*]\s+/, '')}</li>`); continue;
+      }
+      if (/^\d+\.\s+/.test(trimmed)) {
+        closeQuote(); closeTable();
+        if (!inList || listType !== 'ol') { closeList(); html.push('<ol class="md-ol">'); inList = true; listType = 'ol'; }
+        html.push(`<li>${trimmed.replace(/^\d+\.\s+/, '')}</li>`); continue;
+      }
+      closeList(); closeQuote(); closeTable();
+      html.push(`<p class="md-p">${trimmed}</p>`);
+    }
+    closeList(); closeQuote(); closeTable();
+    let result = html.join('\n');
+    result = result.replace(/\x00CODE(\d+)\x00/g, (_, idx) => codeBlocks[parseInt(idx)]);
+    return result;
+  }
+
+  private escapeHtml(text: string): string {
+    return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 }
