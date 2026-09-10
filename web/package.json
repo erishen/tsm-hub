@@ -1,7 +1,7 @@
 {
-  "name": "llm-router-console",
+  "name": "tsm-gateway-console",
   "version": "0.1.0",
-  "description": "Admin console for llm-router (Go + Angular)",
+  "description": "Admin console for tsm-gateway (Go + Angular)",
   "private": true,
   "scripts": {
     "ng": "ng",

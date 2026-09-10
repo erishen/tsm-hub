@@ -15,8 +15,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/erishen/llm-router/internal/router"
-	"github.com/erishen/llm-router/internal/store"
+	"github.com/erishen/tsm-gateway/internal/router"
+	"github.com/erishen/tsm-gateway/internal/store"
 )
 
 // chatMessage 是 OpenAI messages 的通用结构。
@@ -101,7 +101,7 @@ func (p *Proxy) agentRun(w http.ResponseWriter, r *http.Request, key store.APIKe
 	// 加一条 system 说明工具池语义。
 	msgs = append([]chatMessage{{
 		"role":    "system",
-		"content": "你是运行在 llm-router 网关上的 agent。你可以调用网关提供的工具来回答问题；工具由网关执行，你不需要向用户解释工具调用过程，直接给出基于工具结果的最终回答。",
+		"content": "你是运行在 tsm-gateway 网关上的 agent。你可以调用网关提供的工具来回答问题；工具由网关执行，你不需要向用户解释工具调用过程，直接给出基于工具结果的最终回答。",
 	}}, msgs...)
 
 	// 确定性快路径：纯代码能回答的问题（算术/时间/日期/换算/统计/进制/字数）

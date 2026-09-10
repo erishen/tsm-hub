@@ -3,7 +3,7 @@
   "version": 1,
   "newProjectRoot": "projects",
   "projects": {
-    "llm-router-console": {
+    "tsm-gateway-console": {
       "projectType": "application",
       "root": "",
       "sourceRoot": "src",
@@ -44,10 +44,10 @@
           "builder": "@angular-devkit/build-angular:dev-server",
           "configurations": {
             "production": {
-              "buildTarget": "llm-router-console:build:production"
+              "buildTarget": "tsm-gateway-console:build:production"
             },
             "development": {
-              "buildTarget": "llm-router-console:build:development"
+              "buildTarget": "tsm-gateway-console:build:development"
             }
           },
           "defaultConfiguration": "development"

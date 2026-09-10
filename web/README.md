@@ -1,6 +1,6 @@
 # 管理台前端（Angular 19）
 
-llm-router 的 Web 控制台。构建产物输出到 `../internal/web/dist/browser`，
+tsm-gateway 的 Web 控制台。构建产物输出到 `../internal/web/dist/browser`，
 由 Go 的 `//go:embed all:dist` 打进二进制，所以部署时只需要一个可执行文件。
 
 ## 开发
@@ -25,7 +25,7 @@ pnpm run check:syntax       # 不依赖 node_modules 的 TS 语法自检
 手动起的话，dev 模式下后端要另开一个终端跑：
 
 ```bash
-cd .. && ./bin/llm-router -data ./data -addr :9070
+cd .. && ./bin/tsm-gateway -data ./data -addr :9070
 ```
 
 打开 <http://localhost:4200>，用 `data/config.json` 里的 `settings.admin_token` 登录。

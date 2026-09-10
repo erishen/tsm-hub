@@ -1,4 +1,4 @@
-// Package store 定义 llm-router 的持久化数据模型。
+// Package store 定义 tsm-gateway 的持久化数据模型。
 //
 // 所有配置落在单个 JSON 文件（data/config.json），启动时全量载入内存，
 // 变更走「临时文件 + rename」原子落盘，避免写一半断电导致配置损坏。

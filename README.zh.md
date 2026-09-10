@@ -1,4 +1,4 @@
-# llm-router
+# tsm-gateway
 
 > 自制 Token Key + 智能路由的 LLM 网关：对外只暴露自己签发的 `sk-tr-…` Key，
 > 内部把 OpenAI 兼容请求智能路由到配置好的多家上游模型。
@@ -28,7 +28,7 @@
 ## 快速开始
 
 ```bash
-cd work/golang/llm-router
+cd work/golang/tsm-gateway
 
 # 0) 拉取技能库子模块（resolve-skills，管理台「技能库」页用）
 git submodule update --init --recursive
@@ -44,7 +44,7 @@ mkdir -p data && cp config.example.json data/config.json
 $EDITOR data/config.json          # 必改：settings.admin_token、各 provider 的 api_key
 
 # 4) 启动
-./bin/llm-router -data ./data -addr :9070
+./bin/tsm-gateway -data ./data -addr :9070
 ```
 
 打开 <http://localhost:9070> 进入管理台，用 `admin_token` 登录。
@@ -75,7 +75,7 @@ print(client.chat.completions.create(model="smart", messages=[{"role": "user", "
 客户端 (sk-tr-…)
    │
    ▼
-┌──────────────────────── llm-router ────────────────────────┐
+┌──────────────────────── tsm-gateway ────────────────────────┐
 │ 1. 鉴权    sha256(Key) → 查内存索引 → 校验 enabled/过期      │
 │ 2. 限流    RPM 滑动窗口 + token/金额/每日额度                │
 │ 3. 路由    别名 → 候选列表：priority 排序 + weight 加权      │
@@ -96,7 +96,7 @@ OpenAI            DeepSeek / 通义         本地 Ollama
 ## 目录结构
 
 ```
-llm-router/
+tsm-gateway/
 ├── cmd/
 │   ├── server/          # 网关主程序
 │   └── mockupstream/    # 本地联调用的假上游（不接真实模型）
@@ -405,7 +405,7 @@ make dev-stop      # 只停不停编译，端口和 .dev/*.pid 都会被清掉
 
 ```bash
 make web-install && make web-build   # 先构建管理台（产物会被打进镜像）
-docker compose up -d --build          # 或 docker build -t llm-router . && docker run ...
+docker compose up -d --build          # 或 docker build -t tsm-gateway . && docker run ...
 ```
 
 镜像里只编译 Go（不需要在镜像内联网装 Node），前端产物从宿主机 `internal/web/dist/browser`

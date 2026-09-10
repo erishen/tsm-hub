@@ -1,8 +1,8 @@
 {
-  "name": "llm-router-mcp-deps",
+  "name": "tsm-gateway-mcp-deps",
   "private": true,
   "version": "1.0.0",
-  "description": "llm-router 网关预装的 MCP server 依赖（npm 系）",
+  "description": "tsm-gateway 网关预装的 MCP server 依赖（npm 系）",
   "dependencies": {
     "@modelcontextprotocol/server-filesystem": "^2026.8.31",
     "@modelcontextprotocol/server-sequential-thinking": "^2026.8.31",

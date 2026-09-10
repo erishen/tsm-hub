@@ -1,4 +1,4 @@
-# llm-router
+# tsm-gateway
 
 > Self-issued Token Key + smart routing LLM gateway: expose only your own `sk-tr-…` keys to clients,
 > internally route OpenAI-compatible requests to multiple configured upstream providers.
@@ -28,7 +28,7 @@
 ## Quick start
 
 ```bash
-cd work/golang/llm-router
+cd work/golang/tsm-gateway
 
 # 0) Pull skills submodule (resolve-skills, used by admin "Skills" page)
 git submodule update --init --recursive
@@ -44,7 +44,7 @@ mkdir -p data && cp config.example.json data/config.json
 $EDITOR data/config.json          # Must change: settings.admin_token, each provider's api_key
 
 # 4) Start
-./bin/llm-router -data ./data -addr :9070
+./bin/tsm-gateway -data ./data -addr :9070
 ```
 
 Open <http://localhost:9070> for the admin console, log in with `admin_token`.
@@ -75,7 +75,7 @@ print(client.chat.completions.create(model="smart", messages=[{"role": "user", "
 Client (sk-tr-…)
    │
    ▼
-┌──────────────────────── llm-router ────────────────────────┐
+┌──────────────────────── tsm-gateway ────────────────────────┐
 │ 1. Auth    sha256(Key) → memory index → enabled/expiry check │
 │ 2. Rate limit  RPM sliding window + token/cost/daily quota   │
 │ 3. Route    alias → candidate list: priority sort + weight    │
@@ -96,7 +96,7 @@ OpenAI            DeepSeek / Tongyi         Local Ollama
 ## Directory structure
 
 ```
-llm-router/
+tsm-gateway/
 ├── cmd/
 │   ├── server/          # Gateway main program
 │   └── mockupstream/    # Fake upstream for local dev (no real models)
@@ -406,7 +406,7 @@ Ports can be changed with `make dev ROUTER_PORT=9080 WEB_PORT=4300`.
 
 ```bash
 make web-install && make web-build   # Build admin console first (output will be baked into image)
-docker compose up -d --build          # or docker build -t llm-router . && docker run ...
+docker compose up -d --build          # or docker build -t tsm-gateway . && docker run ...
 ```
 
 Only Go is compiled in the image (no need to install Node in-image), frontend output is copied from host `internal/web/dist/browser`;
