@@ -37,6 +37,14 @@ type ProtocolAdapter interface {
 	StreamDoneEvent() string
 }
 
+// RequestSigner 是可选接口，适配器可以实现它来在请求发送前做签名等准备工作。
+// 例如 AWS Bedrock 需要 SigV4 签名。
+type RequestSigner interface {
+	// SignRequest 在请求发送前对请求进行签名或其他准备工作。
+	// body 是转换后的请求体，provider 是当前选中的上游 Provider。
+	SignRequest(req *http.Request, body []byte, provider store.Provider) error
+}
+
 // adapters 是已注册的协议适配器注册表。
 var adapters = map[string]ProtocolAdapter{}
 
@@ -63,6 +71,9 @@ func init() {
 	RegisterAdapter(&AnthropicAdapter{})
 	RegisterAdapter(&AzureAdapter{})
 	RegisterAdapter(&GeminiAdapter{})
+	RegisterAdapter(&BedrockAdapter{})
+	RegisterAdapter(&CohereAdapter{})
+	RegisterAdapter(&MistralAdapter{})
 }
 
 // copyHeaders 复制客户端请求头到上游请求（跳过逐跳头和鉴权头）。

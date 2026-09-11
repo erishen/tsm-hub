@@ -63,10 +63,12 @@ type openAIMessage struct {
 
 // openAIRequest 是 OpenAI 格式的请求体（用于解析需要转换的字段）。
 type openAIRequest struct {
-	Model    string          `json:"model"`
-	Messages []openAIMessage `json:"messages"`
-	Stream   bool            `json:"stream"`
-	Tools    []openAITool    `json:"tools,omitempty"`
+	Model       string          `json:"model"`
+	Messages    []openAIMessage `json:"messages"`
+	Stream      bool            `json:"stream"`
+	Temperature *float64        `json:"temperature,omitempty"`
+	MaxTokens   *int            `json:"max_tokens,omitempty"`
+	Tools       []openAITool    `json:"tools,omitempty"`
 }
 
 type openAITool struct {
