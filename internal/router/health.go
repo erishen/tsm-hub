@@ -156,6 +156,7 @@ func (t *Tracker) Throttled(id string) bool {
 }
 
 // Snapshot 导出全部健康状态，供管理台展示。
+// Healthy 语义：当前不在冷却期即可接客（含半开探测态）；failures 字段单独展示历史失败计数。
 func (t *Tracker) Snapshot() []ProviderHealth {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
@@ -164,7 +165,7 @@ func (t *Tracker) Snapshot() []ProviderHealth {
 	for id, s := range t.states {
 		out = append(out, ProviderHealth{
 			ProviderID: id,
-			Healthy:    s.availableLocked(now) && s.failures < t.failMax,
+			Healthy:    s.availableLocked(now),
 			Failures:   s.failures,
 			LastError:  s.lastErr,
 			LastOKAt:   s.lastOK,
@@ -181,6 +182,7 @@ func (t *Tracker) Snapshot() []ProviderHealth {
 
 // Health 返回单个 provider 的当前状态；尚无任何请求记录时返回健康默认值，
 // 供管理台完整展示所有 provider。
+// Healthy 语义：当前不在冷却期即可接客（含半开探测态）。
 func (t *Tracker) Health(id string) ProviderHealth {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
@@ -191,7 +193,7 @@ func (t *Tracker) Health(id string) ProviderHealth {
 	}
 	return ProviderHealth{
 		ProviderID: id,
-		Healthy:    s.availableLocked(now) && s.failures < t.failMax,
+		Healthy:    s.availableLocked(now),
 		Failures:   s.failures,
 		LastError:  s.lastErr,
 		LastOKAt:   s.lastOK,

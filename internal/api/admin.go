@@ -287,13 +287,15 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 	out := make([]map[string]any, 0)
 	for _, p := range s.store.ListProviders() {
+		h := s.health.Health(p.ID)
 		out = append(out, map[string]any{
 			"id": p.ID, "name": p.Name, "base_url": p.BaseURL,
 			"api_key": displaySecret(p.APIKey), "models": p.Models, "headers": p.Headers,
 			"enabled": p.Enabled, "weight": p.Weight, "priority": p.Priority,
 			"timeout_ms": p.TimeoutMS,
-			"healthy":    s.health.Available(p.ID),
-			"latency_ms": s.health.Latency(p.ID),
+			"healthy":    h.Healthy,
+			"latency_ms": h.LatencyMS,
+			"health":     h,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"providers": out})
