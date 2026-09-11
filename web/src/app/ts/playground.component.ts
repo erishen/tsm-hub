@@ -38,8 +38,8 @@ const DRAFT_KEY = 'tsm-hub.playground.draft';
   selector: 'app-playground',
   standalone: true,
   imports: [CommonModule, FormsModule],
-  templateUrl: './playground.component.html',
-  styleUrls: ['./playground.component.css'],
+  templateUrl: '../html/playground.component.html',
+  styleUrls: ['../css/playground.component.css'],
 })
 export class PlaygroundComponent implements OnInit {
   keyText = '';

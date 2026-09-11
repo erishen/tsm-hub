@@ -9,7 +9,7 @@ import { Agg, DailyPoint, Overview, ProviderHealth } from './models';
   selector: 'app-dashboard',
   standalone: true,
   imports: [CommonModule, FormsModule, RouterLink],
-  templateUrl: './dashboard.component.html',
+  templateUrl: '../html/dashboard.component.html',
 })
 export class DashboardComponent implements OnInit, OnDestroy {
   readonly overview = signal<Overview | null>(null);

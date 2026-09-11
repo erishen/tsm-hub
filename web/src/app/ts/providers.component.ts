@@ -10,7 +10,7 @@ import { Balance, Provider, ProbeModel } from './models';
   selector: 'app-providers',
   standalone: true,
   imports: [CommonModule, FormsModule],
-  templateUrl: './providers.component.html',
+  templateUrl: '../html/providers.component.html',
 })
 export class ProvidersComponent implements OnInit, OnDestroy {
   readonly providers = signal<Provider[]>([]);

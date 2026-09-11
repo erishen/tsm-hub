@@ -10,8 +10,8 @@ import { ToolInfo } from './models';
   selector: 'app-tools',
   standalone: true,
   imports: [CommonModule, FormsModule],
-  templateUrl: './tools.component.html',
-  styleUrls: ['./tools.component.css'],
+  templateUrl: '../html/tools.component.html',
+  styleUrls: ['../css/tools.component.css'],
 })
 export class ToolsComponent implements OnInit, OnDestroy {
   tools = signal<ToolInfo[]>([]);

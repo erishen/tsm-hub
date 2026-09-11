@@ -19,7 +19,7 @@ const CATEGORY_LABEL: Record<string, string> = {
   selector: 'app-models',
   standalone: true,
   imports: [CommonModule, FormsModule],
-  templateUrl: './models.component.html',
+  templateUrl: '../html/models.component.html',
 })
 export class ModelsComponent implements OnInit {
   readonly models = signal<CatalogModel[]>([]);

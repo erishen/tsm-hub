@@ -7,8 +7,8 @@ import { Balance, ProviderBalance } from './models';
   selector: 'app-balances',
   standalone: true,
   imports: [CommonModule],
-  templateUrl: './balances.component.html',
-  styleUrls: ['./balances.component.css'],
+  templateUrl: '../html/balances.component.html',
+  styleUrls: ['../css/balances.component.css'],
 })
 export class BalancesComponent implements OnInit {
   readonly balances = signal<ProviderBalance[]>([]);

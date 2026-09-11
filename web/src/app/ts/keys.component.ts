@@ -10,8 +10,8 @@ import { ApiKey, Quota, SkillSummary } from './models';
   selector: 'app-keys',
   standalone: true,
   imports: [CommonModule, FormsModule],
-  templateUrl: './keys.component.html',
-  styleUrls: ['./keys.component.css'],
+  templateUrl: '../html/keys.component.html',
+  styleUrls: ['../css/keys.component.css'],
 })
 export class KeysComponent implements OnInit, OnDestroy {
   readonly keys = signal<ApiKey[]>([]);

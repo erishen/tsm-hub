@@ -25,7 +25,7 @@ function rateClass(rate: number): string {
   selector: 'app-observability',
   standalone: true,
   imports: [CommonModule, FormsModule],
-  templateUrl: './observability.component.html',
+  templateUrl: '../html/observability.component.html',
 })
 export class ObservabilityComponent implements OnInit, OnDestroy {
   days = 14;

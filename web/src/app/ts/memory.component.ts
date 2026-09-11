@@ -6,8 +6,8 @@ import { ApiService } from './api.service';
   selector: 'app-memory',
   standalone: true,
   imports: [CommonModule],
-  templateUrl: './memory.component.html',
-  styleUrls: ['./memory.component.css'],
+  templateUrl: '../html/memory.component.html',
+  styleUrls: ['../css/memory.component.css'],
 })
 export class MemoryComponent implements OnInit {
   memory = signal<{ ns: string; value: string }[]>([]);
