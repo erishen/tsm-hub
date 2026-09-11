@@ -6,11 +6,11 @@
 - **后端**：Go 1.22，**零第三方依赖**（只用标准库 + modernc.org/sqlite 纯 Go 实现），单二进制
 - **前端**：Angular 19（standalone + signals），构建产物 `embed` 进 Go 二进制
 - **存储**：JSON 配置文件（原子写）+ JSONL 用量流水 + SQLite（记忆/审计日志），无需外部数据库
-- **协议**：OpenAI 兼容（`/v1/chat/completions`、`/v1/models`…），含 SSE 流式透传
+- **协议**：客户端 OpenAI 兼容（`/v1/chat/completions`、`/v1/models`…），含 SSE 流式透传；**上游协议适配层**支持 13 种协议（OpenAI/Anthropic/Azure/Gemini/Bedrock/SageMaker/Cohere/Mistral/HuggingFace/Replicate/Together/Fireworks/Groq）+ 12 个国内平台（均 OpenAI 兼容）
 - **能力池**：内置通用工具 + Agent Skills 技能库 + MCP server + Docker 沙箱 + 会话记忆
 - **智能路由**：优先级 failover、权重分流、smart 成本智能路由、auto 场景路由、确定性快路径
-- **安全合规**：Key SHA-256 哈希存储、审计日志、用量自动清理、上游 Key `env:` 引用、[安全部署指南](./SECURITY.md)
-- **管理台**：18 个页面（概览/Providers/路由表/Keys/模型/额度/用量/监控/技能库/MCP/工具/记忆/沙箱/快路径/应用推荐/测试/审计日志），深色模式、全局搜索、PWA
+- **安全合规**：Key SHA-256 哈希存储、审计日志、用量自动清理、上游 Key `env:` 引用、[安全部署指南](./docs/SECURITY.md)
+- **管理台**：18 个页面（概览/Providers/上游平台/路由表/Keys/模型/额度/用量/监控/技能库/MCP/工具/记忆/沙箱/快路径/应用推荐/测试/审计日志），深色模式、全局搜索、PWA
 
 ---
 
@@ -80,14 +80,16 @@ print(client.chat.completions.create(model="smart", messages=[{"role": "user", "
 │ 2. 限流    RPM 滑动窗口 + token/金额/每日额度                │
 │ 3. 路由    别名 → 候选列表：priority 排序 + weight 加权      │
 │            过滤掉冷却中的 provider，保留一个半开探测位         │
-│ 4. 转发    换 Authorization、改写 model、注入 stream_options │
-│ 5. 回传    非流式整包回传；流式按 SSE 帧逐帧转发             │
+│ 4. 协议适配 适配器：OpenAI→Anthropic/Azure/Gemini/…          │
+│            请求/响应/流式格式转换 + AWS SigV4 签名            │
+│ 5. 转发    换 Authorization、改写 model、注入 stream_options │
+│ 6. 回传    非流式整包回传；流式按 SSE 帧逐帧转发             │
 │            响应头带 X-LLM-Router-Provider: <provider_id>    │
-│ 6. 记账    usage → 内存聚合 + data/usage/YYYY-MM-DD.jsonl   │
+│ 7. 记账    usage → 内存聚合 + data/usage/YYYY-MM-DD.jsonl   │
 └────────────────────────────────────────────────────────────┘
    │                    │                    │
    ▼                    ▼                    ▼
-OpenAI            DeepSeek / 通义         本地 Ollama
+OpenAI            DeepSeek / 通义         Anthropic / Gemini
 （失败自动换下一个候选；连续失败 → 摘除 + 冷却 → 半开探测）
 ```
 
