@@ -129,13 +129,22 @@ export class AppComponent {
 
   /** 并行拉取模型/工具/技能/Provider/路由/Key，本地过滤匹配项，按类型分组展示。 */
   private doSearch(q: string): void {
+    // 手动 Promise 包装，避免 firstValueFrom/timeout 的兼容性问题
+    const withTimeout = (obs: any): Promise<any> =>
+      new Promise((resolve) => {
+        const sub = obs.subscribe({
+          next: (data: any) => { resolve(data); sub.unsubscribe(); },
+          error: () => resolve(null),
+        });
+        setTimeout(() => { resolve(null); sub.unsubscribe(); }, 8000);
+      });
     Promise.all([
-      this.api.modelsCatalog().toPromise().catch(() => null),
-      this.api.listTools().toPromise().catch(() => null),
-      this.api.listSkills().toPromise().catch(() => null),
-      this.api.listProviders().toPromise().catch(() => null),
-      this.api.listRoutes().toPromise().catch(() => null),
-      this.api.listKeys().toPromise().catch(() => null),
+      withTimeout(this.api.modelsCatalog()),
+      withTimeout(this.api.listTools()),
+      withTimeout(this.api.listSkills()),
+      withTimeout(this.api.listProviders()),
+      withTimeout(this.api.listRoutes()),
+      withTimeout(this.api.listKeys()),
     ]).then(([models, tools, skills, providers, routes, keys]) => {
       const groups: { label: string; items: { name: string; desc?: string; route: string }[] }[] = [];
       const match = (s: string) => s.toLowerCase().includes(q);
