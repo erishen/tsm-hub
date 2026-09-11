@@ -24,7 +24,7 @@ import (
 
 	"github.com/dop251/goja"
 
-	"github.com/erishen/tsm-gateway/internal/store"
+	"github.com/erishen/tsm-hub/internal/store"
 )
 
 // fastPlugin 是一个已加载的检测器插件。

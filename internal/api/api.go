@@ -17,14 +17,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erishen/tsm-gateway/internal/auth"
-	"github.com/erishen/tsm-gateway/internal/audit"
-	"github.com/erishen/tsm-gateway/internal/proxy"
-	"github.com/erishen/tsm-gateway/internal/quota"
-	"github.com/erishen/tsm-gateway/internal/router"
-	"github.com/erishen/tsm-gateway/internal/skills"
-	"github.com/erishen/tsm-gateway/internal/store"
-	"github.com/erishen/tsm-gateway/internal/web"
+	"github.com/erishen/tsm-hub/internal/auth"
+	"github.com/erishen/tsm-hub/internal/audit"
+	"github.com/erishen/tsm-hub/internal/proxy"
+	"github.com/erishen/tsm-hub/internal/quota"
+	"github.com/erishen/tsm-hub/internal/router"
+	"github.com/erishen/tsm-hub/internal/skills"
+	"github.com/erishen/tsm-hub/internal/store"
+	"github.com/erishen/tsm-hub/internal/web"
 )
 
 // Server 聚合所有依赖并注册路由。
@@ -125,7 +125,7 @@ func (s *Server) Handler() http.Handler {
 		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path == "/" {
 				writeJSON(w, http.StatusOK, map[string]any{
-					"service": "tsm-gateway",
+					"service": "tsm-hub",
 					"docs":    "/api/admin/overview (需要管理口令)",
 				})
 				return
@@ -438,7 +438,7 @@ func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 		path = "/v1/chat/completions"
 	}
 	// 技能注入：key 配置了 inject_skills 时，把技能库文本注入 chat 请求的
-	// system prompt（只对 chat/completions 生效）。tsm-gateway 由此成为
+	// system prompt（只对 chat/completions 生效）。tsm-hub 由此成为
 	// "带技能的路由网关"——任意 OpenAI 兼容客户端走这里都能感知技能库。
 	if key.InjectSkills != "" && path == "/v1/chat/completions" && s.skills != nil {
 		if inj := s.skills.Render(key.InjectSkills); inj != "" {
@@ -540,7 +540,7 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request, key store.
 		items = append(items, modelItem{ID: id, Object: "model", OwnedBy: owner, Created: s.startAt.Unix()})
 	}
 	for _, rt := range s.store.ListRoutes() {
-		add(rt.Model, "tsm-gateway")
+		add(rt.Model, "tsm-hub")
 	}
 	for _, p := range s.store.ListProviders() {
 		if !p.Enabled {

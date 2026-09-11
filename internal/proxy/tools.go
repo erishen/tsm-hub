@@ -467,7 +467,7 @@ func (p *Proxy) toolFetchURL(args toolArgs) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("User-Agent", "tsm-gateway-agent/1.0")
+	req.Header.Set("User-Agent", "tsm-hub-agent/1.0")
 	resp, err := p.client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("fetch failed: %w", err)
@@ -649,7 +649,7 @@ func (p *Proxy) toolExchangeRate(args toolArgs) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("User-Agent", "tsm-gateway/1.0")
+	req.Header.Set("User-Agent", "tsm-hub/1.0")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return "", err

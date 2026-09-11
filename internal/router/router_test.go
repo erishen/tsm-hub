@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/erishen/tsm-gateway/internal/store"
+	"github.com/erishen/tsm-hub/internal/store"
 )
 
 func newStore(t *testing.T, providers []store.Provider, routes []store.Route) *store.Store {

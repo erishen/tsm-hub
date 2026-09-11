@@ -22,7 +22,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erishen/tsm-gateway/internal/store"
+	"github.com/erishen/tsm-hub/internal/store"
 )
 
 // stderrLog 把 MCP 子进程的 stderr 记入网关日志（原为丢弃，排查脚本崩溃全靠它）。
@@ -292,7 +292,7 @@ func (s *mcpServer) connectStdio() error {
 	if _, err := s.call(ctx, "initialize", map[string]any{
 		"protocolVersion": "2024-11-05",
 		"capabilities":    map[string]any{},
-		"clientInfo":      map[string]any{"name": "tsm-gateway", "version": "1.0"},
+		"clientInfo":      map[string]any{"name": "tsm-hub", "version": "1.0"},
 	}); err != nil {
 		s.close()
 		return fmt.Errorf("initialize %s: %w", s.name, err)
@@ -330,7 +330,7 @@ func (s *mcpServer) connectHTTP() error {
 	if _, err := s.call(ctx, "initialize", map[string]any{
 		"protocolVersion": "2024-11-05",
 		"capabilities":    map[string]any{},
-		"clientInfo":      map[string]any{"name": "tsm-gateway", "version": "1.0"},
+		"clientInfo":      map[string]any{"name": "tsm-hub", "version": "1.0"},
 	}); err != nil {
 		return fmt.Errorf("initialize %s: %w", s.name, err)
 	}

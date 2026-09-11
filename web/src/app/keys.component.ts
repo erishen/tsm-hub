@@ -337,7 +337,7 @@ export class KeysComponent implements OnInit, OnDestroy {
   /** 对外 Base URL（OpenAI 兼容端点），默认按当前 host 推断 :9070，可改并记忆。 */
   baseUrl = '';
 
-  private static readonly BASE_URL_KEY = 'tsm-gateway.public-base-url';
+  private static readonly BASE_URL_KEY = 'tsm-hub.public-base-url';
 
   
   /** 弹窗滚动锁：打开时锁 body，关闭/销毁时恢复（防止滚动穿透母页面）。 */
@@ -379,7 +379,7 @@ constructor(private api: ApiService) {}
       `  -d '{"messages":[{"role":"user","content":"你好"}]}'`,
       ``,
       `# 无脑调用：不传 model（或传 "auto"），网关按内容自动分流`,
-      `# chat / fast / reason / code 等场景由 tsm-gateway 内部决策，外部无需关心`,
+      `# chat / fast / reason / code 等场景由 tsm-hub 内部决策，外部无需关心`,
     ].join('\n');
   }
 

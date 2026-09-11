@@ -16,7 +16,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"github.com/erishen/tsm-gateway/internal/router"
+	"github.com/erishen/tsm-hub/internal/router"
 )
 
 // memoryStore 是 remember/recall 的 SQLite 持久化存储。

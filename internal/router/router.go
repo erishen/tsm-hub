@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/erishen/tsm-gateway/internal/store"
+	"github.com/erishen/tsm-hub/internal/store"
 )
 
 // Candidate 是一个可转发的上游目标。
