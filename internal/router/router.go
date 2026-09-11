@@ -173,7 +173,8 @@ func supportsModel(p store.Provider, model string) bool {
 }
 
 // order 按策略排序候选：failover 严格按 priority 升序；weighted 按延迟加权打散；
-// smart 按成本智能打分（免费优先、单价低优先），健康/429 降权由健康过滤与 HalfOpen 承担。
+// smart 按可配置的多维度智能评分（策略模式：cost_first / stability_first / task_aware / balanced），
+// 健康/429 降权由健康过滤与 HalfOpen 承担。
 func (r *Router) order(cands []Candidate, strategy string) []Candidate {
 	out := append([]Candidate(nil), cands...)
 
@@ -217,11 +218,24 @@ func (r *Router) order(cands []Candidate, strategy string) []Candidate {
 	return r.weightedShuffle(pool)
 }
 
-// smartScore 给候选打成本分：免费加分（主信号），单价低加分，半开/429 降权。
-// 权重与价格档位可经 settings.smart 配置；未配置用默认值。
+// smartScore 给候选打多维度智能分：根据策略模式（cost_first / stability_first / task_aware / balanced）
+// 和各维度权重综合计算。权重与价格档位可经 settings.smart 配置；未配置用默认值。
 // 定价优先取探测快照（如 OpenRouter），探测缺失时按 id 后缀规则判免费。
 func (r *Router) smartScore(c Candidate) int {
 	cfg := r.store.Settings().Smart
+
+	// 根据策略模式设置默认权重
+	costW, stabilityW, latencyW := r.defaultWeights(cfg.StrategyMode)
+	if cfg.CostWeight > 0 {
+		costW = cfg.CostWeight
+	}
+	if cfg.StabilityWeight > 0 {
+		stabilityW = cfg.StabilityWeight
+	}
+	if cfg.LatencyWeight > 0 {
+		latencyW = cfg.LatencyWeight
+	}
+
 	freeBonus := cfg.FreeBonus
 	if freeBonus == 0 {
 		freeBonus = 100
@@ -232,6 +246,8 @@ func (r *Router) smartScore(c Candidate) int {
 	}
 
 	score := 0
+
+	// ===== 成本维度 =====
 	var pm *store.ProbeModel
 	for i := range c.Provider.ProbeModels {
 		if c.Provider.ProbeModels[i].ID == c.UpstreamModel {
@@ -239,12 +255,13 @@ func (r *Router) smartScore(c Candidate) int {
 			break
 		}
 	}
+	costScore := 0
 	if pm == nil {
 		if strings.Contains(c.UpstreamModel, ":free") || strings.HasSuffix(c.UpstreamModel, "-free") {
-			score += freeBonus
+			costScore += freeBonus
 		}
 	} else if pm.Free {
-		score += freeBonus
+		costScore += freeBonus
 	}
 	if pm != nil && pm.Pricing != nil {
 		p, err := strconv.ParseFloat(pm.Pricing.Prompt, 64)
@@ -260,12 +277,49 @@ func (r *Router) smartScore(c Candidate) int {
 			}
 			for _, tier := range tiers {
 				if p <= tier.PromptMax {
-					score += tier.Score
+					costScore += tier.Score
 					break
 				}
 			}
 		}
 	}
+	score += costScore * costW / 100
+
+	// ===== 稳定性维度（成功率 + 失败次数）=====
+	stabilityScore := 0
+	health := r.health.Health(c.ProviderID)
+	if health.Requests > 0 {
+		successRate := float64(health.Requests-health.Errors) / float64(health.Requests)
+		stabilityScore = int(successRate * 100)
+	} else {
+		// 新 provider 没有历史数据，给中等偏上的分数鼓励探索
+		stabilityScore = 70
+	}
+	// 连续失败次数惩罚
+	if health.Failures > 0 {
+		stabilityScore -= health.Failures * 10
+	}
+	if stabilityScore < 0 {
+		stabilityScore = 0
+	}
+	score += stabilityScore * stabilityW / 100
+
+	// ===== 延迟维度 =====
+	latencyScore := 0
+	if lat := r.health.Latency(c.ProviderID); lat > 0 {
+		// 延迟越低分数越高：100ms 以内 100 分，1000ms 以上 0 分
+		if lat < 100 {
+			latencyScore = 100
+		} else if lat < 1000 {
+			latencyScore = int(100 - float64(lat-100)/9)
+		}
+	} else {
+		// 没有延迟数据，给中等分数
+		latencyScore = 60
+	}
+	score += latencyScore * latencyW / 100
+
+	// ===== 通用惩罚 =====
 	if c.HalfOpen {
 		score -= halfPenalty
 	}
@@ -274,6 +328,22 @@ func (r *Router) smartScore(c Candidate) int {
 		score -= 1000
 	}
 	return score
+}
+
+// defaultWeights 根据策略模式返回默认的各维度权重（百分比）。
+func (r *Router) defaultWeights(mode string) (cost, stability, latency int) {
+	switch mode {
+	case "stability_first":
+		return 30, 100, 50 // 稳定性优先
+	case "task_aware":
+		return 50, 80, 70 // 任务感知（能力匹配在 Pick 层过滤，这里侧重稳定+延迟）
+	case "balanced":
+		return 60, 70, 70 // 平衡模式
+	case "cost_first":
+		fallthrough
+	default:
+		return 100, 40, 30 // 成本优先（默认，保持向后兼容）
+	}
 }
 
 func priorityOf(c Candidate) int {
