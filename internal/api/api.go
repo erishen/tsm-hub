@@ -133,7 +133,12 @@ func (s *Server) Handler() http.Handler {
 			http.NotFound(w, r)
 		})
 	}
-	return s.withRecovery(mux)
+	handler := s.withRecovery(mux)
+	// CORS 中间件（仅在配置启用时生效）
+	if s.store != nil && s.store.Settings().CORS.Enabled {
+		handler = newCORSMiddleware(s.store.Settings().CORS).Wrap(handler)
+	}
+	return handler
 }
 
 // ---------- 中间件 ----------

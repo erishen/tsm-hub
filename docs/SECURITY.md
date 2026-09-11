@@ -14,8 +14,12 @@
   ```json
   { "api_key": "env:DEEPSEEK_API_KEY" }
   ```
-- 直接填写明文时，`config.json` 权限为 `600`（仅所有者可读写），但仍存在备份泄露、误提交 git 等风险
+- 直接填写明文时，`config.json` 权限应为 `600`（仅所有者可读写），但仍存在备份泄露、误提交 git 等风险
 - 管理台展示时自动脱敏（前4位****后4位）
+- **启动时自动安全检查**：
+  - 如 `config.json` 权限不是 `600`（group/other 可读），会发出警告
+  - 如检测到明文存储的 Provider API Key，会发出警告并统计数量，建议改用环境变量引用
+  - 如未启用 TLS，会发出警告，建议生产环境启用 TLS 或使用反向代理
 
 ### 用量数据
 
@@ -83,7 +87,27 @@
 
 ### HTTPS / TLS
 
-⚠️ **网关本身只监听 HTTP，生产环境必须通过反向代理提供 HTTPS**。
+网关支持两种 HTTPS 部署方式：
+
+**方式一：网关原生 TLS（推荐，简单）**
+
+在 `config.json` 的 `settings.tls` 中配置：
+```json
+{
+  "settings": {
+    "tls": {
+      "enabled": true,
+      "cert_file": "/etc/ssl/certs/tsm-hub.crt",
+      "key_file": "/etc/ssl/private/tsm-hub.key"
+    }
+  }
+}
+```
+启动时会自动检查证书文件是否存在，启用后网关直接监听 HTTPS。
+
+**方式二：反向代理（适合已有反向代理的环境）**
+
+⚠️ **未启用 TLS 时，网关只监听 HTTP，API 密钥和用户数据在网络上明文传输，仅限受信任的内网环境使用。生产环境必须启用 TLS 或通过反向代理提供 HTTPS。**
 
 **Nginx 示例**：
 ```nginx
@@ -130,8 +154,34 @@ tsm-hub.example.com {
 
 ### CORS（跨域资源共享）
 
-- 网关本身**不配置 CORS**，浏览器跨域请求会被阻止（这是安全的默认行为，防止恶意网站调用 API）
-- 如果需要从浏览器端直接调用网关 API（如前端应用直连），请在反向代理层配置 CORS：
+网关支持原生 CORS 配置，也可在反向代理层配置。
+
+**方式一：网关原生 CORS 配置**
+
+在 `config.json` 的 `settings.cors` 中配置：
+```json
+{
+  "settings": {
+    "cors": {
+      "enabled": true,
+      "allowed_origins": ["https://your-app.example.com"],
+      "allowed_methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+      "allowed_headers": ["Content-Type", "Authorization", "X-Admin-Token", "X-Session-Token"],
+      "allow_credentials": true,
+      "max_age": 86400
+    }
+  }
+}
+```
+
+⚠️ **安全注意事项**：
+- 生产环境**不要**使用 `allowed_origins: ["*"]` + `allow_credentials: true`（浏览器会拒绝）
+- 建议明确列出允许的源，如 `["https://app.example.com"]`
+- 仅在需要浏览器端直接调用网关 API 时启用 CORS
+
+**方式二：反向代理层配置 CORS**
+
+如果使用反向代理，也可在反向代理层配置 CORS：
 
 **Nginx CORS 配置示例**：
 ```nginx
@@ -151,6 +201,8 @@ location / {
     # ... 其他 proxy 配置
 }
 ```
+
+**默认行为**：未启用 CORS 时，浏览器跨域请求会被阻止（这是安全的默认行为，防止恶意网站调用 API）。
 
 ### 速率限制
 
@@ -189,15 +241,16 @@ location / {
 部署前请确认：
 
 ### 基础安全
-- [ ] Admin Token 已修改为强随机值（非默认 `123456`）
+- [ ] Admin Token 已修改为强随机值（非默认 `change-me-admin`）
 - [ ] 上游 Provider API Key 使用 `env:` 引用环境变量
-- [ ] 通过反向代理提供 HTTPS（Nginx/Caddy）
+- [ ] 已启用 TLS（网关原生 `settings.tls` 或通过反向代理提供 HTTPS）
 - [ ] 管理端口未直接暴露公网（或有防火墙限制）
 - [ ] `config.json` 权限为 `600`
 - [ ] `config.json` 已加入 `.gitignore`
 - [ ] 配置了用量数据自动清理（`usage_retention_days`）
 - [ ] 配置了审计日志保留天数（`audit_retention_days`）
 - [ ] 定期备份 `data/` 目录（config.json + usage/ + memory.db + audit.db）
+- [ ] 启动日志中无安全警告（TLS 未启用、明文 API Key、config 权限等）
 
 ### 能力池安全
 - [ ] `fetch_url` 工具未放行内网地址（除非确有需要）
@@ -208,7 +261,14 @@ location / {
 - [ ] 不需要 agent 工具循环的 Key 可通过 `X-Llm-Router-Agent: off` 关闭
 
 ### 网络与限流
-- [ ] 如需浏览器跨域调用，已在反向代理层配置 CORS（指定具体域名，不用 `*`）
+- [ ] 如需浏览器跨域调用，已配置 CORS（网关原生 `settings.cors` 或反向代理层，指定具体域名，不用 `*`）
 - [ ] 已为高流量 Key 配置 `quota.rpm` 限流
 - [ ] 反向代理层已配置全局速率限制（作为网关限流的补充）
 - [ ] SSE 流式响应的代理超时已设置足够长（建议 300s+）
+
+## 相关文档
+
+- [隐私政策（PRIVACY.md）](./PRIVACY.md) — 数据收集、使用、存储、数据主体权利
+- [数据处理协议模板（DPA.md）](./DPA.md) — 作为数据处理者时与客户签署的 DPA 模板
+- [架构文档（ARCHITECTURE.md）](./ARCHITECTURE.md) — 系统架构、数据流、组件设计
+- [隐私合规审计报告（PRIVACY_AUDIT.md）](./PRIVACY_AUDIT.md) — 全面的隐私合规检查报告与修复建议

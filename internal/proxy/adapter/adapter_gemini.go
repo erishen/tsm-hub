@@ -11,8 +11,9 @@ import (
 // GeminiAdapter 是 Google Gemini API 协议的适配器。
 //
 // Gemini 与 OpenAI 的主要差异：
-// - URL：https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}
-// - 认证：API key 作为 URL 参数（而非请求头）
+// - URL：https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent
+// - 认证：优先使用 x-goog-api-key 请求头（避免密钥出现在 URL/日志中），
+//   兼容 URL 参数 ?key={api_key}（当 base_url 已包含 key 参数时保留）
 // - 请求体：contents/parts 格式（而非 messages）
 // - 响应体：candidates[].content.parts[].text（而非 choices[].message.content）
 // - 流式：:streamGenerateContent，SSE 事件格式不同
@@ -22,21 +23,17 @@ func (a *GeminiAdapter) Name() string { return "gemini" }
 
 func (a *GeminiAdapter) UpstreamURL(provider store.Provider, clientPath string) string {
 	base := strings.TrimRight(provider.BaseURL, "/")
-	// 如果用户已经填了完整的 URL（包含 /models/），直接使用
+	// 如果用户已经填了完整的 URL（包含 /models/），直接使用（不添加 key 参数，用请求头传递）
 	if strings.Contains(base, "/models/") {
-		sep := "?"
-		if strings.Contains(base, "?") {
-			sep = "&"
-		}
-		return base + sep + "key=" + provider.ResolvedAPIKey()
+		return base
 	}
 	// 否则默认用 generateContent 端点（模型名在请求体转换时处理）
-	return base + "/v1beta/models/gemini-pro:generateContent?key=" + provider.ResolvedAPIKey()
+	return base + "/v1beta/models/gemini-pro:generateContent"
 }
 
 func (a *GeminiAdapter) AuthHeader(provider store.Provider) (key, value string) {
-	// Gemini 用 URL 参数传递 API key，不需要认证头
-	return "", ""
+	// 使用 x-goog-api-key 请求头传递 API key，避免密钥出现在 URL/日志中
+	return "x-goog-api-key", provider.ResolvedAPIKey()
 }
 
 // geminiRequest 是 Gemini API 的请求体格式。
