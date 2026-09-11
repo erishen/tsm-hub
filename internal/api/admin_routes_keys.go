@@ -96,11 +96,12 @@ func (s *Server) handleListKeys(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleCreateKey(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name         string      `json:"name"`
-		Models       []string    `json:"models"`
-		Quota        store.Quota `json:"quota"`
-		ExpiresIn    int64       `json:"expires_in_seconds"`
-		InjectSkills string      `json:"inject_skills"`
+		Name          string      `json:"name"`
+		Models        []string    `json:"models"`
+		Quota         store.Quota `json:"quota"`
+		ExpiresIn     int64       `json:"expires_in_seconds"`
+		InjectSkills  string      `json:"inject_skills"`
+		AgentDisabled bool        `json:"agent_disabled"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid json: "+err.Error())
@@ -116,15 +117,16 @@ func (s *Server) handleCreateKey(w http.ResponseWriter, r *http.Request) {
 		req.InjectSkills = "list"
 	}
 	k := store.APIKey{
-		ID:           newID(),
-		Name:         req.Name,
-		Prefix:       display,
-		Hash:         hash,
-		Enabled:      true,
-		Models:       req.Models,
-		Quota:        req.Quota,
-		CreatedAt:    time.Now(),
-		InjectSkills: req.InjectSkills,
+		ID:            newID(),
+		Name:          req.Name,
+		Prefix:        display,
+		Hash:          hash,
+		Enabled:       true,
+		Models:        req.Models,
+		Quota:         req.Quota,
+		CreatedAt:     time.Now(),
+		InjectSkills:  req.InjectSkills,
+		AgentDisabled: req.AgentDisabled,
 	}
 	if req.ExpiresIn > 0 {
 		k.ExpiresAt = time.Now().Add(time.Duration(req.ExpiresIn) * time.Second)
@@ -213,20 +215,21 @@ func (s *Server) handleDeleteKey(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleUpdateKey(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name         string      `json:"name"`
-		Models       []string    `json:"models"`
-		Quota        store.Quota `json:"quota"`
-		InjectSkills string      `json:"inject_skills"`
+		Name          string      `json:"name"`
+		Models        []string    `json:"models"`
+		Quota         store.Quota `json:"quota"`
+		InjectSkills  string      `json:"inject_skills"`
+		AgentDisabled bool        `json:"agent_disabled"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid json: "+err.Error())
 		return
 	}
-	if err := s.store.UpdateKey(r.PathValue("id"), req.Name, req.Models, req.Quota, req.InjectSkills); err != nil {
+	if err := s.store.UpdateKey(r.PathValue("id"), req.Name, req.Models, req.Quota, req.InjectSkills, req.AgentDisabled); err != nil {
 		writeError(w, http.StatusNotFound, "not_found", err.Error())
 		return
 	}
-	s.recordAudit(r, "update", "key", r.PathValue("id"), map[string]any{"name": req.Name, "models": req.Models})
+	s.recordAudit(r, "update", "key", r.PathValue("id"), map[string]any{"name": req.Name, "models": req.Models, "agent_disabled": req.AgentDisabled})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 

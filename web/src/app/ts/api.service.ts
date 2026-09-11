@@ -313,7 +313,7 @@ export class ApiService {
 
   createKey(body: {
     name: string; models?: string[]; quota?: Partial<Quota>; expires_in_seconds?: number;
-    inject_skills?: string;
+    inject_skills?: string; agent_disabled?: boolean;
   }): Observable<{ id: string; key: string; prefix: string; warning: string }> {
     return this.http.post<{ id: string; key: string; prefix: string; warning: string }>(
       '/api/admin/keys', body, { headers: this.headers() },
@@ -332,7 +332,7 @@ export class ApiService {
   }
 
   updateKey(id: string, body: {
-    name?: string; models?: string[]; quota?: Partial<Quota>; inject_skills?: string;
+    name?: string; models?: string[]; quota?: Partial<Quota>; inject_skills?: string; agent_disabled?: boolean;
   }): Observable<unknown> {
     return this.http.patch(`/api/admin/keys/${encodeURIComponent(id)}`, body, { headers: this.headers() })
       .pipe(catchError(this.handleError));

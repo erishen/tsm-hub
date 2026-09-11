@@ -555,7 +555,7 @@ func (s *Store) SetKeyEnabled(id string, enabled bool) error {
 }
 
 // UpdateKey 更新已有 key 的可编辑字段（Name/Models/Quota/InjectSkills）。
-func (s *Store) UpdateKey(id string, name string, models []string, quota Quota, injectSkills string) error {
+func (s *Store) UpdateKey(id string, name string, models []string, quota Quota, injectSkills string, agentDisabled bool) error {
 	return s.Update(func(c *Config) error {
 		for i := range c.Keys {
 			if c.Keys[i].ID == id {
@@ -563,6 +563,7 @@ func (s *Store) UpdateKey(id string, name string, models []string, quota Quota, 
 				c.Keys[i].Models = models
 				c.Keys[i].Quota = quota
 				c.Keys[i].InjectSkills = injectSkills
+				c.Keys[i].AgentDisabled = agentDisabled
 				return nil
 			}
 		}

@@ -152,6 +152,15 @@
                 </select>
               </div>
             </div>
+            <div class="form-row">
+              <div style="display:flex;align-items:center;gap:8px;">
+                <input type="checkbox" id="agent-disabled" [(ngModel)]="form.agent_disabled" style="width:18px;height:18px;" />
+                <label for="agent-disabled" style="margin:0;cursor:pointer;">禁用网关 Agent（该 Key 有自己的 Agent 流水线时勾选）</label>
+              </div>
+            </div>
+            <div class="form-hint" *ngIf="form.agent_disabled" style="font-size:12px;color:#6B7280;margin-top:-8px;">
+              勾选后请求直接透传到上游模型，不经过网关 Agent 工具循环。适用于 crewai-pse、resolve-studio 等自带 Agent 流水线的客户端。
+            </div>
           </div>
           <div class="form-section">
             <h3>配额（0 = 不限）</h3>
@@ -186,7 +195,7 @@
         <thead>
           <tr>
             <th style="width:32px"><input type="checkbox" [checked]="allSelected()" (change)="toggleAll($event)" /></th>
-            <th>名称 / Prefix</th><th>状态</th><th>模型</th><th>技能注入</th>
+            <th>名称 / Prefix</th><th>状态</th><th>模型</th><th>技能注入</th><th>Agent</th>
             <th class="num">用量 Tokens</th><th class="num">成本</th>
             <th class="num">RPM</th><th>工具使用 <span class="muted" style="font-weight:400;font-size:11px">（执行 / 声明）</span></th><th>剩余 / 配额</th><th>操作</th>
           </tr>
@@ -210,6 +219,11 @@
             <td>
               <span class="muted" style="font-size:12px" *ngIf="!k.inject_skills">—</span>
               <span *ngIf="k.inject_skills" title="技能注入：该 Key 的请求会自动携带技能上下文">{{ injectLabel(k.inject_skills) }}</span>
+            </td>
+            <td>
+              <span class="badge" [class.ok]="!k.agent_disabled" [class.bad]="k.agent_disabled" title="{{ k.agent_disabled ? '已禁用网关 Agent，请求直接透传到上游模型' : '经过网关 Agent，享受内置工具池' }}">
+                {{ k.agent_disabled ? 'Agent 关闭' : 'Agent 开启' }}
+              </span>
             </td>
             <td class="num">{{ compact(k.usage?.total_tokens ?? 0) }}</td>
             <td class="num">{{ usd(k.usage?.cost_usd ?? 0) }}</td>

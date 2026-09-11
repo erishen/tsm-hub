@@ -1593,7 +1593,7 @@ func TestAgentSkillsInjection(t *testing.T) {
 	defer e.server.Close()
 
 	// 给主 key 开启技能注入（list 无技能库时为空，仅验证不破坏循环）。
-	if err := e.store.UpdateKey("k-test", "", nil, store.Quota{}, "list"); err != nil {
+	if err := e.store.UpdateKey("k-test", "", nil, store.Quota{}, "list", false); err != nil {
 		t.Fatalf("update key: %v", err)
 	}
 	resp := e.do(t, http.MethodPost, "/v1/chat/completions",
