@@ -10,8 +10,14 @@ services:
       - ./data:/data
     environment:
       # 生产环境务必改成强口令；未设置时回落到 config.json 里的 admin_token。
-      LLM_ROUTER_ADMIN_TOKEN: change-me-admin
-      LLM_ROUTER_LOG_LEVEL: info
+      # 如果想复用挂载的 ./data/config.json 中的 admin_token，注释掉下面这行即可
+      # TSM_HUB_ADMIN_TOKEN: change-me-admin
+      TSM_HUB_LOG_LEVEL: info
+      # 智能路由策略（可选）：cost_first / stability_first / task_aware / balanced
+      # TSM_HUB_SMART_STRATEGY: stability_first
+      # TSM_HUB_SMART_COST_WEIGHT: 40
+      # TSM_HUB_SMART_STABILITY_WEIGHT: 100
+      # TSM_HUB_SMART_LATENCY_WEIGHT: 60
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9070/healthz"]
       interval: 30s
