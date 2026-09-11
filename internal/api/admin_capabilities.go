@@ -204,6 +204,8 @@ func (s *Server) handleListTools(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleListExternalTools 列出外部自创工具：声明统计 + 录用状态 + 已录用实现。
+// 注意：被识别为 MCP 风格的工具（server__tool / server:tool / server/tool）不会出现在这里，
+// 而是在 MCP 页面按 server 聚合显示；除非该 MCP server 已被管理员忽略，才会回退到这里显示。
 
 func (s *Server) handleListExternalTools(w http.ResponseWriter, r *http.Request) {
 	known := map[string]bool{}
@@ -214,6 +216,11 @@ func (s *Server) handleListExternalTools(w http.ResponseWriter, r *http.Request)
 	for _, n := range []string{"read_file", "csv_analyze", "execute_code"} {
 		known[n] = true
 	}
+	// 已忽略的 MCP server：这些 server 的工具会回退到 Tools 页面显示。
+	ignoredMcp := map[string]bool{}
+	for _, sv := range s.store.Settings().IgnoredMcpServers {
+		ignoredMcp[sv] = true
+	}
 	adopted := map[string]bool{}
 	impls := map[string]store.ExternalTool{}
 	for _, t := range s.store.ListExternalTools() {
@@ -223,6 +230,10 @@ func (s *Server) handleListExternalTools(w http.ResponseWriter, r *http.Request)
 	out := make([]map[string]any, 0)
 	for _, t := range s.rec.ClientToolStats() {
 		if knownToolName(t.Name, known) {
+			continue
+		}
+		// 排除 MCP 风格的工具，除非该 MCP server 已被忽略（回退到 Tools 页面）。
+		if server, ok := extractMcpServer(t.Name); ok && !ignoredMcp[server] {
 			continue
 		}
 		item := map[string]any{
@@ -514,8 +525,38 @@ func parseSuggestJSON(content string) (map[string]any, error) {
 	return out, nil
 }
 
+// extractMcpServer 从工具名中提取 MCP server 名，支持多种命名格式：
+//   - 双下划线：server__tool（MCP 标准，优先级最高）
+//   - 单冒号：server:tool（部分 Python 框架使用）
+//   - 斜杠：server/tool（部分 JS 框架使用）
+//
+// 返回 server 名和是否识别成功。提取出的 server 名会通过 validProviderID 校验。
+// 优先级：双下划线 > 单冒号 > 斜杠，因为双下划线是 MCP 标准，最不容易误判。
+
+func extractMcpServer(name string) (string, bool) {
+	// 按优先级尝试不同的分隔符
+	separators := []string{"__", ":", "/"}
+	for _, sep := range separators {
+		i := strings.Index(name, sep)
+		if i <= 0 {
+			continue // 分隔符在开头或不存在，跳过
+		}
+		server := name[:i]
+		tool := name[i+len(sep):]
+		if tool == "" {
+			continue // 工具名为空，跳过
+		}
+		if !validProviderID(server) {
+			continue // server 名不合法，跳过
+		}
+		return server, true
+	}
+	return "", false
+}
+
 // handleListExternalMcpCandidates 返回外部 MCP server 候选：
-// 调用方声明的 server__tool 风格工具（未命中网关能力、未在网关 MCP 配置）按 server 聚合，
+// 调用方声明的 MCP 风格工具（未命中网关能力、未在网关 MCP 配置）按 server 聚合，
+// 支持多种命名格式：server__tool（双下划线）、server:tool（单冒号）、server/tool（斜杠），
 // 供管理员择优接入网关（一键写入 Settings.Mcps 并常驻连接）。
 
 func (s *Server) handleListExternalMcpCandidates(w http.ResponseWriter, r *http.Request) {
@@ -535,13 +576,9 @@ func (s *Server) handleListExternalMcpCandidates(w http.ResponseWriter, r *http.
 		if known[t.Name] {
 			continue
 		}
-		i := strings.Index(t.Name, "__")
-		if i <= 0 {
-			continue // 非 server__tool 风格，不是 MCP 候选
-		}
-		server := t.Name[:i]
-		if !validProviderID(server) {
-			continue
+		server, ok := extractMcpServer(t.Name)
+		if !ok {
+			continue // 非 MCP 风格工具名，不是 MCP 候选
 		}
 		if _, ok := configured[server]; ok {
 			continue // 已接入网关的 server，不算外部候选
