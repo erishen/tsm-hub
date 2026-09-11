@@ -26,7 +26,7 @@
         </h3>
         <table>
           <thead>
-            <tr><th>模型</th><th>Provider</th><th>评分</th><th>上下文</th><th>价格</th><th>用途</th></tr>
+            <tr><th>模型</th><th>Provider</th><th>评分</th><th>上下文</th><th>价格</th><th>Tools</th><th>用途</th></tr>
           </thead>
           <tbody>
             <tr *ngFor="let m of byCategory()[cat]" [style.opacity]="m.unavailable ? 0.55 : 1">
@@ -47,6 +47,10 @@
                 <span class="badge free" *ngIf="m.free">FREE</span>
                 <span class="muted small" *ngIf="!m.free && m.pricing">$ {{ m.pricing.prompt }}/{{ m.pricing.completion }}M</span>
                 <span class="muted" *ngIf="!m.free && !m.pricing">—</span>
+              </td>
+              <td style="white-space:nowrap">
+                <span class="badge ok" *ngIf="m.supports_tools !== false" title="支持 tool calling / function calling">✓ Tools</span>
+                <span class="badge bad" *ngIf="m.supports_tools === false" title="不支持 tool calling（带 tools 请求会返回 400）">✗ No Tools</span>
               </td>
               <td>{{ m.purpose }}</td>
             </tr>

@@ -183,6 +183,8 @@ export interface CatalogModel {
   route_score?: number;
   /** 是否在某条路由的 targets 里（未接入路由的模型不会被外部调用命中）。 */
   in_route?: boolean;
+  /** 是否支持 tool calling（function calling）。默认 true；曾因带 tools 返回 400 则为 false。 */
+  supports_tools?: boolean;
 }
 
 /** 探测返回的模型元信息：上下文窗口（token 总量）与免费标记。 */
