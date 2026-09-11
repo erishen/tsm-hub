@@ -92,11 +92,11 @@ import { Balance, ProviderBalance } from './models';
           <!-- OpenRouter -->
           <ng-container *ngIf="b.balance.kind === 'openrouter'">
             <div class="balance-main" *ngIf="b.balance.total_credits">
-              <span class="balance-amount">\${{ b.balance.total_credits?.toFixed(2) }}</span>
+              <span class="balance-amount">\${{ b.balance.total_credits.toFixed(2) }}</span>
               <span class="balance-label">总额度</span>
             </div>
             <div class="balance-main" *ngIf="!b.balance.total_credits && b.balance.limit">
-              <span class="balance-amount">\${{ b.balance.limit?.toFixed(2) }}</span>
+              <span class="balance-amount">\${{ b.balance.limit.toFixed(2) }}</span>
               <span class="balance-label">额度上限</span>
             </div>
             <div class="balance-main" *ngIf="!b.balance.total_credits && !b.balance.limit">
@@ -110,11 +110,11 @@ import { Balance, ProviderBalance } from './models';
               </div>
               <div class="detail-item" *ngIf="b.balance.limit_remaining">
                 <span class="detail-label">剩余</span>
-                <span class="detail-value">\${{ b.balance.limit_remaining?.toFixed(2) }}</span>
+                <span class="detail-value">\${{ b.balance.limit_remaining.toFixed(2) }}</span>
               </div>
               <div class="detail-item" *ngIf="b.balance.hard_limit_usd">
                 <span class="detail-label">订阅上限</span>
-                <span class="detail-value">\${{ b.balance.hard_limit_usd?.toFixed(2) }}</span>
+                <span class="detail-value">\${{ b.balance.hard_limit_usd.toFixed(2) }}</span>
               </div>
             </div>
             <div class="progress-bar" *ngIf="usagePct(b.balance) > -1">
@@ -132,7 +132,7 @@ import { Balance, ProviderBalance } from './models';
           <!-- OpenAI -->
           <ng-container *ngIf="b.balance.kind === 'openai'">
             <div class="balance-main" *ngIf="b.balance.hard_limit_usd">
-              <span class="balance-amount">\${{ b.balance.hard_limit_usd?.toFixed(2) }}</span>
+              <span class="balance-amount">\${{ b.balance.hard_limit_usd.toFixed(2) }}</span>
               <span class="balance-label">订阅上限</span>
             </div>
             <div class="balance-detail-row">
