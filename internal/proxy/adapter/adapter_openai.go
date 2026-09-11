@@ -1,13 +1,13 @@
 package adapter
 
 import (
-	"encoding/json"
-
 	"github.com/erishen/tsm-hub/internal/store"
 )
 
 // OpenAIAdapter 是 OpenAI 兼容协议的适配器，也是默认适配器。
-// 它不做任何转换，直接透传请求和响应（只做 URL 拼接和模型名替换）。
+// 它不做任何转换，直接透传请求和响应（只做 URL 拼接和认证头）。
+// 注意：模型名替换和 stream_options 注入由 proxy.rewriteBody 统一处理，
+// 这里不再重新序列化请求体，以保留 stream_options 等未知字段。
 type OpenAIAdapter struct{}
 
 func (a *OpenAIAdapter) Name() string { return "openai" }
@@ -21,19 +21,9 @@ func (a *OpenAIAdapter) AuthHeader(provider store.Provider) (key, value string) 
 }
 
 func (a *OpenAIAdapter) ConvertRequest(body []byte, upstreamModel string) ([]byte, map[string]string, error) {
-	// OpenAI 适配器不做请求体转换，但需要替换模型名
-	var req openAIRequest
-	if err := json.Unmarshal(body, &req); err != nil {
-		return body, nil, nil // 解析失败就原样透传
-	}
-	if upstreamModel != "" && upstreamModel != "*" {
-		req.Model = upstreamModel
-		out, err := json.Marshal(req)
-		if err != nil {
-			return body, nil, nil
-		}
-		return out, nil, nil
-	}
+	// OpenAI 适配器纯透传，不做请求体转换。
+	// 模型名替换和 stream_options 注入已由 proxy.rewriteBody 处理。
+	// 不重新序列化可以保留 stream_options 等所有原始字段。
 	return body, nil, nil
 }
 

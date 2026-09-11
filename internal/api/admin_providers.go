@@ -7,6 +7,7 @@ import (
 	"github.com/erishen/tsm-hub/internal/store"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -325,6 +326,18 @@ func parseMoonshotBalance(body []byte) map[string]any {
 
 // flexFloat 兼容 JSON 字符串与数字两种表示（DeepSeek 余额字段是 "51.75" 字符串）。
 type flexFloat float64
+
+// UnmarshalJSON 支持字符串和数字两种 JSON 表示。
+func (f *flexFloat) UnmarshalJSON(data []byte) error {
+	// 去掉引号（字符串格式）
+	s := strings.Trim(string(data), `"`)
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return err
+	}
+	*f = flexFloat(v)
+	return nil
+}
 
 
 func parseDeepSeekBalance(body []byte) map[string]any {
