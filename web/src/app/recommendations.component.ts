@@ -94,7 +94,7 @@ import { AppScenario, RecommendationsResp } from './models';
 
         <!-- 操作 -->
         <div class="scenario-actions">
-          <a class="btn-small primary" [routerLink]="['/playground']" [queryParams]="{ model: sc.models[0]?.id }">去测试</a>
+          <a class="btn-small primary" [routerLink]="['/playground']" [queryParams]="{ model: sc.models[0].id }">去测试</a>
           <a class="btn-small" [routerLink]="['/models']">查看全部模型</a>
         </div>
       </div>
