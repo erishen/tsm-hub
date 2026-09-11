@@ -73,6 +73,8 @@ export interface ApiKey {
   tools_declared?: string[];
   /** 技能注入：""=不注入；list=技能清单；all=全部技能；其他=单个技能名。 */
   inject_skills?: string;
+  /** 禁用网关 agent：true=该 key 的请求不经过网关 agent（即使客户端未传 tools），直接透传到上游模型。适用于客户端自己有完整 Agent 流水线的场景。 */
+  agent_disabled?: boolean;
 }
 
 export interface Overview {

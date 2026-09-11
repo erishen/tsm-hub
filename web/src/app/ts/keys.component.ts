@@ -84,7 +84,7 @@ export class KeysComponent implements OnInit, OnDestroy {
 
   modelsText = '';
   expireDays = 0;
-  form: { name: string; quota: Quota } = { name: '', quota: this.blankQuota() };
+  form: { name: string; quota: Quota; agent_disabled: boolean } = { name: '', quota: this.blankQuota(), agent_disabled: false };
   /** 技能注入：''=不注入 | list | all | __name__(指定技能)，默认 list（技能清单）。 */
   injectSkills = 'list';
   injectSkillName = '';
@@ -186,7 +186,7 @@ constructor(private api: ApiService) {}
   }
 
   startNew(): void {
-    this.form = { name: '', quota: this.blankQuota() };
+    this.form = { name: '', quota: this.blankQuota(), agent_disabled: false };
     this.modelsText = '';
     this.expireDays = 0;
     this.injectSkills = 'list';
@@ -203,6 +203,7 @@ constructor(private api: ApiService) {}
         daily_tokens: k.quota.daily_tokens ?? 0,
         rpm: k.quota.rpm ?? 0,
       },
+      agent_disabled: k.agent_disabled ?? false,
     };
     this.modelsText = (k.models && k.models.length) ? k.models.join(',') : '';
     this.expireDays = 0; // 编辑不改有效期
@@ -238,6 +239,7 @@ constructor(private api: ApiService) {}
       models: models.length ? models : [],
       quota: this.form.quota,
       inject_skills: inject,
+      agent_disabled: this.form.agent_disabled,
     }).subscribe({
       next: () => {
         this.saving.set(false);
@@ -261,12 +263,13 @@ constructor(private api: ApiService) {}
       quota: this.form.quota,
       expires_in_seconds: this.expireDays > 0 ? this.expireDays * 86400 : undefined,
       inject_skills: inject || undefined,
+      agent_disabled: this.form.agent_disabled,
     }).subscribe({
       next: (res) => {
         this.saving.set(false);
         this.justCreated = { id: res.id, key: res.key, prefix: res.prefix };
         this.creating.set(false);
-        this.form = { name: '', quota: this.blankQuota() };
+        this.form = { name: '', quota: this.blankQuota(), agent_disabled: false };
         this.modelsText = '';
         this.injectSkills = '';
         this.injectSkillName = '';
