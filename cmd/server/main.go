@@ -79,6 +79,26 @@ func run(cfg config.Config) error {
 			"add one in the admin console or via POST /api/admin/providers")
 	}
 
+	// 安全自检：config.json 权限和明文 API Key。
+	checkConfigSecurity(cfg.ConfigFile(), st, logger)
+
+	// TLS 配置检查。
+	if settings.TLS.Enabled {
+		if settings.TLS.CertFile == "" || settings.TLS.KeyFile == "" {
+			return fmt.Errorf("TLS enabled but cert_file or key_file is empty")
+		}
+		if _, err := os.Stat(settings.TLS.CertFile); err != nil {
+			return fmt.Errorf("TLS cert file not found: %s", settings.TLS.CertFile)
+		}
+		if _, err := os.Stat(settings.TLS.KeyFile); err != nil {
+			return fmt.Errorf("TLS key file not found: %s", settings.TLS.KeyFile)
+		}
+		logger.Info("TLS enabled", "cert", settings.TLS.CertFile, "key", settings.TLS.KeyFile)
+	} else {
+		logger.Warn("TLS is disabled — API keys and user data are transmitted in plaintext. " +
+			"Enable TLS in config.json (settings.tls) or put a reverse proxy (Nginx/Caddy) in front for production.")
+	}
+
 	rec, err := quota.NewRecorder(cfg.UsageDir())
 	if err != nil {
 		return err
@@ -125,11 +145,21 @@ func run(cfg config.Config) error {
 	// 优雅退出。
 	errCh := make(chan error, 1)
 	go func() {
+		scheme := "http"
+		if settings.TLS.Enabled {
+			scheme = "https"
+		}
 		logger.Info("tsm-hub listening",
-			"addr", listen, "version", version,
+			"addr", listen, "scheme", scheme, "version", version,
 			"config", cfg.ConfigFile(), "data", cfg.DataDir)
-		logger.Info("admin console", "url", consoleURL(listen), "admin_token_set", settings.AdminToken != "")
-		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		logger.Info("admin console", "url", consoleURL(listen, settings.TLS.Enabled), "admin_token_set", settings.AdminToken != "")
+		var err error
+		if settings.TLS.Enabled {
+			err = httpSrv.ListenAndServeTLS(settings.TLS.CertFile, settings.TLS.KeyFile)
+		} else {
+			err = httpSrv.ListenAndServe()
+		}
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}
 	}()
@@ -152,16 +182,54 @@ func run(cfg config.Config) error {
 }
 
 // consoleURL 把监听地址变成可点的 URL：":9070" → localhost:9070，"0.0.0.0:9070" → localhost:9070。
-func consoleURL(listen string) string {
+func consoleURL(listen string, tls bool) string {
 	addr := strings.TrimSpace(listen)
+	scheme := "http"
+	if tls {
+		scheme = "https"
+	}
 	if strings.HasPrefix(addr, ":") {
-		return "http://localhost" + addr
+		return scheme + "://localhost" + addr
 	}
 	addr = strings.Replace(addr, "0.0.0.0", "localhost", 1)
 	if strings.HasPrefix(addr, "http://") || strings.HasPrefix(addr, "https://") {
 		return addr
 	}
-	return "http://" + addr
+	return scheme + "://" + addr
+}
+
+// checkConfigSecurity 检查配置文件权限和明文 API Key，发出安全警告。
+func checkConfigSecurity(configFile string, st *store.Store, logger *slog.Logger) {
+	// 检查 config.json 权限（建议 600）。
+	if fi, err := os.Stat(configFile); err == nil {
+		perm := fi.Mode().Perm()
+		// 检查是否有 group/other 的读权限（044 表示 group 和 other 可读）。
+		if perm&0044 != 0 {
+			logger.Warn("config file is readable by group/others — it may contain plaintext API keys. "+
+				"Run: chmod 600 "+configFile,
+				"file", configFile, "permissions", perm.String())
+		}
+	}
+
+	// 检查是否有明文存储的 Provider API Key（建议使用 env: 前缀引用环境变量）。
+	plaintextKeys := 0
+	envKeys := 0
+	for _, p := range st.ListProviders() {
+		if p.APIKey == "" {
+			continue
+		}
+		if strings.HasPrefix(p.APIKey, store.EnvKeyPrefix) {
+			envKeys++
+		} else {
+			plaintextKeys++
+		}
+	}
+	if plaintextKeys > 0 {
+		logger.Warn("some provider API keys are stored in plaintext in config.json. "+
+			"Consider using 'env:VAR_NAME' prefix to reference environment variables instead. "+
+			"See SECURITY.md for details.",
+			"plaintext_count", plaintextKeys, "env_reference_count", envKeys)
+	}
 }
 
 func newLogger(level string) *slog.Logger {

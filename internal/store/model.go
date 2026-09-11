@@ -59,6 +59,36 @@ type Settings struct {
 	Sandbox SandboxCfg `json:"sandbox,omitempty"`
 	// Fastpath 是确定性快路径 + codegen 配置。
 	Fastpath FastpathCfg `json:"fastpath,omitempty"`
+	// TLS 是 HTTPS/TLS 配置；启用后网关直接监听 HTTPS，无需反向代理。
+	TLS TLSCfg `json:"tls,omitempty"`
+	// CORS 是跨域资源共享配置；浏览器端直接调用网关时需要。
+	CORS CORSCfg `json:"cors,omitempty"`
+}
+
+// TLSCfg 配置网关的 HTTPS/TLS 终端。
+type TLSCfg struct {
+	// Enabled=true 时使用 ListenAndServeTLS 启动 HTTPS 服务。
+	Enabled bool `json:"enabled,omitempty"`
+	// CertFile 是 TLS 证书文件路径（PEM 格式）。
+	CertFile string `json:"cert_file,omitempty"`
+	// KeyFile 是 TLS 私钥文件路径（PEM 格式）。
+	KeyFile string `json:"key_file,omitempty"`
+}
+
+// CORSCfg 配置跨域资源共享（CORS）策略。
+type CORSCfg struct {
+	// Enabled=true 时发送 CORS 响应头并处理预检请求。
+	Enabled bool `json:"enabled,omitempty"`
+	// AllowedOrigins 是允许的源列表；支持 "*" 表示允许所有源（不推荐生产环境）。
+	AllowedOrigins []string `json:"allowed_origins,omitempty"`
+	// AllowedMethods 是允许的 HTTP 方法列表，默认 GET,POST,PUT,DELETE,OPTIONS。
+	AllowedMethods []string `json:"allowed_methods,omitempty"`
+	// AllowedHeaders 是允许的请求头列表，默认 Content-Type,Authorization,X-Admin-Token,X-Session-Token。
+	AllowedHeaders []string `json:"allowed_headers,omitempty"`
+	// AllowCredentials 表示是否允许携带凭证（Cookie、Authorization 头）。
+	AllowCredentials bool `json:"allow_credentials,omitempty"`
+	// MaxAge 是预检请求缓存时间（秒），默认 86400（24小时）。
+	MaxAge int `json:"max_age,omitempty"`
 }
 
 // FastpathCfg 配置确定性快路径（零模型回答）与 codegen（LLM 生成检测器）。
