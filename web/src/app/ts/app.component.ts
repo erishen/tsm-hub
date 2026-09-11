@@ -147,7 +147,7 @@ export class AppComponent {
       withTimeout(this.api.listKeys()),
     ]).then(([models, tools, skills, providers, routes, keys]) => {
       const groups: { label: string; items: { name: string; desc?: string; route: string }[] }[] = [];
-      const match = (s: string) => s.toLowerCase().includes(q);
+      const match = (s: string | undefined | null) => (s ? s.toLowerCase().includes(q) : false);
       if (models?.models) {
         const items = models.models.filter((m: any) => match(m.id) || match(m.name || '')).slice(0, 8)
           .map((m: any) => ({ name: m.id, desc: m.provider || '', route: '/models' }));
