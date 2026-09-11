@@ -80,6 +80,7 @@ func (s *Server) handleListKeys(w http.ResponseWriter, r *http.Request) {
 			"created_at":    k.CreatedAt,
 			"expires_at":    k.ExpiresAt,
 			"inject_skills": k.InjectSkills,
+			"agent_disabled": k.AgentDisabled,
 			"usage":         agg,
 			"rpm_current":   rpm[k.ID],
 			// 新建 key 的 2 分钟窗口内为 true，前端展示「补看」入口。
