@@ -435,6 +435,9 @@ func (s *Server) buildCatalog() map[string]any {
 		RouteScore int `json:"route_score"`
 		// InRoute 表示该 (provider, model) 是否在某条路由的 targets 里（未接入路由的模型不会被外部调用命中）。
 		InRoute bool `json:"in_route"`
+		// SupportsTools 表示该模型是否支持 tool calling（function calling）。
+		// 默认 true（假设支持）；如果曾因带 tools 返回 400 被标记不可用，则为 false。
+		SupportsTools bool `json:"supports_tools"`
 	}
 	out := make([]*item, 0)
 	var latestProbe time.Time
@@ -458,11 +461,17 @@ func (s *Server) buildCatalog() map[string]any {
 			if !has {
 				meta = inferModelMeta(id)
 			}
-			it := &item{ID: id, Provider: p.ID, Category: meta.Category, Purpose: meta.Purpose, Ctx: meta.Ctx}
+			it := &item{ID: id, Provider: p.ID, Category: meta.Category, Purpose: meta.Purpose, Ctx: meta.Ctx, SupportsTools: true}
 			// 曾 404 的模型：冷却期内标灰，路由自动跳过。
 			if reason, unavail := s.store.ModelUnavailable(p.ID, id); unavail {
 				it.Unavailable = reason
+				// 如果不可用原因是 "tools unsupported"（带 tools 返回 400），标记为不支持 tool calling。
+				if strings.Contains(reason, "tools unsupported") {
+					it.SupportsTools = false
+				}
 			}
+			// 默认 SupportsTools = true（零值），假设模型支持 tool calling；
+			// 只有明确因带 tools 返回 400 被标记不可用时才设为 false。
 			// 快照覆盖：该 Provider 最近一次探测的 context_length/free/pricing 优先于静态表。
 			if pm, ok2 := probeByID[id]; ok2 {
 				it.ContextLength = pm.ContextLength
