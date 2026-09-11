@@ -1,0 +1,4 @@
+    table.tbl { table-layout: fixed; }
+    .ellipsis { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .col-name { width: 30%; }
+  

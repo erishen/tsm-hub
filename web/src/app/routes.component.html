@@ -1,0 +1,120 @@
+    <div class="page-head">
+      <div>
+        <h1>路由表</h1>
+        <div class="sub">把对外模型名映射到上游候选：failover 按优先级降级，weighted 按权重分流</div>
+      </div>
+      <button class="primary" (click)="startNew()">+ 新增</button>
+    </div>
+
+    <div class="banner error" *ngIf="error()">{{ error() }}</div>
+
+    <div class="page-loading" *ngIf="loading()">加载中…</div>
+    <!-- 编辑弹窗 -->
+    <div class="modal-backdrop" *ngIf="editing()">
+      <div class="modal" (click)="$event.stopPropagation()">
+        <div class="modal-head">
+          <div class="modal-icon">{{ editingModel ? '✎' : '+' }}</div>
+          <div class="modal-titles">
+            <h2>{{ editingModel ? '编辑 ' + editingModel : '新增路由' }}</h2>
+            <div class="sub">{{ editingModel ? '调整映射策略与上游候选' : '把对外模型名映射到上游候选' }}</div>
+          </div>
+          <button class="icon" (click)="cancel()" aria-label="关闭">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-section">
+            <h3>映射</h3>
+            <div class="form-row">
+              <div>
+                <label>对外模型名 <span class="muted" style="font-weight:400">（留空 = 通配兜底）</span></label>
+                <input [(ngModel)]="form.model" placeholder="留空：任何未路由的模型都走它" />
+              </div>
+              <div style="flex:0 0 220px">
+                <label>策略</label>
+                <select [(ngModel)]="form.strategy">
+                  <option value="smart">smart（成本智能）</option>
+                  <option value="failover">failover（优先降级）</option>
+                  <option value="weighted">weighted（加权分流）</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <label>备注（可选）</label>
+              <input [(ngModel)]="form.remark" placeholder="如：百炼免费额度优先，用完可删" />
+            </div>
+          </div>
+
+          <div class="form-section">
+            <h3>候选 <span class="muted" style="font-weight:400">（按尝试顺序，免费/低价优先自动靠前）</span></h3>
+            <div class="route-target-row" *ngFor="let t of form.targets; let i = index">
+              <div class="rt-provider">
+                <label>Provider</label>
+                <select [(ngModel)]="t.provider_id">
+                  <option *ngFor="let p of providers()" [ngValue]="p.id">{{ p.id }} — {{ p.name }}</option>
+                </select>
+              </div>
+              <div class="rt-model">
+                <label>上游模型 <span class="muted" style="font-weight:400">（留空沿用）</span></label>
+                <input [(ngModel)]="t.model" placeholder="同请求模型" />
+              </div>
+              <div class="rt-num">
+                <label>权重</label>
+                <input type="number" [(ngModel)]="t.weight" />
+              </div>
+              <div class="rt-num">
+                <label>优先级</label>
+                <input type="number" [(ngModel)]="t.priority" />
+              </div>
+              <button class="danger rt-del" (click)="removeTarget(i)">移除</button>
+            </div>
+            <button class="ghost" style="margin-top:4px" (click)="addTarget()">+ 候选</button>
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button (click)="cancel()" [disabled]="saving()">取消</button>
+          <button class="primary" (click)="save()" [disabled]="saving()">
+            {{ saving() ? '保存中…' : '保存' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>已配置（{{ routes().length }}）</h2>
+      <div class="batch-bar" *ngIf="selectedCount()">
+        <span>已选 {{ selectedCount() }} 项</span>
+        <button class="small danger" (click)="batchDelete()">批量删除</button>
+        <button class="small" style="margin-left:auto" (click)="clearSelection()">取消选择</button>
+      </div>
+      <table *ngIf="routes().length; else none">
+        <thead>
+          <tr><th style="width:32px"><input type="checkbox" [checked]="allSelected()" (change)="toggleAll($event)" /></th><th>对外模型</th><th>策略</th><th>候选（按尝试顺序）</th><th>操作</th></tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let r of routes()" [class.selected]="isSelected(r.model || '*')">
+            <td><input type="checkbox" [checked]="isSelected(r.model || '*')" (change)="toggleSelect(r.model || '*', $event)" /></td>
+            <td class="mono">
+              {{ r.model || '*(通配)' }}
+              <span class="badge" *ngIf="!r.model">兜底</span>
+              <div class="muted small" *ngIf="r.remark" style="color:#b45309;margin-top:2px" title="路由备注">{{ r.remark }}</div>
+            </td>
+            <td><span class="badge">{{ r.strategy }}</span></td>
+            <td>
+              <div *ngFor="let t of r.targets" class="mono">
+                {{ t.provider_id }}
+                <span class="muted">→ {{ t.model || '同请求模型' }}</span>
+                <span class="badge">w{{ t.weight }}</span>
+                <span class="badge">p{{ t.priority }}</span>
+              </div>
+            </td>
+            <td style="white-space:nowrap">
+              <button class="small" (click)="edit(r)">编辑</button>
+              <button class="small danger" style="margin-left:6px" (click)="remove(r)">删除</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <ng-template #none>
+        <div class="empty">还没有路由规则。未命中路由表时，会自动回退到「声明支持该模型的 provider」。</div>
+      </ng-template>
+    </div>
+  

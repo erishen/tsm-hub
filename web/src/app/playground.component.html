@@ -1,0 +1,106 @@
+    <div class="page-head">
+      <div>
+        <h1>测试</h1>
+        <div class="sub">用 Token Key 发请求，验证路由命中与上游连通性</div>
+      </div>
+    </div>
+
+    <div class="banner error" *ngIf="errorMsg()">{{ errorMsg() }}</div>
+
+    <div class="page-loading" *ngIf="loading()">加载中…</div>
+    <div class="pg-grid">
+      <div class="card pg-form">
+        <h2>请求</h2>
+
+        <div class="form-row">
+          <div>
+            <label>Token Key</label>
+            <input [(ngModel)]="keyText" placeholder="sk-tr-..." />
+          </div>
+        </div>
+        <div class="form-row">
+          <div>
+            <label>模型</label>
+            <div style="display:flex;gap:8px">
+              <select [(ngModel)]="model" style="flex:1">
+                <option value="" disabled *ngIf="!model">选择模型…</option>
+                <option *ngFor="let m of selectModels()" [ngValue]="m">{{ m }}{{ isFree(m) ? ' (FREE)' : '' }}</option>
+              </select>
+              <button type="button" class="small" (click)="loadModels()" title="重新拉取 Providers 与路由的模型列表">刷新</button>
+            </div>
+            <div class="muted small" style="margin-top:4px">候选 = Providers 已配置的具体模型 + 路由别名</div>
+          </div>
+          <div>
+            <label>响应模式</label>
+            <select [(ngModel)]="stream">
+              <option [ngValue]="true">流式 SSE</option>
+              <option [ngValue]="false">非流式</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div>
+            <label>System（可选）</label>
+            <textarea [(ngModel)]="system" placeholder="系统提示词"></textarea>
+          </div>
+        </div>
+        <div class="form-row">
+          <div>
+            <label>User 消息</label>
+            <textarea [(ngModel)]="user" placeholder="你好"></textarea>
+          </div>
+        </div>
+        <div class="form-row">
+          <div>
+            <label>temperature（可选）</label>
+            <input type="number" step="0.1" [(ngModel)]="temperature" placeholder="留空=默认" />
+          </div>
+          <div>
+            <label>max_tokens（可选）</label>
+            <input type="number" [(ngModel)]="maxTokens" placeholder="留空=默认" />
+          </div>
+        </div>
+        <div style="margin-top:6px; display:flex; align-items:center; gap:10px">
+          <button class="primary" (click)="send()" [disabled]="!keyText || !user || busy()">
+            {{ busy() ? '发送中…' : '发送' }}
+          </button>
+          <button class="ghost" (click)="clearDraft()">清空</button>
+          <span class="muted small" *ngIf="draftSaved()">已自动保存草稿</span>
+          <span class="muted small" *ngIf="!api.loggedIn">未登录时「一键 Mock 联调」不可用</span>
+        </div>
+      </div>
+
+      <div class="card pg-out">
+        <h2>响应</h2>
+        <div class="pg-meta" *ngIf="meta() as m">
+          <span class="badge" [class.ok]="m.ok" [class.bad]="!m.ok">HTTP {{ m.status }}</span>
+          <span class="muted" *ngIf="m.provider">provider: <b>{{ m.provider }}</b></span>
+          <span class="muted">耗时 {{ m.latencyMs }} ms</span>
+          <span class="muted" *ngIf="m.ttfbMs != null">首字节 {{ m.ttfbMs }} ms</span>
+          <span class="muted" *ngIf="m.usage">tokens {{ m.usage.prompt_tokens }}+{{ m.usage.completion_tokens }}={{ m.usage.total_tokens }}</span>
+        </div>
+        <div class="pg-md" *ngIf="output()" [innerHTML]="renderMd(output())"></div>
+        <div class="empty" *ngIf="!output() && !busy()">发送后在此显示回复</div>
+        <div class="empty" *ngIf="busy()">等待上游…</div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:18px">
+      <h2>最近请求</h2>
+      <table *ngIf="recent().length; else noRecent">
+        <thead>
+          <tr><th>时间</th><th>模型</th><th>状态</th><th>Provider</th><th class="num">耗时</th></tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let r of recent()">
+            <td class="muted">{{ r.time }}</td>
+            <td class="mono">{{ r.model }}</td>
+            <td><span class="badge" [class.ok]="r.ok" [class.bad]="!r.ok">HTTP {{ r.status }}</span></td>
+            <td class="mono">{{ r.provider || '—' }}</td>
+            <td class="num">{{ r.latencyMs }} ms</td>
+          </tr>
+        </tbody>
+      </table>
+      <ng-template #noRecent><div class="empty">还没有请求记录</div></ng-template>
+    </div>
+  

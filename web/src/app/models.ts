@@ -37,6 +37,7 @@ export interface Provider {
   timeout_ms: number;
   healthy: boolean;
   latency_ms: number;
+  health?: ProviderHealth; // 完整健康状态（failures/last_error/down_until 等）
 }
 
 export interface RouteTarget {

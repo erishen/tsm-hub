@@ -1,0 +1,59 @@
+    <div class="page-head">
+      <div>
+        <h1>模型目录</h1>
+        <div class="sub">各 Provider 已配置模型的归类与用途（知识表核验于 2026-09-09；未收录模型按 id 推断）</div>
+      </div>
+      <button class="primary" (click)="load()" [disabled]="loading()">
+        {{ loading() ? '探测中…' : '重新探测' }}
+      </button>
+    </div>
+
+    <div style="display:flex;gap:12px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
+      <input [(ngModel)]="q" placeholder="搜索模型 id / 用途 / Provider…" style="min-width:280px" />
+      <span class="muted small">共 {{ models().length }} 条模型记录 · {{ freeCount() }} 个免费（同模型不同 Provider 分行显示）</span>
+    </div>
+    <div class="muted" style="margin-bottom:8px">
+      <ng-container *ngIf="probeAt()">免费/价格状态来自最近一次探测（{{ probeAt() }}，缓存数据），点「重新探测」更新</ng-container>
+      <ng-container *ngIf="!probeAt() && !loading()">尚未探测过，点「重新探测」获取实时免费/价格/上下文</ng-container>
+    </div>
+    <div class="banner error" *ngIf="error()">{{ error() }}</div>
+
+    <ng-container *ngFor="let cat of categories()">
+      <ng-container *ngIf="byCategory()[cat]?.length">
+        <h3 style="margin:18px 0 8px">
+          {{ CATEGORY_LABEL[cat] }}
+          <span class="muted small" style="font-weight:400">（{{ byCategory()[cat].length }}）</span>
+        </h3>
+        <table>
+          <thead>
+            <tr><th>模型</th><th>Provider</th><th>评分</th><th>上下文</th><th>价格</th><th>用途</th></tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let m of byCategory()[cat]" [style.opacity]="m.unavailable ? 0.55 : 1">
+              <td class="mono">
+                {{ m.id }}
+                <span class="badge bad" *ngIf="m.unavailable" [title]="m.unavailable">不可用：{{ m.unavailable.length > 30 ? m.unavailable.slice(0,30)+'…' : m.unavailable }}</span>
+              </td>
+              <td><span class="badge ok">{{ m.provider }}</span></td>
+              <td style="white-space:nowrap">
+                <span class="badge" [class.free]="(m.route_score ?? 0) >= 150" [class.bad]="(m.route_score ?? 0) < 50"
+                      [title]="'免费+100 / 健康+30 / 延迟分 / 在路由+50 / 不可用-100'">
+                  {{ m.route_score ?? 0 }}
+                </span>
+                <span class="badge" *ngIf="!m.in_route" style="margin-left:4px;background:#f0f0f0;color:#888">未接入</span>
+              </td>
+              <td class="muted">{{ ctx(m) }}</td>
+              <td>
+                <span class="badge free" *ngIf="m.free">FREE</span>
+                <span class="muted small" *ngIf="!m.free && m.pricing">$ {{ m.pricing.prompt }}/{{ m.pricing.completion }}M</span>
+                <span class="muted" *ngIf="!m.free && !m.pricing">—</span>
+              </td>
+              <td>{{ m.purpose }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </ng-container>
+    </ng-container>
+
+    <div class="empty" *ngIf="!loading() && !models().length">还没有配置模型，去 Providers 页添加</div>
+  

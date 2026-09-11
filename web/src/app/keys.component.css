@@ -1,0 +1,6 @@
+    .api-grid { display:flex; flex-direction:column; gap:6px; max-width:720px; }
+    .api-item { display:flex; align-items:baseline; gap:10px; padding:6px 10px; background:#fbfaf7;
+                border:1px solid var(--border,#e4e3dd); border-radius:8px; }
+    .api-item .method { font-weight:600; color:#8BC8EA; min-width:38px; font-size:12px; }
+    .api-item .path { font-weight:600; min-width:110px; }
+  

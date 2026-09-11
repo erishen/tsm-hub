@@ -1,0 +1,63 @@
+    <div class="login-wrap" *ngIf="!api.loggedIn">
+      <div class="card">
+        <h2>LLM Token Router</h2>
+        <p class="muted">请输入管理口令（data/config.json 的 settings.admin_token）</p>
+        <div class="banner error" *ngIf="error">{{ error }}</div>
+        <label for="admin-token">管理口令</label>
+        <input id="admin-token" type="password" [(ngModel)]="token" (keyup.enter)="login()"
+               placeholder="admin_token" autocomplete="current-password" />
+        <div style="margin-top:12px">
+          <button class="primary" (click)="login()" [disabled]="!token || loading">
+            {{ loading ? '登录中…' : '登录' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="app-shell" *ngIf="api.loggedIn">
+      <aside class="sidebar">
+        <div class="brand">
+          LLM Token Router
+          <small>自制 Key · 智能路由</small>
+        </div>
+        <div class="global-search">
+          <input #searchInput type="text" [(ngModel)]="searchQuery" (ngModelChange)="onSearch()"
+                 placeholder="搜索（Ctrl+K）…" autocomplete="off" />
+          <div class="search-dropdown" *ngIf="searchOpen && searchResults.length">
+            <ng-container *ngFor="let group of searchResults">
+              <div class="search-group-title">{{ group.label }}（{{ group.items.length }}）</div>
+              <a *ngFor="let item of group.items" [routerLink]="item.route"
+                 (click)="closeSearch()" [title]="item.desc || ''">
+                <span class="mono">{{ item.name }}</span>
+                <span class="muted small" *ngIf="item.desc" style="margin-left:6px">{{ item.desc }}</span>
+              </a>
+            </ng-container>
+          </div>
+          <div class="search-dropdown" *ngIf="searchOpen && searchQuery && !searching && !searchResults.length">
+            <div class="empty" style="padding:12px">无匹配结果</div>
+          </div>
+        </div>
+        <nav class="nav">
+          <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{exact:true}">概览</a>
+          <ng-container *ngFor="let group of navGroups">
+            <div class="nav-group" [class.open]="!collapsed[group.name]">
+              <div class="nav-group-head" (click)="toggleGroup(group.name)">
+                <span>{{ group.name }}</span><span class="arrow">▶</span>
+              </div>
+              <ng-container *ngIf="!collapsed[group.name]">
+                <a *ngFor="let item of group.items" [routerLink]="item.route"
+                   routerLinkActive="active">{{ item.label }}</a>
+              </ng-container>
+            </div>
+          </ng-container>
+        </nav>
+        <div style="margin-top:24px;display:flex;flex-direction:column;gap:8px">
+          <button class="small" (click)="toggleTheme()">{{ isDark ? '☀ 浅色模式' : '🌙 深色模式' }}</button>
+          <button class="small" (click)="logout()">退出</button>
+        </div>
+      </aside>
+      <main class="main">
+        <router-outlet />
+      </main>
+    </div>
+  
