@@ -181,7 +181,7 @@ func (p *Proxy) Handle(w http.ResponseWriter, r *http.Request, key store.APIKey,
 	}
 	slog.Info("chat request", "model", req.Model, "key", key.ID)
 
-	cands, err := p.router.Pick(req.Model)
+	cands, err := p.router.Pick(req.Model, len(req.Tools) > 0)
 	if err != nil {
 		slog.Warn("no candidate for route", "model", req.Model, "err", err.Error())
 		return p.fail(w, started, key, req.Model, http.StatusBadGateway, err.Error(), scene)

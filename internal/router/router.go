@@ -40,7 +40,10 @@ func New(s *store.Store, h *Tracker) *Router {
 }
 
 // Pick 返回按优先级排好序的候选序列，调用方从头依次尝试即可实现 failover。
-func (r *Router) Pick(model string) ([]Candidate, error) {
+// hasTools=true 表示请求带了 tool calling（function calling），此时会自动过滤掉
+// 已知不支持 tools 的模型（store.NoToolsModels 静态名单 + 运行时 "tools unsupported" 标记），
+// 避免上游 400 后才 failover。
+func (r *Router) Pick(model string, hasTools bool) ([]Candidate, error) {
 	model = strings.TrimSpace(model)
 	if model == "" {
 		return nil, fmt.Errorf("model is required")
@@ -59,7 +62,15 @@ func (r *Router) Pick(model string) ([]Candidate, error) {
 			up = model
 		}
 		// 曾被上游 404 判为不存在的模型：冷却期内跳过（到期自动恢复）。
-		if _, unavail := r.store.ModelUnavailable(p.ID, up); unavail {
+		if reason, unavail := r.store.ModelUnavailable(p.ID, up); unavail {
+			// 如果不可用原因是 "tools unsupported"，且当前请求不带 tools，则不跳过
+			// （该模型只是不支持 tools，普通对话仍可用）。
+			if hasTools || !strings.Contains(reason, "tools unsupported") {
+				continue
+			}
+		}
+		// 请求带 tools 时：过滤掉已知不支持 tool calling 的模型（静态名单）。
+		if hasTools && store.NoToolsModels[up] {
 			continue
 		}
 		// target 未显式配置优先级时，回落到 provider 自己的优先级。

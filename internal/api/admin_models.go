@@ -146,22 +146,6 @@ var baiFreeModels = map[string]bool{
 	"hy3": true, "mimo-v2.5": true, "qwen3.8-flash": true,
 }
 
-// noToolsModels 是已知不支持 tool calling（function calling）的模型名单。
-// 来源：实际测试验证 + 模型类型推断（嵌入/内容安全/音频生成等专用模型通常不支持 tools）。
-// 动态检测：带 tools 请求返回 400 时也会运行时标记为不支持（30 分钟冷却）。
-var noToolsModels = map[string]bool{
-	// OpenRouter 免费模型：实际测试带 tools 返回 400（model does not support tool calling）
-	"nvidia/nemotron-3-super-120b-a12b:free": true,
-	// 嵌入模型：不支持 chat completions，自然不支持 tools
-	"qwen3.7-text-embedding":       true,
-	"qwen3.7-text-embedding-flash": true,
-	// 内容安全模型：专用分类，不支持 tools
-	"nvidia/nemotron-3.5-content-safety:free": true,
-	// 音频生成模型：不支持 tools
-	"google/lyria-3-clip-preview": true,
-	"google/lyria-3-pro-preview":  true,
-}
-
 // markFreeByProvider 按 Provider 免费名单修正探测结果：
 //   - bai：官方免费阵容（上游 /v1/models 不带 is_free 字段，探测无法自动识别）；
 //   - alibailian：用户确认当前已配置模型均有免费额度（上游同样不带免费字段），
@@ -487,7 +471,7 @@ func (s *Server) buildCatalog() map[string]any {
 				}
 			}
 			// 静态知识表：已知不支持 tool calling 的模型（嵌入/内容安全/音频生成等专用模型）。
-			if noToolsModels[id] {
+			if store.NoToolsModels[id] {
 				it.SupportsTools = false
 			}
 			// 快照覆盖：该 Provider 最近一次探测的 context_length/free/pricing 优先于静态表。

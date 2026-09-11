@@ -305,7 +305,8 @@ func lastUserText(msgs []chatMessage) string {
 // status>0 表示上游 4xx（应原样透传），providerID 为该候选的真实 id；
 // 其他失败时 errText 描述原因。
 func (p *Proxy) agentRound(r *http.Request, key store.APIKey, path, model string, msgs []chatMessage) ([]byte, string, string, int, bool) {
-	cands, err := p.router.Pick(model)
+	// 网关 agent 始终带工具 schema 向上游发起请求，所以 hasTools=true。
+	cands, err := p.router.Pick(model, true)
 	if err != nil {
 		return nil, "", err.Error(), 0, false
 	}

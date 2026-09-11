@@ -479,7 +479,8 @@ func (p *Proxy) Complete(r *http.Request, key store.APIKey, path string, msgs []
 // 避免模型返回 tool_calls 而非代码）。返回 (body, reason)：body 非空即成功；
 // 失败时 reason 描述原因（可能为空表示无候选可试）。
 func (p *Proxy) complete(r *http.Request, key store.APIKey, path string, msgs []chatMessage) ([]byte, string) {
-	cands, err := p.router.Pick("chat")
+	// codegen 专用：不带工具 schema，避免模型返回 tool_calls 而非代码。
+	cands, err := p.router.Pick("chat", false)
 	if err != nil {
 		return nil, "codegen: 无可用的 chat 路由（" + err.Error() + "）"
 	}
