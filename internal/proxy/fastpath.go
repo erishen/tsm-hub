@@ -573,6 +573,12 @@ func tryFastAnswer(text string) *fastAnswer {
 	if strings.TrimSpace(text) == "" {
 		return nil
 	}
+	// 全局长度限制：fastpath 只处理短查询（<200 字符）。
+	// 长文本（文章写作、代码生成、复杂任务等）不可能是纯算术/统计/换算问题，
+	// 直接跳过所有 fastpath 匹配器，避免章节编号/列表项/关键词被误识别。
+	if len([]rune(text)) > 200 {
+		return nil
+	}
 	for _, check := range fastChecks {
 		if r := check(text); r != nil {
 			return r
