@@ -32,7 +32,7 @@
             <td><input type="checkbox" [checked]="isSelected(p.id)" (change)="toggleSelect(p.id, $event)" /></td>
             <td>
               <div class="mono">{{ p.id }}</div>
-              <div class="muted">{{ p.name }}</div>
+              <div class="muted">{{ p.name }} <span class="badge small" [class.ok]="!p.protocol || p.protocol === 'openai'" [class.warn]="p.protocol === 'anthropic'">{{ p.protocol || 'openai' }}</span></div>
             </td>
             <td class="mono nowrap" style="max-width:300px" [title]="p.base_url">{{ shortUrl(p.base_url) }}</td>
             <td style="max-width:240px">
@@ -76,6 +76,13 @@
             </div>
             <div class="form-row">
               <div><label>Base URL</label><input [(ngModel)]="form.base_url" placeholder="https://api.openai.com/v1" /></div>
+              <div>
+                <label>协议</label>
+                <select [(ngModel)]="form.protocol">
+                  <option value="openai">OpenAI 兼容</option>
+                  <option value="anthropic">Anthropic Claude</option>
+                </select>
+              </div>
               <div><label>API Key</label><input [(ngModel)]="form.api_key" placeholder="sk-..." /></div>
             </div>
           </div>
