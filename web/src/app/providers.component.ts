@@ -54,8 +54,8 @@ import { Balance, Provider, ProbeModel } from './models';
             <td class="num">{{ p.weight }}</td>
             <td class="num">{{ p.priority }}</td>
             <td>
-              <span class="badge" [class.ok]="p.enabled && p.healthy" [class.bad]="!p.healthy">
-                {{ p.enabled ? (p.healthy ? 'healthy' : 'degraded') : 'disabled' }}
+              <span class="badge" [class.ok]="p.enabled && p.healthy && (p.health?.failures ?? 0) === 0" [class.warn]="p.enabled && p.healthy && (p.health?.failures ?? 0) > 0" [class.bad]="!p.healthy">
+                {{ p.enabled ? (p.healthy ? ((p.health?.failures ?? 0) > 0 ? 'half-open' : 'healthy') : 'degraded') : 'disabled' }}
               </span>
             </td>
             <td class="num">{{ p.latency_ms }} ms</td>

@@ -89,8 +89,8 @@ import { Agg, DailyPoint, Overview, ProviderHealth } from './models';
           <tr *ngFor="let h of health()">
             <td class="mono">{{ h.provider_id }}</td>
             <td>
-              <span class="badge" [class.ok]="h.healthy" [class.bad]="!h.healthy">
-                {{ h.healthy ? 'healthy' : 'degraded' }}
+              <span class="badge" [class.ok]="h.healthy && h.failures === 0" [class.warn]="h.healthy && h.failures > 0" [class.bad]="!h.healthy">
+                {{ h.healthy ? (h.failures > 0 ? 'half-open' : 'healthy') : 'degraded' }}
               </span>
             </td>
             <td class="num">{{ h.latency_ms }} ms</td>
