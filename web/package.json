@@ -1,7 +1,7 @@
 {
-  "name": "tsm-gateway-console",
+  "name": "tsm-hub-console",
   "version": "0.1.0",
-  "description": "Admin console for tsm-gateway (Go + Angular)",
+  "description": "Admin console for tsm-hub (Go + Angular)",
   "private": true,
   "scripts": {
     "ng": "ng",

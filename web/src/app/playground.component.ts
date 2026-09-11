@@ -32,7 +32,7 @@ interface PgDraft {
   maxTokens: any;
 }
 
-const DRAFT_KEY = 'tsm-gateway.playground.draft';
+const DRAFT_KEY = 'tsm-hub.playground.draft';
 
 @Component({
   selector: 'app-playground',

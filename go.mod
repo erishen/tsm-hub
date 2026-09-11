@@ -1,4 +1,4 @@
-module github.com/erishen/tsm-gateway
+module github.com/erishen/tsm-hub
 
 go 1.25.0
 

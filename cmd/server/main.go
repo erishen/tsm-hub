@@ -1,4 +1,4 @@
-// Command tsm-gateway 启动一个 LLM Token Router 服务：
+// Command tsm-hub 启动一个 LLM Token Router 服务：
 // 对外签发自制 Token Key（sk-tr-…），把 OpenAI 兼容请求智能路由到配置好的上游模型。
 package main
 
@@ -15,13 +15,13 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
-	"github.com/erishen/tsm-gateway/internal/api"
-	"github.com/erishen/tsm-gateway/internal/config"
-	"github.com/erishen/tsm-gateway/internal/proxy"
-	"github.com/erishen/tsm-gateway/internal/quota"
-	"github.com/erishen/tsm-gateway/internal/router"
-	"github.com/erishen/tsm-gateway/internal/skills"
-	"github.com/erishen/tsm-gateway/internal/store"
+	"github.com/erishen/tsm-hub/internal/api"
+	"github.com/erishen/tsm-hub/internal/config"
+	"github.com/erishen/tsm-hub/internal/proxy"
+	"github.com/erishen/tsm-hub/internal/quota"
+	"github.com/erishen/tsm-hub/internal/router"
+	"github.com/erishen/tsm-hub/internal/skills"
+	"github.com/erishen/tsm-hub/internal/store"
 )
 
 // version 由 Makefile 通过 -ldflags 注入。
@@ -37,7 +37,7 @@ func main() {
 		os.Exit(1)
 	}
 	if cfg.Version {
-		fmt.Printf("tsm-gateway %s\n", version)
+		fmt.Printf("tsm-hub %s\n", version)
 		return
 	}
 	if err := run(cfg); err != nil {
@@ -125,7 +125,7 @@ func run(cfg config.Config) error {
 	// 优雅退出。
 	errCh := make(chan error, 1)
 	go func() {
-		logger.Info("tsm-gateway listening",
+		logger.Info("tsm-hub listening",
 			"addr", listen, "version", version,
 			"config", cfg.ConfigFile(), "data", cfg.DataDir)
 		logger.Info("admin console", "url", consoleURL(listen), "admin_token_set", settings.AdminToken != "")

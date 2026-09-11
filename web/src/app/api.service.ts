@@ -6,7 +6,7 @@ import {
   Agg, ApiKey, Balance, CatalogModel, McpServer, ObservabilityResponse, Overview, ProbeModel, Provider, ProviderBalance, ProviderHealth, Quota, RecommendationsResp, Route, SkillDetail, SkillSummary, ToolInfo, UsageResponse,
 } from './models';
 
-const SESSION_KEY = 'tsm-gateway.session';
+const SESSION_KEY = 'tsm-hub.session';
 
 /** 统一封装管理 API：自动带上会话 token，401 时清空登录态。 */
 @Injectable({ providedIn: 'root' })
@@ -72,7 +72,7 @@ export class ApiService {
 
   /** 批量余额缓存（localStorage 持久化，刷新页面后仍生效）：进入页面默认只读缓存，
    *  不发起查询；点「刷新」才强制查询并更新缓存。 */
-  private static readonly BALANCES_KEY = 'tsm-gateway.balances.cache.v1';
+  private static readonly BALANCES_KEY = 'tsm-hub.balances.cache.v1';
   private get balancesCache(): { data: ProviderBalance[]; at: number } | null {
     try {
       const raw = localStorage.getItem(ApiService.BALANCES_KEY);

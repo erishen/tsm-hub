@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/erishen/tsm-gateway/internal/store"
+	"github.com/erishen/tsm-hub/internal/store"
 )
 
 func sandboxStore(t *testing.T) *Proxy {

@@ -2,7 +2,7 @@
 //
 // 优先级：命令行 flag > 环境变量 > data/config.json 里的 settings。
 //
-// 环境变量前缀：TSM_GATEWAY_*（新），兼容旧前缀 LLM_ROUTER_*（先读新的，再读旧的）。
+// 环境变量前缀：TSM_HUB_*（最新），兼容 TSM_HUB_* 和 LLM_ROUTER_*（按优先级 fallback）。
 package config
 
 import (
@@ -25,31 +25,34 @@ type Config struct {
 	Version    bool
 }
 
-// envOrFallback 先读新前缀 TSM_GATEWAY_*，再读旧前缀 LLM_ROUTER_*，都没有则返回默认值。
-func envOrFallback(newKey, oldKey, def string) string {
-	if v := os.Getenv(newKey); v != "" {
+// envOrFallback 按优先级读取环境变量：TSM_HUB_* → TSM_HUB_* → LLM_ROUTER_*，都没有则返回默认值。
+func envOrFallback(hubKey, gatewayKey, routerKey, def string) string {
+	if v := os.Getenv(hubKey); v != "" {
 		return v
 	}
-	if v := os.Getenv(oldKey); v != "" {
+	if v := os.Getenv(gatewayKey); v != "" {
+		return v
+	}
+	if v := os.Getenv(routerKey); v != "" {
 		return v
 	}
 	return def
 }
 
-// DefaultDataDir 返回默认数据目录：环境变量 TSM_GATEWAY_DATA_DIR（兼容 LLM_ROUTER_DATA_DIR），否则 ./data。
+// DefaultDataDir 返回默认数据目录：环境变量 TSM_HUB_DATA_DIR（兼容 TSM_HUB_DATA_DIR、LLM_ROUTER_DATA_DIR），否则 ./data。
 func DefaultDataDir() string {
-	return envOrFallback("TSM_GATEWAY_DATA_DIR", "LLM_ROUTER_DATA_DIR", "data")
+	return envOrFallback("TSM_HUB_DATA_DIR", "TSM_HUB_DATA_DIR", "LLM_ROUTER_DATA_DIR", "data")
 }
 
 // Parse 解析命令行参数与环境变量。
 func Parse(args []string) (Config, error) {
 	c := Config{
 		DataDir:    DefaultDataDir(),
-		AdminToken: envOrFallback("TSM_GATEWAY_ADMIN_TOKEN", "LLM_ROUTER_ADMIN_TOKEN", ""),
-		LogLevel:   envOrFallback("TSM_GATEWAY_LOG_LEVEL", "LLM_ROUTER_LOG_LEVEL", "info"),
+		AdminToken: envOrFallback("TSM_HUB_ADMIN_TOKEN", "TSM_HUB_ADMIN_TOKEN", "LLM_ROUTER_ADMIN_TOKEN", ""),
+		LogLevel:   envOrFallback("TSM_HUB_LOG_LEVEL", "TSM_HUB_LOG_LEVEL", "LLM_ROUTER_LOG_LEVEL", "info"),
 	}
-	fs := flag.NewFlagSet("tsm-gateway", flag.ContinueOnError)
-	fs.StringVar(&c.Listen, "addr", envOrFallback("TSM_GATEWAY_ADDR", "LLM_ROUTER_ADDR", ""), "监听地址，如 :9070（覆盖配置文件）")
+	fs := flag.NewFlagSet("tsm-hub", flag.ContinueOnError)
+	fs.StringVar(&c.Listen, "addr", envOrFallback("TSM_HUB_ADDR", "TSM_HUB_ADDR", "LLM_ROUTER_ADDR", ""), "监听地址，如 :9070（覆盖配置文件）")
 	fs.StringVar(&c.DataDir, "data", c.DataDir, "数据目录，存放 config.json 与 usage/")
 	fs.StringVar(&c.AdminToken, "admin-token", c.AdminToken, "管理口令（覆盖配置文件）")
 	fs.StringVar(&c.LogLevel, "log-level", c.LogLevel, "日志级别：debug|info|warn|error")
@@ -83,22 +86,22 @@ func envOr(key, def string) string {
 
 // Usage 打印帮助。
 func Usage() string {
-	return `tsm-gateway — Tools + Skills + MCPs 能力网关
+	return `tsm-hub — Tools + Skills + MCPs 能力中心
 
 用法:
-  tsm-gateway [flags]
+  tsm-hub [flags]
 
 flags:
   -addr string         监听地址（默认读 data/config.json 的 settings.listen）
-  -data string         数据目录（默认 ./data 或 $TSM_GATEWAY_DATA_DIR）
-  -admin-token string  管理口令（也可用 $TSM_GATEWAY_ADMIN_TOKEN）
+  -data string         数据目录（默认 ./data 或 $TSM_HUB_DATA_DIR）
+  -admin-token string  管理口令（也可用 $TSM_HUB_ADMIN_TOKEN）
   -log-level string    日志级别 debug|info|warn|error（默认 info）
   -version             打印版本
 
 示例:
-  tsm-gateway -data ./data -addr :9070
-  TSM_GATEWAY_ADMIN_TOKEN=s3cret tsm-gateway
+  tsm-hub -data ./data -addr :9070
+  TSM_HUB_ADMIN_TOKEN=s3cret tsm-hub
 
-环境变量兼容：旧前缀 LLM_ROUTER_* 仍可用（如 LLM_ROUTER_ADMIN_TOKEN），新前缀 TSM_GATEWAY_* 优先。
+环境变量兼容：新前缀 TSM_HUB_* 优先，兼容 TSM_HUB_* 和 LLM_ROUTER_*。
 `
 }

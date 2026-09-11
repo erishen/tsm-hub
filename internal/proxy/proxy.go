@@ -21,10 +21,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/erishen/tsm-gateway/internal/quota"
-	"github.com/erishen/tsm-gateway/internal/router"
-	"github.com/erishen/tsm-gateway/internal/skills"
-	"github.com/erishen/tsm-gateway/internal/store"
+	"github.com/erishen/tsm-hub/internal/quota"
+	"github.com/erishen/tsm-hub/internal/router"
+	"github.com/erishen/tsm-hub/internal/skills"
+	"github.com/erishen/tsm-hub/internal/store"
 )
 
 // Proxy 持有转发所需的全部依赖。

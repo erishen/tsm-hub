@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erishen/tsm-gateway/internal/store"
+	"github.com/erishen/tsm-hub/internal/store"
 )
 
 // Agg 是一组用量指标的累加值。

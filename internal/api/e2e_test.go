@@ -16,11 +16,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/erishen/tsm-gateway/internal/auth"
-	"github.com/erishen/tsm-gateway/internal/proxy"
-	"github.com/erishen/tsm-gateway/internal/quota"
-	"github.com/erishen/tsm-gateway/internal/router"
-	"github.com/erishen/tsm-gateway/internal/store"
+	"github.com/erishen/tsm-hub/internal/auth"
+	"github.com/erishen/tsm-hub/internal/proxy"
+	"github.com/erishen/tsm-hub/internal/quota"
+	"github.com/erishen/tsm-hub/internal/router"
+	"github.com/erishen/tsm-hub/internal/store"
 )
 
 // mockUpstream 是一个假的上游 LLM 服务。
@@ -778,15 +778,15 @@ func TestMetricsEndpoint(t *testing.T) {
 	}
 	body := string(raw)
 	for _, want := range []string{
-		"tsm_gateway_uptime_seconds",
-		`tsm_gateway_http_requests_total{status="200"} 2`,
-		`tsm_gateway_http_requests_total{status="401"} 1`,
-		`tsm_gateway_http_requests_total{status="429"} 1`,
-		`tsm_gateway_quota_denials_total{code="rate_limited"} 1`,
-		`tsm_gateway_upstream_healthy{provider="primary"} 1`,
-		`tsm_gateway_upstream_requests_total{provider="primary"} 1`,
-		`tsm_gateway_upstream_errors_total{provider="primary"} 1`,
-		`tsm_gateway_upstream_requests_total{provider="backup"} 2`,
+		"tsm_hub_uptime_seconds",
+		`tsm_hub_http_requests_total{status="200"} 2`,
+		`tsm_hub_http_requests_total{status="401"} 1`,
+		`tsm_hub_http_requests_total{status="429"} 1`,
+		`tsm_hub_quota_denials_total{code="rate_limited"} 1`,
+		`tsm_hub_upstream_healthy{provider="primary"} 1`,
+		`tsm_hub_upstream_requests_total{provider="primary"} 1`,
+		`tsm_hub_upstream_errors_total{provider="primary"} 1`,
+		`tsm_hub_upstream_requests_total{provider="backup"} 2`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("metrics missing %q", want)

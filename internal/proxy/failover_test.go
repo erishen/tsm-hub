@@ -6,10 +6,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/erishen/tsm-gateway/internal/quota"
-	"github.com/erishen/tsm-gateway/internal/router"
-	"github.com/erishen/tsm-gateway/internal/skills"
-	"github.com/erishen/tsm-gateway/internal/store"
+	"github.com/erishen/tsm-hub/internal/quota"
+	"github.com/erishen/tsm-hub/internal/router"
+	"github.com/erishen/tsm-hub/internal/skills"
+	"github.com/erishen/tsm-hub/internal/store"
 )
 
 // TestFailoverChainCollected 验证 failover 链被收集并写入用量流水：

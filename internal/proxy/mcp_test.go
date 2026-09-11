@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/erishen/tsm-gateway/internal/store"
+	"github.com/erishen/tsm-hub/internal/store"
 )
 
 // fakeMCPServer 生成一个模拟 MCP server 的 python 脚本（stdio + newline JSON-RPC）。

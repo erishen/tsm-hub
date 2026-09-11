@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 预装 tsm-gateway 网关的 MCP server 依赖，使平台开箱即用。
+# 预装 tsm-hub 网关的 MCP server 依赖，使平台开箱即用。
 # 用法：./scripts/install-mcps.sh   （或 make install-mcps）
 set -euo pipefail
 cd "$(dirname "$0")/.."

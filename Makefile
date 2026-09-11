@@ -1,7 +1,7 @@
 # 前端包管理器：优先 pnpm，没装则回退 npm（可用 make PM=pnpm ... 显式指定）
 PM         ?= $(shell command -v pnpm >/dev/null 2>&1 && echo pnpm || echo npm)
 
-BINARY     := bin/tsm-gateway
+BINARY     := bin/tsm-hub
 MOCK       := bin/mockupstream
 VERSION    ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 
@@ -132,7 +132,7 @@ smoke: build mock
 
 ## docker-build: 构建镜像（建议先 make web-build，否则管理台是占位页）
 docker-build:
-	docker build -t tsm-gateway:latest .
+	docker build -t tsm-hub:latest .
 
 ## docker-up: docker compose 启动（挂载 ./data）
 docker-up:

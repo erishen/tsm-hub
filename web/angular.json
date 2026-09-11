@@ -3,7 +3,7 @@
   "version": 1,
   "newProjectRoot": "projects",
   "projects": {
-    "tsm-gateway-console": {
+    "tsm-hub-console": {
       "projectType": "application",
       "root": "",
       "sourceRoot": "src",
@@ -44,10 +44,10 @@
           "builder": "@angular-devkit/build-angular:dev-server",
           "configurations": {
             "production": {
-              "buildTarget": "tsm-gateway-console:build:production"
+              "buildTarget": "tsm-hub-console:build:production"
             },
             "development": {
-              "buildTarget": "tsm-gateway-console:build:development"
+              "buildTarget": "tsm-hub-console:build:development"
             }
           },
           "defaultConfiguration": "development"

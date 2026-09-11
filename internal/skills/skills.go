@@ -1,6 +1,6 @@
 // Package skills 挂载外部 Agent Skills 技能库（Agent Skills 标准：每个技能
 // 一个目录，含 SKILL.md frontmatter + 可选 scripts/references/assets）。
-// 只读浏览：tsm-gateway 管理台通过 /api/admin/skills 展示技能清单与全文。
+// 只读浏览：tsm-hub 管理台通过 /api/admin/skills 展示技能清单与全文。
 package skills
 
 import (
@@ -162,7 +162,7 @@ func (l *Library) Render(mode string) string {
 			return ""
 		}
 		var b strings.Builder
-		b.WriteString("[tsm-gateway 技能库] 本网关挂载了以下 Agent Skills（技能名: 用途）：\n")
+		b.WriteString("[tsm-hub 技能库] 本网关挂载了以下 Agent Skills（技能名: 用途）：\n")
 		for _, s := range list {
 			fmt.Fprintf(&b, "- %s: %s\n", s.Name, s.Description)
 		}
@@ -174,7 +174,7 @@ func (l *Library) Render(mode string) string {
 			return ""
 		}
 		var b strings.Builder
-		b.WriteString("[tsm-gateway 技能库] 以下是网关挂载的全部技能（SKILL.md 全文已内联，按此执行；不要尝试读取任何文件路径）：\n")
+		b.WriteString("[tsm-hub 技能库] 以下是网关挂载的全部技能（SKILL.md 全文已内联，按此执行；不要尝试读取任何文件路径）：\n")
 		for _, s := range list {
 			d, ok := l.Get(s.Name)
 			if !ok {
@@ -188,7 +188,7 @@ func (l *Library) Render(mode string) string {
 		if !ok {
 			return ""
 		}
-		return fmt.Sprintf("[tsm-gateway 技能库] 技能 %s 的 SKILL.md（全文已内联，按此执行；不要尝试读取任何文件路径）：\n%s", d.Name, d.Raw)
+		return fmt.Sprintf("[tsm-hub 技能库] 技能 %s 的 SKILL.md（全文已内联，按此执行；不要尝试读取任何文件路径）：\n%s", d.Name, d.Raw)
 	}
 }
 

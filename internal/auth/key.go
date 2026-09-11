@@ -60,12 +60,15 @@ func ConstantTimeEqual(a, b string) bool {
 
 // ---------- Admin token ----------
 
-// AdminToken 解析管理台口令：优先显式参数，其次环境变量 TSM_GATEWAY_ADMIN_TOKEN（兼容 LLM_ROUTER_ADMIN_TOKEN）。
+// AdminToken 解析管理台口令：优先显式参数，其次环境变量 TSM_HUB_ADMIN_TOKEN（兼容 TSM_HUB_ADMIN_TOKEN、LLM_ROUTER_ADMIN_TOKEN）。
 func AdminToken(explicit string) string {
 	if explicit != "" {
 		return explicit
 	}
-	if v := os.Getenv("TSM_GATEWAY_ADMIN_TOKEN"); v != "" {
+	if v := os.Getenv("TSM_HUB_ADMIN_TOKEN"); v != "" {
+		return v
+	}
+	if v := os.Getenv("TSM_HUB_ADMIN_TOKEN"); v != "" {
 		return v
 	}
 	return os.Getenv("LLM_ROUTER_ADMIN_TOKEN")

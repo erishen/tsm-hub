@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erishen/tsm-gateway/internal/store"
+	"github.com/erishen/tsm-hub/internal/store"
 )
 
 // Limiter 基于滑动窗口做 RPM 限流，并结合 Recorder 的累计值做额度判断。

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/erishen/tsm-gateway/internal/store"
+	"github.com/erishen/tsm-hub/internal/store"
 )
 
 func rec(t *testing.T) *Recorder {

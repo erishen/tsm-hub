@@ -1,8 +1,8 @@
 services:
-  tsm-gateway:
+  tsm-hub:
     build: .
-    image: tsm-gateway:latest
-    container_name: tsm-gateway
+    image: tsm-hub:latest
+    container_name: tsm-hub
     restart: unless-stopped
     ports:
       - "9070:9070"

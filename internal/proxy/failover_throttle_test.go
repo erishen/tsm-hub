@@ -7,10 +7,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/erishen/tsm-gateway/internal/quota"
-	"github.com/erishen/tsm-gateway/internal/router"
-	"github.com/erishen/tsm-gateway/internal/skills"
-	"github.com/erishen/tsm-gateway/internal/store"
+	"github.com/erishen/tsm-hub/internal/quota"
+	"github.com/erishen/tsm-hub/internal/router"
+	"github.com/erishen/tsm-hub/internal/skills"
+	"github.com/erishen/tsm-hub/internal/store"
 )
 
 // newFailoverFixture 构造 bad→good 两级 failover 路由的完整 proxy。
