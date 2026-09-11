@@ -10,7 +10,7 @@ VERSION    ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo d
 export CGO_ENABLED := 1
 LDFLAGS := -X main.version=$(VERSION) -linkmode=external
 
-.PHONY: all build run test vet fmt cover web-install web-build web-dev web-check dev dev-stop dev-logs dev-status mock mock-run mock-run-500 clean smoke help
+.PHONY: all build run test vet fmt cover web-install web-build web-dev web-check dev dev-stop dev-logs dev-status mock mock-run mock-run-500 clean smoke help docker-build docker-up docker-down docker-stop docker-restart docker-logs docker-status
 
 all: build
 
@@ -130,13 +130,45 @@ dev-status:
 smoke: build mock
 	./scripts/smoke.sh
 
-## docker-build: 构建镜像（建议先 make web-build，否则管理台是占位页）
-docker-build:
+## docker-build: 构建镜像（自动先构建前端，确保管理台是最新版本）
+docker-build: web-build
 	docker build -t tsm-hub:latest .
 
-## docker-up: docker compose 启动（挂载 ./data）
-docker-up:
+## docker-up: docker compose 启动（自动先构建前端，挂载 ./data，后台运行）
+docker-up: web-build
 	docker compose up -d --build
+	@echo "✓ tsm-hub started, visit http://localhost:9070"
+
+## docker-down: 停止并删除 docker 容器（保留 ./data 数据）
+docker-down:
+	docker compose down
+	@echo "✓ tsm-hub stopped and removed"
+
+## docker-stop: 停止 docker 容器（不删除，可 docker-start 恢复）
+docker-stop:
+	docker compose stop
+	@echo "✓ tsm-hub stopped"
+
+## docker-start: 启动已停止的 docker 容器
+docker-start:
+	docker compose start
+	@echo "✓ tsm-hub started"
+
+## docker-restart: 重启 docker 容器
+docker-restart:
+	docker compose restart
+	@echo "✓ tsm-hub restarted"
+
+## docker-logs: 跟踪 docker 日志（Ctrl-C 退出）
+docker-logs:
+	docker compose logs -f --tail=100
+
+## docker-status: 查看 docker 容器状态
+docker-status:
+	@docker compose ps
+	@echo ""
+	@echo "健康检查："
+	@curl -s http://localhost:9070/healthz 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'  状态: {d[\"status\"]}, 运行: {d[\"uptime_s\"]}s, Provider: {len(d[\"providers\"])}个')" 2>/dev/null || echo "  服务未响应"
 
 clean: dev-stop
 	rm -rf bin coverage.out $(DEV_DIR)
