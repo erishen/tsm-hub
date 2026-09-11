@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -63,6 +64,7 @@ func New(path string) (*Store, error) {
 		}
 	}
 	s.applyDefaults()
+	s.applyEnvOverrides()
 	s.reindex()
 	return s, nil
 }
@@ -121,6 +123,47 @@ func (s *Store) applyDefaults() {
 		st.Fastpath.Enabled = true
 		st.Fastpath.Codegen = true
 	}
+}
+
+// applyEnvOverrides 用环境变量覆盖配置（优先级高于 config.json，低于命令行 flag）。
+// 目前支持 smart 路由策略相关的环境变量：
+//   - TSM_HUB_SMART_STRATEGY: 策略模式（cost_first / stability_first / task_aware / balanced）
+//   - TSM_HUB_SMART_COST_WEIGHT: 成本维度权重
+//   - TSM_HUB_SMART_STABILITY_WEIGHT: 稳定性维度权重
+//   - TSM_HUB_SMART_LATENCY_WEIGHT: 延迟维度权重
+//
+// 兼容旧前缀 LLM_ROUTER_SMART_*。
+func (s *Store) applyEnvOverrides() {
+	smart := &s.cfg.Settings.Smart
+	if v := envOrFallback("TSM_HUB_SMART_STRATEGY", "LLM_ROUTER_SMART_STRATEGY", ""); v != "" {
+		smart.StrategyMode = v
+	}
+	if v := envOrFallback("TSM_HUB_SMART_COST_WEIGHT", "LLM_ROUTER_SMART_COST_WEIGHT", ""); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			smart.CostWeight = n
+		}
+	}
+	if v := envOrFallback("TSM_HUB_SMART_STABILITY_WEIGHT", "LLM_ROUTER_SMART_STABILITY_WEIGHT", ""); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			smart.StabilityWeight = n
+		}
+	}
+	if v := envOrFallback("TSM_HUB_SMART_LATENCY_WEIGHT", "LLM_ROUTER_SMART_LATENCY_WEIGHT", ""); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			smart.LatencyWeight = n
+		}
+	}
+}
+
+// envOrFallback 按优先级读取环境变量：key1 → key2，都没有则返回 def。
+func envOrFallback(key1, key2, def string) string {
+	if v := os.Getenv(key1); v != "" {
+		return v
+	}
+	if v := os.Getenv(key2); v != "" {
+		return v
+	}
+	return def
 }
 
 func (s *Store) reindex() {
@@ -598,6 +641,7 @@ func (s *Store) Reload() error {
 	cfg.Version = CurrentVersion
 	s.cfg = cfg
 	s.applyDefaults()
+	s.applyEnvOverrides()
 	s.reindex()
 	return nil
 }

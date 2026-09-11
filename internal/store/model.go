@@ -167,6 +167,17 @@ type AgentCfg struct {
 
 // SmartScoreCfg 是 smart 策略的可调参数。0 值表示用默认值。
 type SmartScoreCfg struct {
+	// StrategyMode 策略模式：cost_first / stability_first / task_aware / balanced
+	// - cost_first: 成本优先（默认，保持向后兼容）
+	// - stability_first: 稳定性优先，成功率高的 Provider 优先
+	// - task_aware: 任务感知，根据任务类型选择合适的模型
+	// - balanced: 平衡模式，综合考虑所有维度
+	StrategyMode string `json:"strategy_mode,omitempty"`
+	// 各维度权重（0表示用默认值，范围0-200）
+	CostWeight      int `json:"cost_weight,omitempty"`      // 成本权重
+	StabilityWeight int `json:"stability_weight,omitempty"`  // 稳定性权重（成功率）
+	LatencyWeight   int `json:"latency_weight,omitempty"`    // 延迟权重
+	CapabilityWeight int `json:"capability_weight,omitempty"` // 能力匹配权重
 	// FreeBonus 免费模型的基础加分（默认 100）。
 	FreeBonus int `json:"free_bonus"`
 	// HalfOpenPenalty 半开（刚过冷却探测期）候选的扣分（默认 30）。
