@@ -230,6 +230,11 @@ export class ApiService {
       .pipe(catchError(this.handleError));
   }
 
+  listExternalTools(): Observable<{ external_tools: { name: string; calls: number; key_count: number; adopted: boolean; kind?: string; impl_type?: string; description?: string }[] }> {
+    return this.http.get<{ external_tools: { name: string; calls: number; key_count: number; adopted: boolean; kind?: string; impl_type?: string; description?: string }[] }>('/api/admin/external-tools', { headers: this.headers() })
+      .pipe(catchError(this.handleError));
+  }
+
   adoptExternalTool(name: string, body: { description?: string; kind?: string; impl_type: string; impl_source?: string }): Observable<unknown> {
     return this.http.post(`/api/admin/external-tools/${encodeURIComponent(name)}/adopt`, body, { headers: this.headers() })
       .pipe(catchError(this.handleError));
