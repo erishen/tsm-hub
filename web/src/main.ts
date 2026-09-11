@@ -7,6 +7,7 @@ import { AppComponent } from './app/ts/app.component';
 const routes: Routes = [
   { path: '', loadComponent: () => import('./app/ts/dashboard.component').then((m) => m.DashboardComponent) },
   { path: 'providers', loadComponent: () => import('./app/ts/providers.component').then((m) => m.ProvidersComponent) },
+  { path: 'platforms', loadComponent: () => import('./app/ts/platforms.component').then((m) => m.PlatformsComponent) },
   { path: 'routes', loadComponent: () => import('./app/ts/routes.component').then((m) => m.RoutesComponent) },
   { path: 'keys', loadComponent: () => import('./app/ts/keys.component').then((m) => m.KeysComponent) },
   { path: 'balances', loadComponent: () => import('./app/ts/balances.component').then((m) => m.BalancesComponent) },

@@ -311,3 +311,26 @@ export interface RecommendationsResp {
   free_models: number;
   scenario_num: number;
 }
+
+/** 上游平台信息（用于快速接入页面） */
+export interface UpstreamPlatform {
+  id: string;
+  name: string;
+  description: string;
+  protocol: string;
+  base_url: string;
+  website: string;
+  signup_url: string;
+  docs_url: string;
+  pricing_url: string;
+  free_tier: string;
+  models: string[];
+  stream_support: boolean;
+  features: string[];
+}
+
+/** 上游平台列表响应 */
+export interface UpstreamPlatformsResp {
+  platforms: UpstreamPlatform[];
+  total: number;
+}

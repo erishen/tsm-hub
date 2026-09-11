@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"github.com/erishen/tsm-hub/internal/auth"
+	"github.com/erishen/tsm-hub/internal/proxy/adapter"
 	"github.com/erishen/tsm-hub/internal/quota"
 	"github.com/erishen/tsm-hub/internal/router"
 	"github.com/erishen/tsm-hub/internal/store"
@@ -65,6 +66,7 @@ func (s *Server) adminMux() http.Handler {
 	m.HandleFunc("GET /api/admin/memory", s.admin(s.handleListMemory))
 	m.HandleFunc("DELETE /api/admin/memory", s.admin(s.handleClearMemory))
 	m.HandleFunc("GET /api/admin/audit-logs", s.admin(s.handleAuditLogs))
+	m.HandleFunc("GET /api/admin/upstream-platforms", s.admin(s.handleUpstreamPlatforms))
 	return m
 }
 
@@ -442,5 +444,14 @@ func slugify(s string) string {
 		out = strings.ReplaceAll(out, "--", "-")
 	}
 	return out
+}
+
+// handleUpstreamPlatforms 返回所有支持的上游平台信息，用于管理台展示和快速接入。
+func (s *Server) handleUpstreamPlatforms(w http.ResponseWriter, r *http.Request) {
+	platforms := adapter.ListUpstreamPlatforms()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"platforms": platforms,
+		"total":     len(platforms),
+	})
 }
 
