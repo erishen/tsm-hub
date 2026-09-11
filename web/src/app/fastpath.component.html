@@ -1,0 +1,108 @@
+    <div class="page-head">
+      <div>
+        <h1>快路径</h1>
+        <div class="sub">确定性快路径：能用纯代码回答的问题（算术/时间/日期/单位换算/统计/进制/字数）直接返回，零模型调用、零上游消耗</div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <h3>试一下</h3>
+    <div class="page-loading" *ngIf="loading()">加载中…</div>
+      <div class="row">
+        <input style="flex:1" [(ngModel)]="testQuery" placeholder="输入问题，如：23*47+5 等于多少 / 把字符串 abcdef 反转输出"
+               (keyup.enter)="test()" />
+        <button class="primary" (click)="test()" [disabled]="testing || !testQuery">测试</button>
+      </div>
+      <div class="banner success" *ngIf="testResult !== null" style="margin-top:10px">
+        <b>{{ testMethod || '未命中' }}</b>：{{ testResult || '无法用快路径回答（可点上方按钮生成检测器）' }}
+      </div>
+      <div *ngIf="chain && chain.length" style="margin-top:10px;font-size:12px">
+        <div class="muted" style="margin-bottom:4px">尝试链：</div>
+        <div *ngFor="let c of chain" style="display:flex;gap:8px;align-items:baseline;margin:2px 0">
+          <span class="tag" [class.green]="c.hit">{{ c.stage }} · {{ c.hit ? '命中' : '未命中' }}</span>
+          <span class="muted" [style.word-break]="'break-all'">{{ c.detail || '—' }}</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <h3>内置匹配器（{{ builtin.length }}）</h3>
+      <table>
+        <thead><tr><th>匹配器</th><th>触发示例</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr *ngFor="let m of builtin">
+            <td class="mono">{{ m.name }}</td>
+            <td>{{ m.trigger }}</td>
+            <td class="muted">{{ m.desc }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <div class="row" style="justify-content:space-between;align-items:center">
+        <h3 style="margin:0">插件（{{ plugins.length }}）</h3>
+        <button class="small" (click)="generate()" [disabled]="testing || !testQuery">对上方问题生成检测器</button>
+      </div>
+      <div class="banner error" *ngIf="genMsg">{{ genMsg }}</div>
+      <table>
+        <thead><tr><th>名称</th><th>触发（trigger）</th><th>状态</th><th style="width:220px">操作</th></tr></thead>
+        <tbody>
+          <tr *ngFor="let p of plugins">
+            <td class="mono">{{ p.name }}</td>
+            <td>{{ p.trigger || '—' }}</td>
+            <td>
+              <span class="tag" [class.green]="p.promoted">{{ p.promoted ? modeLabel(p.mode) : '运行时' }}</span>
+            </td>
+            <td>
+              <button class="small" *ngIf="!p.promoted" (click)="openPromote(p)">晋升</button>
+              <button class="small danger" (click)="remove(p)">删除</button>
+            </td>
+          </tr>
+          <tr *ngIf="!plugins.length">
+            <td colspan="4" class="muted">暂无插件。输入一个内置匹配器覆盖不到的问题，点「生成检测器」试试。</td>
+          </tr>
+        </tbody>
+      </table>
+      <details *ngIf="plugins.length" style="margin-top:10px">
+        <summary class="muted" style="cursor:pointer">查看插件源码</summary>
+        <pre class="code" *ngFor="let p of plugins">{{ p.source }}</pre>
+      </details>
+
+      <!-- 晋升模式选择弹窗 -->
+      <div class="modal-backdrop" *ngIf="promoteTarget()">
+        <div class="modal" (click)="$event.stopPropagation()">
+        <div class="modal-head">
+          <span class="modal-icon">⚡</span>
+          <div class="modal-titles">
+            <h2>晋升插件</h2>
+            <div class="sub">{{ promoteTarget()!.name }} · {{ promoteTarget()!.trigger || '无触发词' }}</div>
+          </div>
+          <button class="icon" (click)="closePromote()" aria-label="关闭">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-section">
+            <div class="muted" style="font-size:12px;margin-bottom:12px">
+              选择晋升方式：
+            </div>
+            <label class="radio-row">
+              <input type="radio" [(ngModel)]="promoteMode" value="fastpath" />
+              <span><b>纯 fastpath（推荐）</b><span class="muted" style="display:block;font-size:12px">请求前精确匹配直接返回，零模型调用、零成本</span></span>
+            </label>
+            <label class="radio-row">
+              <input type="radio" [(ngModel)]="promoteMode" value="tool" />
+              <span><b>注册为工具</b><span class="muted" style="display:block;font-size:12px">进工具池，可被 LLM 主动调用、外部 /v1/tools 可查可声明</span></span>
+            </label>
+            <label class="radio-row">
+              <input type="radio" [(ngModel)]="promoteMode" value="both" />
+              <span><b>两者都要</b><span class="muted" style="display:block;font-size:12px">既拦截又当工具（同一段逻辑双通道生效）</span></span>
+            </label>
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button class="small" (click)="closePromote()">取消</button>
+          <button class="small primary" (click)="doPromote()">晋升</button>
+        </div>
+        </div>
+    </div>
+  

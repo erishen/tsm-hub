@@ -1,0 +1,238 @@
+    <div class="page-head">
+      <div>
+        <h1>Token Keys</h1>
+        <div class="sub">对外签发 sk-tr- 开头的自制 Key，服务端只保存哈希</div>
+      </div>
+      <button class="primary" (click)="startNew()">+ 签发</button>
+    </div>
+
+    <div class="banner error" *ngIf="error()">{{ error() }}</div>
+
+    <div class="page-loading" *ngIf="loading()">加载中…</div>
+    <!-- 外部接入说明 -->
+    <div class="card">
+      <h2>外部怎么连</h2>
+
+      <div class="step">
+        <div class="step-num">1</div>
+        <div style="flex:1">
+          <label>Base URL（OpenAI 兼容端点，网关实际地址）</label>
+          <input [(ngModel)]="baseUrl" (blur)="saveBaseUrl()" placeholder="http://localhost:9070/v1" style="max-width:520px" />
+          <div class="muted small" style="margin-top:4px">网关监听 <span class="mono">:9070</span>；本机联调默认已填好，部署到服务器时改成对外可达地址（如 <span class="mono">https://llm.example.com/v1</span>）。</div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-num">2</div>
+        <div style="flex:1">
+          <label>请求头认证</label>
+          <div class="code-block" style="max-width:520px">
+            <button class="small" style="float:right" (click)="copy('Authorization: Bearer <你的Key>', 'auth')">{{ copied() === 'auth' ? '已复制 ✓' : '复制' }}</button>
+            <pre>Authorization: Bearer &lt;你的Key&gt;</pre>
+          </div>
+          <div class="muted small" style="margin-top:4px">Key 以 <span class="mono">sk-tr-</span> 开头，本页签发；服务端只保存哈希。与 OpenAI 客户端完全兼容（SDK 里传 <span class="mono">api_key</span> 即可）。</div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-num">3</div>
+        <div style="flex:1">
+          <label>直接复制示例跑通</label>
+          <div style="display:flex;gap:12px;flex-wrap:wrap">
+            <div style="flex:1;min-width:320px">
+              <label class="small muted" style="margin-bottom:6px">curl</label>
+              <div class="code-block">
+                <button class="small" style="float:right" (click)="copy(curlExample, 'curl')">{{ copied() === 'curl' ? '已复制 ✓' : '复制' }}</button>
+                <pre>{{ curlExample }}</pre>
+              </div>
+            </div>
+            <div style="flex:1;min-width:320px">
+              <label class="small muted" style="margin-bottom:6px">Python（OpenAI SDK）</label>
+              <div class="code-block">
+                <button class="small" style="float:right" (click)="copy(pyExample, 'py')">{{ copied() === 'py' ? '已复制 ✓' : '复制' }}</button>
+                <pre>{{ pyExample }}</pre>
+              </div>
+            </div>
+          </div>
+          <div class="muted small" style="margin-top:8px">
+            模型名填 <b>playground 候选</b>（路由别名或 Provider 模型 id）；网关自动智能分流到免费/低价家。
+            配额、禁用、过期等都在本页控制。
+          </div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-num">4</div>
+        <div style="flex:1">
+          <label>可编程接口（用同一个 Key 查询网关能力）</label>
+          <div class="muted small" style="margin-top:2px;margin-bottom:8px">
+            带 <span class="mono">Authorization: Bearer &lt;你的Key&gt;</span> 即可读取；用于让调用方程序动态发现网关挂了什么。
+          </div>
+          <div class="api-grid">
+            <div class="api-item" *ngFor="let a of apiEndpoints">
+              <span class="mono method">{{ a.method }}</span>
+              <span class="mono path">{{ a.path }}</span>
+              <span class="muted small">{{ a.desc }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 一次性明文展示 -->
+    <div class="card" *ngIf="justCreated">
+      <h2>请立即保存这个 Key</h2>
+      <div class="banner warn">它只会出现这一次。服务端只保存 sha256 哈希，关闭后无法找回。</div>
+      <div class="secret">{{ justCreated.key }}</div>
+      <div class="muted" style="margin-top:8px">
+        ID: <span class="mono">{{ justCreated.id }}</span> ·
+        Prefix: <span class="mono">{{ justCreated.prefix }}</span>
+      </div>
+      <div style="margin-top:12px">
+        <label>立即用 curl 验证</label>
+        <div class="code-block">
+          <button class="small" style="float:right" (click)="copy(curlWithKey())">{{ copied() === 'curlKey' ? '已复制 ✓' : '复制' }}</button>
+          <pre>{{ curlWithKey() }}</pre>
+        </div>
+      </div>
+      <div style="margin-top:12px">
+        <button class="primary" (click)="copy(justCreated.key, 'key')">{{ copied() === 'key' ? '已复制 ✓' : '复制 Key' }}</button>
+        <button (click)="justCreated = null">我已保存</button>
+      </div>
+    </div>
+
+    <!-- 签发弹窗 -->
+    <!-- 补看明文弹窗（创建后 2 分钟窗口内可用） -->
+    <div class="modal-backdrop" *ngIf="revealPlain()">
+      <div class="modal card" style="max-width:560px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <h2 style="margin:0">Key 明文</h2>
+          <span class="muted" style="font-size:12px">{{ revealName() }} · 仅本次展示，关闭后无法再查看</span>
+          <button class="small" style="margin-left:auto" (click)="closeReveal()">关闭</button>
+        </div>
+        <div class="mono" style="margin:14px 0;padding:12px;background:#f6f4ef;border-radius:8px;word-break:break-all;user-select:all">{{ revealPlain() }}</div>
+        <div style="display:flex;gap:8px">
+          <button class="primary" (click)="copy(revealPlain(), 'key')">复制 Key</button>
+          <span class="muted" style="font-size:12px;align-self:center" *ngIf="copied() === 'key'">已复制 ✓</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-backdrop" *ngIf="creating() || editing()">
+      <div class="modal" (click)="$event.stopPropagation()">
+        <div class="modal-head">
+          <div class="modal-icon">+</div>
+          <div class="modal-titles">
+            <h2>{{ editing() ? '编辑 Key' : '签发新 Key' }}</h2>
+            <div class="sub">{{ editing() ? editing()!.prefix + ' · key 本身不变' : '生成 sk-tr- 开头的自制 Key，服务端只保存哈希' }}</div>
+          </div>
+          <button class="icon" (click)="cancel()" aria-label="关闭">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-section">
+            <h3>基本信息</h3>
+            <div class="form-row">
+              <div><label>名称</label><input [(ngModel)]="form.name" placeholder="生产环境 A" /></div>
+              <div><label>允许模型（逗号分隔，留空=全部）</label><input [(ngModel)]="modelsText" placeholder="smart,fast" /></div>
+            </div>
+            <div class="form-row">
+              <div>
+                <label>技能注入（可选）</label>
+                <select [(ngModel)]="injectSkills">
+                  <option value="">不注入</option>
+                  <option value="list">技能清单（轻量，用于"有啥技能"）</option>
+                  <option value="all">全部技能全文</option>
+                  <option value="__name__">指定技能</option>
+                </select>
+              </div>
+              <div *ngIf="injectSkills === '__name__'">
+                <label>选择技能</label>
+                <select [(ngModel)]="injectSkillName">
+                  <option *ngFor="let s of skillOptions()" [value]="s.name">{{ s.name }}</option>
+                </select>
+              </div>
+            </div>
+          </div>
+          <div class="form-section">
+            <h3>配额（0 = 不限）</h3>
+            <div class="form-row">
+              <div><label>总 Token 上限</label><input type="number" [(ngModel)]="form.quota.max_tokens" /></div>
+              <div><label>总成本上限 USD</label><input type="number" [(ngModel)]="form.quota.max_cost_usd" /></div>
+              <div><label>每日 Token 上限</label><input type="number" [(ngModel)]="form.quota.daily_tokens" /></div>
+              <div><label>每分钟请求数</label><input type="number" [(ngModel)]="form.quota.rpm" /></div>
+              <div><label>有效期（天，0=永久）</label><input type="number" [(ngModel)]="expireDays" /></div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button (click)="cancel()" [disabled]="saving()">取消</button>
+          <button class="primary" (click)="saveOrCreate()" [disabled]="saving()">
+            {{ saving() ? (editing() ? '保存中…' : '签发中…') : (editing() ? '保存' : '签发') }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>已签发（{{ keys().length }}）</h2>
+      <div class="batch-bar" *ngIf="selectedCount()">
+        <span>已选 {{ selectedCount() }} 项</span>
+        <button class="small" (click)="batchToggle(true)">批量启用</button>
+        <button class="small" (click)="batchToggle(false)">批量停用</button>
+        <button class="small danger" (click)="batchDelete()">批量删除</button>
+        <button class="small" style="margin-left:auto" (click)="clearSelection()">取消选择</button>
+      </div>
+      <table *ngIf="keys().length; else none">
+        <thead>
+          <tr>
+            <th style="width:32px"><input type="checkbox" [checked]="allSelected()" (change)="toggleAll($event)" /></th>
+            <th>名称 / Prefix</th><th>状态</th><th>模型</th><th>技能注入</th>
+            <th class="num">用量 Tokens</th><th class="num">成本</th>
+            <th class="num">RPM</th><th>工具使用 <span class="muted" style="font-weight:400;font-size:11px">（执行 / 声明）</span></th><th>剩余 / 配额</th><th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let k of keys()" [class.selected]="isSelected(k.id)">
+            <td><input type="checkbox" [checked]="isSelected(k.id)" (change)="toggleSelect(k.id, $event)" /></td>
+            <td>
+              <div>{{ k.name }}</div>
+              <div class="mono muted">{{ k.prefix }}</div>
+            </td>
+            <td>
+              <span class="badge" [class.ok]="k.enabled" [class.bad]="!k.enabled">
+                {{ k.enabled ? 'enabled' : 'disabled' }}
+              </span>
+              <div class="muted" style="font-size:12px" *ngIf="k.expires_at">
+                {{ k.expires_at | date:'yyyy-MM-dd' }} 过期
+              </div>
+            </td>
+            <td>{{ (k.models && k.models.length) ? k.models.join(', ') : '全部' }}</td>
+            <td>
+              <span class="muted" style="font-size:12px" *ngIf="!k.inject_skills">—</span>
+              <span *ngIf="k.inject_skills" title="技能注入：该 Key 的请求会自动携带技能上下文">{{ injectLabel(k.inject_skills) }}</span>
+            </td>
+            <td class="num">{{ compact(k.usage?.total_tokens ?? 0) }}</td>
+            <td class="num">{{ usd(k.usage?.cost_usd ?? 0) }}</td>
+            <td class="num">{{ k.rpm_current }}/{{ k.quota.rpm || '∞' }}</td>
+            <td style="font-size:12px;max-width:220px">
+              <ng-container *ngIf="k.tools_used && k.tools_used.length; else noTools">
+                <span class="mono" style="margin-right:4px" *ngFor="let t of k.tools_used; let last = last">{{ t }}{{ last ? '' : ',' }}</span>
+                <div class="muted" *ngIf="k.tools_declared && k.tools_declared.length" title="该 Key 请求中声明过的工具（含系统外）">
+                  声明：{{ k.tools_declared.join(', ') }}
+                </div>
+              </ng-container>
+              <ng-template #noTools><span class="muted">—</span></ng-template>
+            </td>
+            <td class="muted" style="font-size:12px">{{ quotaRemain(k) }}</td>
+            <td style="white-space:nowrap">
+              <button class="small" (click)="startEdit(k)">编辑</button>
+              <button class="small" style="margin-left:6px" (click)="toggle(k)">{{ k.enabled ? '停用' : '启用' }}</button>
+              <button class="small" style="margin-left:6px" *ngIf="k.revealable" (click)="reveal(k)">补看明文</button>
+              <button class="small danger" style="margin-left:6px" (click)="remove(k)">删除</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <ng-template #none><div class="empty">还没有 Key，点击右上角「+ 签发」创建对外访问凭证（sk-tr- 开头）</div></ng-template>
+    </div>
+  

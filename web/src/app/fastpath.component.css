@@ -1,0 +1,10 @@
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+    .row { display:flex; align-items:center; gap:10px; }
+    .tag { display:inline-block; padding:2px 8px; border-radius:10px; background:#f0f0f0; font-size:12px; }
+    .tag.green { background:#e6f7e9; color:#2e7d32; }
+    .code { background:#1e1e1e; color:#d4d4d4; padding:10px; border-radius:8px; font-size:12px; overflow-x:auto; white-space:pre-wrap; }
+    .radio-row { display:flex; gap:10px; align-items:flex-start; padding:10px 12px;
+      border:1px solid var(--border,#e4e3dd); border-radius:10px; margin-bottom:8px; cursor:pointer; }
+    .radio-row:hover { background:#faf9f5; }
+    .radio-row input { margin-top:3px; }
+  

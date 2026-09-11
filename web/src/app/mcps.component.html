@@ -1,0 +1,219 @@
+    <div class="page-head">
+      <div>
+        <h1>MCP</h1>
+        <div class="sub">stdio 型 MCP server 注册进网关 agent 工具池（mcp_&lt;server&gt;_&lt;tool&gt;），工具由网关服务端执行</div>
+      </div>
+      <button class="primary" (click)="openEdit(null)">+ 添加 MCP Server</button>
+    </div>
+
+    <div class="banner error" *ngIf="error()">{{ error() }}</div>
+    <div class="banner ok" *ngIf="saved()">{{ saved() }}</div>
+
+    <div class="card">
+      <h2>常用模板</h2>
+      <div class="muted small" style="margin-bottom:10px">
+        参考 resolve-studio 的常用 MCP 接入清单。点「使用此模板」预填表单，确认路径 / Token 后保存。
+      </div>
+      <div class="tpl-grid">
+        <div class="tpl-card" *ngFor="let t of templates">
+          <div class="tpl-head">
+            <span class="mono tpl-id">{{ t.id }}</span>
+            <button class="small primary" (click)="useTemplate(t)">使用此模板</button>
+          </div>
+          <div class="muted small tpl-desc">{{ t.desc }}</div>
+          <div class="tpl-needs" *ngIf="t.needs">⚠ {{ t.needs }}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>MCP Servers（{{ mcps().length }}）</h2>
+      <table class="tbl">
+        <thead>
+          <tr>
+            <th>名称</th>
+            <th>命令</th>
+            <th>参数</th>
+            <th>状态</th>
+            <th>工具</th>
+            <th style="width:150px">操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let m of mcps()">
+            <td class="col-name"><span class="mono">{{ m.name }}</span></td>
+            <td class="col-cmd"><span class="mono small ellipsis" [title]="m.transport === 'http' ? (m.url || '') : (m.command || '')">{{ m.transport === 'http' ? (m.url || '—') : (m.command || '—') }}</span></td>
+            <td class="col-args"><span class="mono small ellipsis" [title]="m.transport === 'http' ? 'HTTP' : ((m.args || []).join(' ') || '')">{{ m.transport === 'http' ? 'HTTP' : ((m.args || []).join(' ') || '—') }}</span></td>
+            <td class="col-status">
+              <span class="badge nowrap" [class.ok]="m.connected" [class.err]="!m.connected">
+                {{ m.connected ? '已连接' : '未连接' }}
+              </span>
+            </td>
+            <td class="col-tools">
+              <div class="mcp-chips" *ngIf="(m.tools || []).length">
+                <button class="chip" *ngFor="let t of m.tools" (click)="toggleExpanded(m.name)"
+                        [class.active]="expandedName() === m.name" [title]="toolDesc(m, t)">{{ t }}</button>
+              </div>
+              <span *ngIf="!(m.tools || []).length">—</span>
+            </td>
+            <td>
+              <div style="display:flex;gap:6px">
+                <button class="small" (click)="openEdit(m)">编辑</button>
+                <button class="small danger" (click)="remove(m)">删除</button>
+              </div>
+            </td>
+          </tr>
+          <tr *ngIf="loadingMcps()">
+            <td colspan="6" style="padding:6px 0">
+              <div class="skel-row"></div>
+              <div class="skel-row" style="width:72%"></div>
+              <div class="skel-row" style="width:48%"></div>
+            </td>
+          </tr>
+          <tr *ngIf="!loadingMcps() && error() && !mcps().length">
+            <td colspan="6" class="empty">
+              <span class="err-text">{{ error() }}</span>
+              <button class="small" style="margin-left:10px" (click)="load()">重试</button>
+            </td>
+          </tr>
+          <tr *ngIf="!loadingMcps() && !error() && !mcps().length">
+            <td colspan="6" class="empty">未配置 MCP server。示例：npx &#64;modelcontextprotocol/server-fetch</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="mcp-detail" *ngIf="expandedName() && detailServer()">
+        <div class="detail-head">
+          <span class="mono">{{ expandedName() }}</span>
+          <span class="muted" style="font-size:12px">工具详情（{{ (detailServer()?.tool_details || []).length }}）</span>
+          <button class="small" style="margin-left:auto" (click)="closeExpanded()">收起</button>
+        </div>
+        <div class="mcp-detail" *ngIf="(detailServer()?.tool_details || []).length; else noDetail">
+          <div class="tool-detail" *ngFor="let d of detailServer()!.tool_details">
+            <div class="td-head"><span class="mono">{{ d.name }}</span></div>
+            <div class="muted td-desc">{{ d.description || '（无描述）' }}</div>
+            <pre class="schema" *ngIf="schemaJson(d.input_schema)">{{ schemaJson(d.input_schema) }}</pre>
+          </div>
+        </div>
+        <ng-template #noDetail><div class="empty">该 server 未提供工具 schema</div></ng-template>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>外部 MCP 候选（{{ candidates().length }}）<span class="muted" style="font-weight:400;font-size:12px">（调用方使用过、但网关尚未接入的 MCP server；可一键接入并常驻连接）</span></h2>
+      <div class="skel-row" *ngIf="loadingCandidates()" style="max-width:640px;margin:10px 0"></div>
+      <table class="tbl" *ngIf="!loadingCandidates() && candidates().length; else noneCand">
+        <thead>
+          <tr>
+            <th>Server</th><th class="num">调用次数</th><th class="num">使用方（key 数）</th><th>高频工具</th><th>建议连接命令</th><th style="width:140px">操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let c of candidates()">
+            <td class="col-name"><span class="mono">{{ c.server }}</span></td>
+            <td class="num">{{ c.calls }}</td>
+            <td class="num">{{ c.key_count }}</td>
+            <td>
+              <div class="mcp-chips" *ngIf="c.tools.length">
+                <span class="chip" *ngFor="let t of c.tools.slice(0,5)" [title]="t.name">{{ t.name.split('__')[1] }} ×{{ t.calls }}</span>
+              </div>
+              <span *ngIf="!c.tools.length">—</span>
+            </td>
+            <td>
+              <span class="mono small ellipsis" *ngIf="c.suggested_command" [title]="c.suggested_command">{{ c.suggested_command }}</span>
+              <span class="badge" *ngIf="!c.suggested_command" title="调用方声明只含工具名，无连接配置，需手动填写">需手动填连接</span>
+            </td>
+            <td>
+              <div style="display:flex;gap:6px;flex-wrap:wrap">
+                <button class="small primary" (click)="openAdoptMcp(c)">接入</button>
+                <button class="small danger" (click)="ignoreCandidate(c)" title="从候选列表移除（软删除，可在 config.json 恢复）">删除</button>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <ng-template #noneCand><div class="empty">暂无外部 MCP 候选 —— 调用方使用过、但网关尚未接入的 MCP server 会出现在这里</div></ng-template>
+    </div>
+
+    <!-- 编辑弹窗 -->
+    <div class="modal-backdrop" *ngIf="editing()" (click)="closeEdit()">
+      <div class="modal" (click)="$event.stopPropagation()">
+        <div class="modal-head">
+          <div class="modal-icon">{{ editing()!.mode === 'edit' ? '✎' : editing()!.mode === 'adopt' ? '⇪' : '+' }}</div>
+          <div class="modal-titles">
+            <h2>{{ editing()!.mode === 'edit' ? '编辑 MCP Server' : editing()!.mode === 'adopt' ? '接入外部 MCP' : '添加 MCP Server' }}</h2>
+            <div class="sub">{{ editing()!.mode === 'edit' ? '修改后立即重建连接，配置持久化到 settings.mcps' : editing()!.mode === 'adopt' ? '调用方声明只含工具名，连接命令无法自动捕获；命中常见 MCP 包已自动预填，未命中请手动补充后接入' : '连接 stdio 本地进程或 Streamable HTTP 远程的 MCP server' }}</div>
+          </div>
+          <button class="icon" (click)="closeEdit()" aria-label="关闭">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-section">
+            <h3>标识</h3>
+            <div class="form-row">
+              <div>
+                <label>名称 <span class="req">*</span></label>
+                <input [(ngModel)]="form.name" placeholder="如 fs / think / serena" [disabled]="editing()!.mode !== 'add'" />
+                <div class="muted small">唯一标识；工具名将形如 mcp_&lt;名称&gt;_&lt;tool&gt;</div>
+              </div>
+            </div>
+          </div>
+          <div class="form-section" *ngIf="editing()!.mode === 'adopt'">
+            <h3>AI 建议接入方式</h3>
+            <div class="muted small" style="margin-bottom:8px">
+              声明里没有连接配置 —— 让网关 LLM 根据 server/工具名推断最可能的接入方式（npx 包 / 自建服务），自动预填表单。
+            </div>
+            <div class="banner ok" *ngIf="suggestNotes()">{{ suggestNotes() }}</div>
+            <div class="banner error" *ngIf="suggestError()">{{ suggestError() }}</div>
+            <button class="small primary" (click)="suggestMcp()" [disabled]="suggestRunning()">{{ suggestRunning() ? '分析中…' : '✦ AI 建议' }}</button>
+          </div>
+          <div class="form-section">
+            <h3>连接</h3>
+            <div class="form-row">
+              <div>
+                <label>传输方式</label>
+                <select [(ngModel)]="form.transport">
+                  <option value="stdio">stdio（本地子进程）</option>
+                  <option value="http">http（Streamable HTTP 远程）</option>
+                </select>
+              </div>
+            </div>
+            <ng-container *ngIf="form.transport === 'http'">
+              <label>Endpoint URL <span class="req">*</span></label>
+              <input [(ngModel)]="form.url" placeholder="如 http://127.0.0.1:8787/mcp" />
+              <div class="muted small">远程 MCP server 地址（支持 application/json 与 SSE 响应）</div>
+            </ng-container>
+            <ng-container *ngIf="form.transport !== 'http'">
+              <div class="form-row">
+                <div>
+                  <label>命令 <span class="req">*</span></label>
+                  <input [(ngModel)]="form.command" placeholder="如 ./mcp/node_modules/.bin/mcp-server-filesystem" />
+                </div>
+              </div>
+              <div class="form-row">
+                <div>
+                  <label>参数（空格分隔）</label>
+                  <input [(ngModel)]="form.argsText" placeholder="如 /path/to/workspace" />
+                </div>
+              </div>
+              <div class="form-row">
+                <div>
+                  <label>环境变量（可选，KEY=VALUE 每行一个）</label>
+                  <textarea [(ngModel)]="form.envText" rows="2" placeholder="如 GITHUB_TOKEN=ghp_xxx"></textarea>
+                </div>
+              </div>
+              <div class="form-row">
+                <div>
+                  <label>调用超时（秒，0=默认30s）</label>
+                  <input type="number" min="0" [(ngModel)]="form.timeoutSec" placeholder="如 600（长任务数据管线）" />
+                  <div class="muted small">长任务类 MCP（如 portfolio-check / pse-review）需设 600s，避免工具调用中途超时</div>
+                </div>
+              </div>
+            </ng-container>
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button (click)="closeEdit()">取消</button>
+          <button class="primary" (click)="save()" [disabled]="saving()">{{ saving() ? '保存中…' : '保存' }}</button>
+        </div>
+      </div>
+    </div>
+  

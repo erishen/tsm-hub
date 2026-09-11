@@ -1,0 +1,20 @@
+    .tool-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:10px; }
+    .tool-card { border:1px solid var(--border,#e4e3dd); border-radius:10px; padding:10px 12px; }
+    .tool-name { display:flex; align-items:center; gap:8px; font-weight:600; }
+    .tool-desc { margin-top:4px; font-size:12px; line-height:1.45;
+      display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical;
+      overflow:hidden; text-overflow:ellipsis; min-height:3.6em; }
+    .tool-grid { grid-template-columns: repeat(auto-fill,minmax(240px,1fr)); }
+    .tool-card { min-width: 0; overflow: hidden; }
+    .tool-name .tname { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .tool-name .badge, .tool-name button { flex: 0 0 auto; white-space: nowrap; }
+    .tool-desc { word-break: break-word; }
+    .test-result { margin-top:12px; }
+    .test-result pre { background:#f6f5f1; border:1px solid var(--border,#e4e3dd); border-radius:8px; padding:10px; font-size:12px; white-space:pre-wrap; word-break:break-all; max-height:220px; overflow:auto; margin:0; }
+    .req { color:#d33; }
+    .skel-bar { height:12px; border-radius:6px;
+      background:linear-gradient(90deg,#efece4 25%,#f8f6f1 37%,#efece4 63%);
+      background-size:400% 100%; animation:skel 1.2s ease infinite; }
+    @keyframes skel { 0% {background-position:100% 0;} 100% {background-position:0 0;} }
+    .err-text { color:#d33; font-size:13px; }
+  

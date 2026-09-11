@@ -1,0 +1,35 @@
+    .page { padding: 24px; max-width: 1400px; margin: 0 auto; }
+    .page-head { margin-bottom: 20px; }
+    .page-head h1 { margin: 0 0 4px; font-size: 22px; font-weight: 600; }
+    .page-head .sub { margin: 0; color: var(--text-secondary, #6b7280); font-size: 13px; }
+    .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; gap: 12px; flex-wrap: wrap; }
+    .filters { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .select, .input { padding: 6px 10px; border: 1px solid var(--border-color, #e5e7eb); border-radius: 6px; font-size: 13px; background: var(--card-color, #fff); color: var(--text-color, #111); }
+    .input { width: 160px; }
+    .primary { padding: 6px 14px; background: var(--accent, #3b82f6); color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; }
+    .primary:hover { opacity: 0.9; }
+    .small { padding: 4px 10px; font-size: 12px; }
+    .meta { font-size: 13px; color: var(--text-secondary, #6b7280); }
+    .muted { color: var(--text-secondary, #6b7280); }
+    .table-wrap { overflow-x: auto; border: 1px solid var(--border-color, #e5e7eb); border-radius: 8px; }
+    .table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .table th { text-align: left; padding: 10px 12px; background: var(--bg-secondary, #f9fafb); border-bottom: 1px solid var(--border-color, #e5e7eb); font-weight: 600; white-space: nowrap; }
+    .table td { padding: 8px 12px; border-bottom: 1px solid var(--border-color, #f3f4f6); vertical-align: top; }
+    .table tr:hover { background: var(--bg-hover, #f9fafb); }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .small { font-size: 12px; }
+    .detail { max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--text-secondary, #6b7280); }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 500; }
+    .badge-create { background: #dcfce7; color: #166534; }
+    .badge-update, .badge-upsert { background: #dbeafe; color: #1e40af; }
+    .badge-delete { background: #fee2e2; color: #991b1b; }
+    .badge-toggle { background: #fef3c7; color: #92400e; }
+    .badge-clear { background: #f3e8ff; color: #6b21a8; }
+    .pagination { display: flex; justify-content: center; align-items: center; gap: 16px; margin-top: 16px; }
+    .pagination button { padding: 4px 12px; border: 1px solid var(--border-color, #e5e7eb); border-radius: 6px; background: var(--card-color, #fff); cursor: pointer; font-size: 12px; }
+    .pagination button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .empty { text-align: center; padding: 60px 20px; }
+    .empty-icon { font-size: 40px; margin-bottom: 12px; }
+    .empty-title { font-size: 16px; font-weight: 600; margin-bottom: 6px; }
+    .empty-desc { font-size: 13px; color: var(--text-secondary, #6b7280); }
+  

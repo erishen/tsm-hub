@@ -1,0 +1,5 @@
+    .mcp-chips { display:flex; flex-wrap:wrap; gap:4px; }
+    .chip { border:1px solid var(--border,#e4e3dd); border-radius:999px; padding:2px 10px; font-size:12px; }
+    .form-section { margin-top:14px; }
+    .form-section h3 { margin:0 0 6px; font-size:13px; color:#555; }
+  

@@ -1,0 +1,94 @@
+    <div class="page-head">
+      <div>
+        <h1>应用推荐</h1>
+        <div class="sub">根据当前模型池能力（{{ total() }} 个模型，{{ freeCount() }} 个免费），推荐可做的应用开发场景</div>
+      </div>
+      <button class="primary" (click)="load()" [disabled]="loading()">
+        {{ loading() ? '刷新中…' : '刷新推荐' }}
+      </button>
+    </div>
+
+    <div class="banner error" *ngIf="error()">{{ error() }}</div>
+
+    <!-- 统计卡片 -->
+    <div class="stat-row" *ngIf="!loading() && scenarios().length">
+      <div class="stat-card">
+        <div class="stat-num">{{ total() }}</div>
+        <div class="stat-label">可用模型</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num free">{{ freeCount() }}</div>
+        <div class="stat-label">免费模型</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num">{{ scenarios().length }}</div>
+        <div class="stat-label">推荐场景</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num">{{ freePct() }}%</div>
+        <div class="stat-label">免费占比</div>
+      </div>
+    </div>
+
+    <!-- loading 骨架 -->
+    <div class="page-loading" *ngIf="loading()">
+      <div class="skel-row" style="height:120px"></div>
+      <div class="skel-row" style="height:200px"></div>
+      <div class="skel-row" style="height:200px"></div>
+    </div>
+
+    <!-- 场景卡片网格 -->
+    <div class="scenario-grid" *ngIf="!loading() && scenarios().length">
+      <div class="scenario-card" *ngFor="let sc of scenarios()">
+        <div class="scenario-head">
+          <span class="scenario-icon">{{ sc.icon }}</span>
+          <div class="scenario-title">
+            <h3>{{ sc.name }}</h3>
+            <div class="scenario-desc">{{ sc.description }}</div>
+          </div>
+        </div>
+
+        <!-- 关键能力标签 -->
+        <div class="feature-tags">
+          <span class="tag" *ngFor="let f of sc.features">{{ f }}</span>
+        </div>
+
+        <!-- 推荐模型 -->
+        <div class="rec-models">
+          <div class="rec-model-label">推荐模型（免费优先）</div>
+          <div class="rec-model-item" *ngFor="let m of sc.models; let i = index">
+            <span class="rec-rank">{{ i + 1 }}</span>
+            <div class="rec-model-info">
+              <div class="rec-model-name">
+                <span class="mono">{{ m.id }}</span>
+                <span class="badge free" *ngIf="m.free">FREE</span>
+                <span class="badge" *ngIf="!m.free" style="background:#f0f0f0;color:#888">付费</span>
+              </div>
+              <div class="rec-model-meta">
+                <span class="badge ok">{{ m.provider }}</span>
+                <span class="muted small" *ngIf="m.context_length">{{ formatCtx(m.context_length) }}</span>
+                <span class="muted small">评分 {{ m.route_score }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 示例提示词 -->
+        <div class="example-box">
+          <div class="example-label">示例提示词</div>
+          <div class="example-text">{{ sc.example }}</div>
+          <button class="btn-small" (click)="copyExample(sc.example)">复制</button>
+        </div>
+
+        <!-- 操作 -->
+        <div class="scenario-actions">
+          <a class="btn-small primary" [routerLink]="['/playground']" [queryParams]="{ model: sc.models[0].id }">去测试</a>
+          <a class="btn-small" [routerLink]="['/models']">查看全部模型</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="empty" *ngIf="!loading() && !scenarios().length && !error()">
+      暂无可推荐的应用场景，请先在 Providers 页配置模型
+    </div>
+  
