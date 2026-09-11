@@ -320,6 +320,15 @@ func (p *Proxy) attempt(w http.ResponseWriter, r *http.Request, c router.Candida
 	}
 	upReq.ContentLength = int64(len(upBody))
 
+	// 协议适配器可选的请求签名（如 AWS Bedrock 的 SigV4）
+	if signer, ok := adapter.(RequestSigner); ok {
+		if err := signer.SignRequest(upReq, upBody, c.Provider); err != nil {
+			return Result{ProviderID: c.ProviderID, UpstreamModel: c.UpstreamModel, Status: http.StatusBadGateway,
+				Stream: req.Stream, Latency: time.Since(started),
+				Err: fmt.Sprintf("sign request failed: %v", err), ProviderFault: true}, true
+		}
+	}
+
 	resp, err := p.client.Do(upReq)
 	if err != nil {
 		slog.Warn("upstream request failed", "provider", c.ProviderID, "model", req.Model, "upstream_model", c.UpstreamModel, "err", err.Error())
