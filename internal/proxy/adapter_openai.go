@@ -2,6 +2,8 @@ package proxy
 
 import (
 	"strings"
+
+	"github.com/erishen/tsm-hub/internal/store"
 )
 
 // OpenAIAdapter 是 OpenAI 兼容协议的适配器，也是默认适配器。
@@ -10,8 +12,12 @@ type OpenAIAdapter struct{}
 
 func (a *OpenAIAdapter) Name() string { return "openai" }
 
-func (a *OpenAIAdapter) UpstreamURL(baseURL, clientPath string) string {
-	return upstreamURL(baseURL, clientPath)
+func (a *OpenAIAdapter) UpstreamURL(provider store.Provider, clientPath string) string {
+	return upstreamURL(provider.BaseURL, clientPath)
+}
+
+func (a *OpenAIAdapter) AuthHeader(provider store.Provider) (key, value string) {
+	return "Authorization", "Bearer " + provider.ResolvedAPIKey()
 }
 
 func (a *OpenAIAdapter) ConvertRequest(body []byte, upstreamModel string) ([]byte, map[string]string, error) {

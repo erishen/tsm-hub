@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/erishen/tsm-hub/internal/store"
 )
 
 // AnthropicAdapter 是 Anthropic Claude API 协议的适配器。
@@ -18,13 +20,17 @@ type AnthropicAdapter struct{}
 
 func (a *AnthropicAdapter) Name() string { return "anthropic" }
 
-func (a *AnthropicAdapter) UpstreamURL(baseURL, clientPath string) string {
+func (a *AnthropicAdapter) UpstreamURL(provider store.Provider, clientPath string) string {
 	// Anthropic 固定用 /v1/messages，忽略客户端路径
-	base := strings.TrimRight(baseURL, "/")
+	base := strings.TrimRight(provider.BaseURL, "/")
 	if strings.HasSuffix(base, "/v1") {
 		return base + "/messages"
 	}
 	return base + "/v1/messages"
+}
+
+func (a *AnthropicAdapter) AuthHeader(provider store.Provider) (key, value string) {
+	return "x-api-key", provider.ResolvedAPIKey()
 }
 
 // anthropicRequest 是 Anthropic /v1/messages 的请求体格式。
