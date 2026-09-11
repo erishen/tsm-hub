@@ -7,7 +7,7 @@
 | 依赖 | Go 标准库 + modernc.org/sqlite（纯 Go，无 cgo） | 自己写路由分发、SSE 转发、限流窗口；不引入 chi / gin / redis |
 | 存储 | JSON 配置 + JSONL 流水 + SQLite（记忆/审计日志） | 单机部署，多实例需要共享盘或后续迁移到 Postgres |
 | 前端 | Angular 19 standalone + signals，产物 embed 进二进制 | 一个二进制交付；构建需要 Node |
-| 协议 | OpenAI 兼容子集 | 只透传 `/v1/*`，不解析各家私有字段 |
+| 协议 | 对外 OpenAI 兼容 API；上游协议适配器层支持 13 种协议（OpenAI/Anthropic/Azure/Gemini/Bedrock/SageMaker/Cohere/Mistral/HuggingFace/Replicate/Together/Fireworks/Groq）+ 12 家国内平台（均 OpenAI 兼容） | 适配器负责请求/响应格式转换、认证头构造、流式事件转换；新增协议只需实现 `ProtocolAdapter` 接口 |
 | 安全 | Key SHA-256 哈希、审计日志、自动脱敏 | 增加 SQLite 依赖和存储开销 |
 
 选择零运行时依赖的理由：网关是基础设施，依赖越少升级成本越低；且这个规模的问题（路由 + 限流 + 记账 + agent 工具循环）用标准库完全够。SQLite 选纯 Go 实现避免 cgo 跨平台编译问题。
@@ -25,6 +25,8 @@ internal/proxy    OpenAI 兼容转发、SSE 透传、usage 采集、failover、
                   agent 工具循环（内置工具 + MCP + 技能注入）、
                   会话记忆（SQLite）、Docker 沙箱、确定性快路径（fastpath + codegen）、
                   外部 tools/skills/mcps 自动发现与统计
+internal/proxy/adapter  上游协议适配器层（13 种协议 + 12 家国内平台），
+                        负责 OpenAI ↔ 各家协议的请求/响应/流式事件转换、认证头构造
 internal/quota    限流（RPM 滑动窗口）+ 用量聚合 + JSONL 落盘 + 过期清理
 internal/api      HTTP 层：/v1/* 代理、/api/admin/* 管理接口（40+ 端点）、静态前端
 internal/audit    审计日志（SQLite 存储、自动脱敏、自动清理、查询过滤分页）
@@ -59,11 +61,12 @@ HTTP 请求（最外层：panic 兜底中间件，生成 X-Request-ID 并写进�
 4. `router.Pick(model)` 得到有序候选（failover / weighted / smart 成本智能）；
 5. 逐个候选 `attempt`：
    - 重写 body（`model` 改成上游模型名；流式注入 `stream_options.include_usage`）；
+   - **协议转换**：根据 Provider.Protocol 选择适配器，把 OpenAI 格式请求体转换为目标协议格式（如 Anthropic/Gemini/Azure 等），构造认证头与上游 URL；
    - 换 `Authorization`，合并 provider 自定义 header；
    - 上游 5xx / 网络错误 / 流式首帧前断流 → 记 provider 失败、换下一个候选；
      **4xx 客户端错误不记失败**（避免坏请求把健康上游摘除）；
-   - 非流式：整包读完再回传（便于解析 usage）；
-   - 流式：逐帧转发，从含 `usage` 的最后一帧取 token 数；
+   - 非流式：整包读完，**适配器把目标协议响应转换回 OpenAI 格式**，再回传（便于解析 usage）；
+   - 流式：逐帧转发，**适配器把目标协议 SSE 事件转换为 OpenAI 格式**，从含 `usage` 的最后一帧取 token 数；
    - 成功响应带 `X-LLM-Router-Provider: <provider_id>` 头（流式、非流式都有）；
 6. **agent 工具循环**：客户端未传 `tools` 时，网关自动附加内置工具池 + MCP 工具，
    在服务端执行 `tool_calls` 循环（默认最多 4 轮），最终返回答案；流式请求内部跑完循环后按 SSE 回放；
@@ -92,7 +95,62 @@ route.model 命中路由表？
 
 **auto 场景路由**：客户端 `model` 不传或传 `"auto"` 时，网关按请求内容自动分类并走对应场景路由（`chat` / `reason` / `code` / `fast`），响应头 `X-Llm-Router-Scene` 返回命中信号。无 `auto` 场景路由时回退到 `smart` 通配路由。
 
-## 5. 健康状态机
+## 5. 上游协议适配器层
+
+网关对外只暴露 OpenAI 兼容 API，但上游 Provider 可能使用不同协议。适配器层（`internal/proxy/adapter/`）负责在请求发送前和响应返回后进行格式转换，让调用方无需关心上游协议差异。
+
+### 5.1 支持的协议
+
+| 协议 | 适配器文件 | 说明 |
+|------|-----------|------|
+| OpenAI | `adapter_openai.go` | 默认纯透传，绝大多数国内平台兼容此协议 |
+| Anthropic | `adapter_anthropic.go` | Claude API 协议转换 |
+| Azure OpenAI | `adapter_azure.go` | Azure 部署名映射、API 版本处理 |
+| Google Gemini | `adapter_gemini.go` | Gemini API 协议转换、URL 中传 key |
+| AWS Bedrock | `adapter_bedrock.go` | AWS SigV4 签名、InvokeModel API |
+| AWS SageMaker | `adapter_sagemaker.go` | SageMaker 端点调用、IAM 签名 |
+| Cohere | `adapter_cohere.go` | Cohere Chat API 协议转换 |
+| Mistral | `adapter_mistral.go` | Mistral AI API 协议转换 |
+| Hugging Face | `adapter_huggingface.go` | HF Inference API / TGI 协议转换 |
+| Replicate | `adapter_replicate.go` | Replicate 预测 API、异步轮询 |
+| Together AI | `adapter_together.go` | Together AI API 协议转换 |
+| Fireworks AI | `adapter_fireworks.go` | Fireworks AI API 协议转换 |
+| Groq | `adapter_groq.go` | Groq API 协议转换 |
+
+国内平台（alibailian / sensenova / agnes / deepseek / openrouter / tokenrouter / bai / kimi 等）均使用 OpenAI 兼容协议，走默认适配器纯透传。
+
+### 5.2 适配器接口
+
+```go
+type ProtocolAdapter interface {
+    Name() string                                    // 适配器名称（与 Provider.Protocol 对应）
+    UpstreamURL(provider, clientPath) string        // 构造上游请求 URL
+    AuthHeader(provider) (key, value string)        // 认证请求头（key 为空表示不设置，如 Gemini 在 URL 中传 key）
+    ConvertRequest(body, upstreamModel) (converted, extraHeaders, err)  // OpenAI → 目标协议
+    ConvertResponse(body) ([]byte, error)           // 目标协议 → OpenAI（非流式）
+    ConvertStreamEvent(data) (converted, skip, err) // 目标协议 SSE → OpenAI SSE（流式）
+    StreamDoneEvent() string                         // 目标协议流结束事件标识
+}
+```
+
+可选接口 `RequestSigner` 用于 AWS SigV4 等需要在请求发送前做签名的场景。
+
+### 5.3 适配器注册表
+
+- 启动时各适配器通过 `init()` 调用 `RegisterAdapter()` 注册到全局 `adapters` map；
+- `GetAdapter(provider)` 根据 `Provider.Protocol` 字段返回对应适配器；
+- 未设置 `Protocol` 或协议未知时，返回 OpenAI 适配器（默认纯透传）；
+- 新增协议只需实现 `ProtocolAdapter` 接口并注册，无需修改 proxy 核心逻辑。
+
+### 5.4 流式转换的特殊处理
+
+流式请求的协议转换比非流式更复杂：
+- 适配器逐帧接收上游 SSE 事件，调用 `ConvertStreamEvent()` 转换为 OpenAI 格式；
+- 部分协议（如 Anthropic）的流式事件结构与 OpenAI 差异较大，需要累积多帧才能组装成一条 OpenAI delta；
+- `skip=true` 表示该帧无需转发（如心跳、元数据帧）；
+- 适配器通过 `StreamDoneEvent()` 识别上游流结束信号，确保正确转发 `[DONE]`。
+
+## 6. 健康状态机
 
 ```
         成功                    连续失败 ≥ fail_threshold
@@ -109,7 +167,7 @@ healthy ──────► healthy   healthy ──────────�
 - 只做被动探测（靠真实请求），不主动发心跳，避免产生额外费用；
 - 上游 429（限流）短冷却（默认 60s），404（模型不存在）长冷却（默认 1800s）。
 
-## 6. 配额与记账
+## 7. 配额与记账
 
 - **RPM**：内存滑动窗口（保留最近 1 分钟的时间戳），超限返回 429；
 - **额度**：总额度（token / USD）与每日额度，超限返回 402；
@@ -120,7 +178,7 @@ healthy ──────► healthy   healthy ──────────�
   价格表在 `settings.pricing`，按「实际上游模型名 → 请求别名 → default」顺序取价。
   这是估算，不是账单。免费模型成本记 0。
 
-## 7. 能力池架构
+## 8. 能力池架构
 
 网关在代理之上叠加了一层"能力池"，让走 tsm-hub 的客户端无需自行配置通用工具、MCP、技能：
 
@@ -171,7 +229,7 @@ healthy ──────► healthy   healthy ──────────�
 安全边界：禁网络（`--network none`）、只读根文件系统（仅 /tmp 可写）、丢弃全部 capabilities、
 禁提权、内存/CPU/进程数/文件描述符限制、超时自动 kill 并清理容器，执行完自动销毁。
 
-## 8. 外部发现与晋升机制
+## 9. 外部发现与晋升机制
 
 网关自动记录调用方请求中声明的 `tools`、`skills`、`mcps`，在管理台展示为外部候选：
 
@@ -181,7 +239,7 @@ healthy ──────► healthy   healthy ──────────�
 
 这样外部调用方的最佳实践可以沉淀为网关的通用能力，后续调用方无需重复声明。被忽略的候选进入忽略列表，可手动恢复。
 
-## 9. Key 安全
+## 10. Key 安全
 
 - 明文格式 `sk-tr-<48 hex>`，创建接口返回一次，2 分钟内可补看，超窗后服务端只存哈希；
 - 库中只存 `sha256(明文)`，用 `constant-time` 比较；
@@ -192,7 +250,7 @@ healthy ──────► healthy   healthy ──────────�
   跨线只提示一次（回落线下后重置），写 warn 日志供成本监控；
 - 日志中只打印 key.Prefix（前缀）和 key.ID（哈希 ID），不打印完整 Key。
 
-## 10. 审计日志
+## 11. 审计日志
 
 所有管理写操作（创建/修改/删除 Provider、路由、Key、MCP、设置、清空 usage/记忆等）自动记录审计日志：
 
@@ -202,7 +260,7 @@ healthy ──────► healthy   healthy ──────────�
 - **自动清理**：默认保留 90 天，可通过 `audit_retention_days` 配置，每次写入后异步清理过期记录；
 - **查询**：管理 API `GET /api/admin/audit-logs` 支持按对象类型/操作类型/对象 ID 过滤 + 分页，管理台「审计日志」页展示。
 
-## 11. 持久化格式
+## 12. 持久化格式
 
 `data/config.json`（原子写：临时文件 → fsync → chmod 600 → rename）：
 
@@ -246,7 +304,7 @@ healthy ──────► healthy   healthy ──────────�
 
 `data/fastpath_plugins/`、`data/fastpath_promoted/`：快路径插件 JS 文件，按 mtime 热重载。
 
-## 12. 管理台架构
+## 13. 管理台架构
 
 Angular 19 standalone + signals，18 个页面，全部懒加载：
 
@@ -262,7 +320,7 @@ Angular 19 standalone + signals，18 个页面，全部懒加载：
 批量操作（providers/routes/keys 复选框批量启用/禁用/删除）、导出 CSV（usage/observability）、
 自动刷新开关（dashboard/usage）、PWA（manifest + 图标，支持添加到主屏幕）、键盘快捷键。
 
-## 13. 已知边界与后续
+## 14. 已知边界与后续
 
 见 `TODO.md`。主要待办：多实例下的共享状态、Key 速率限制确认、Provider API Key 加密存储、
 按 Key 的用量清理、流式 token 估算兜底、Prometheus 延迟分位指标。
