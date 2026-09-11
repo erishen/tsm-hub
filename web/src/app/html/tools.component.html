@@ -15,7 +15,7 @@
     <div class="card">
       <h2>网关工具池（{{ tools().length }}）</h2>
       <div class="muted small" style="margin-bottom:10px">
-        客户端不传 tools 时，网关自动附加以下工具并在服务端执行；MCP 工具由常驻连接提供（管理见 MCP 页），外部自创工具录用见「监控」页。
+        客户端不传 tools 时，网关自动附加以下工具并在服务端执行；MCP 工具由常驻连接提供（管理见 MCP 页），外部自创工具见下方「外部工具候选」列表。
       </div>
       <div class="tool-grid" *ngIf="loadingTools()">
         <div class="tool-card" style="grid-column:auto"><div class="skel-bar" style="width:55%"></div><div class="skel-bar" style="width:90%;margin-top:8px"></div></div>
@@ -42,6 +42,44 @@
           <button class="small" style="margin-left:10px" (click)="loadTools()">重试</button>
         </div>
         <div class="empty" *ngIf="!error()">工具池为空</div>
+      </ng-template>
+    </div>
+
+    <!-- 外部工具候选 -->
+    <div class="card">
+      <h2>外部工具候选（{{ externalTools().length }}）<span class="muted" style="font-weight:400;font-size:12px">（调用方声明、不在网关目录里的工具/技能；可择优录用进网关）</span></h2>
+      <div style="display:flex;gap:8px;margin-bottom:10px">
+        <button class="small" (click)="refreshExternalTools()">刷新</button>
+      </div>
+      <div *ngIf="loadingExternalTools()" class="muted small" style="padding:20px 0;text-align:center">加载外部工具候选中…</div>
+      <table class="tbl" *ngIf="!loadingExternalTools() && externalTools().length; else noExternal">
+        <thead>
+          <tr>
+            <th>名称</th><th class="num">调用次数</th><th class="num">使用方（key 数）</th><th>类型</th><th>状态</th><th class="actions">操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let t of externalTools()">
+            <td><span class="mono">{{ t.name }}</span></td>
+            <td class="num">{{ t.calls }}</td>
+            <td class="num">{{ t.key_count }}</td>
+            <td>
+              <span *ngIf="t.kind === 'skill'" class="badge">技能</span>
+              <span *ngIf="t.kind !== 'skill'" class="badge ok">工具</span>
+            </td>
+            <td>
+              <span *ngIf="t.adopted" class="badge ok">{{ t.kind === 'skill' ? '已录用·技能' : '已录用·工具' }}</span>
+              <span *ngIf="!t.adopted" class="badge">未录用</span>
+            </td>
+            <td class="actions">
+              <button *ngIf="!t.adopted" class="small primary" (click)="openAdopt(t)">录用</button>
+              <button *ngIf="t.adopted" class="small" (click)="unadopt(t)">取消</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <ng-template #noExternal>
+        <div class="empty" *ngIf="!loadingExternalTools()">暂无外部工具候选 —— 调用方声明、不在网关目录里的工具会出现在这里</div>
       </ng-template>
     </div>
 
@@ -122,6 +160,67 @@
         <div class="modal-foot">
           <button (click)="closeDetail()">关闭</button>
           <button class="primary" (click)="openTestFromDetail()" *ngIf="!detailTool()!.source.startsWith('mcp:') || detailTool()!.parameters">测试此工具</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 录用外部工具弹窗 -->
+    <div class="modal-backdrop" *ngIf="adoptTarget()" (click)="closeAdopt()">
+      <div class="modal" (click)="$event.stopPropagation()">
+        <div class="modal-head">
+          <div class="modal-icon">⬆</div>
+          <div class="modal-titles">
+            <h2>录用外部工具 <span class="mono">{{ adoptTarget()!.name }}</span></h2>
+            <div class="sub">录用后该工具将加入网关工具池，可被 agent 感知并执行</div>
+          </div>
+          <button class="icon" (click)="closeAdopt()" aria-label="关闭">×</button>
+        </div>
+        <div class="modal-body">
+          <label>
+            类型<span class="req"> *</span>
+          </label>
+          <select [(ngModel)]="adoptForm.kind">
+            <option value="tool">工具（Tool）</option>
+            <option value="skill">技能（Skill）</option>
+          </select>
+
+          <label>
+            描述
+            <span class="muted small"> — 工具的功能说明，将展示在工具池详情中</span>
+          </label>
+          <textarea [(ngModel)]="adoptForm.description" rows="3" placeholder="例如：查询投资组合的当前持仓与收益"></textarea>
+
+          <ng-container *ngIf="adoptForm.kind === 'tool'">
+            <label>
+              实现方式<span class="req"> *</span>
+            </label>
+            <select [(ngModel)]="adoptForm.impl_type">
+              <option value="none">仅记录（暂不实现，后续手动添加）</option>
+              <option value="http">HTTP 调用（外部 API）</option>
+              <option value="mcp">MCP 工具（需在 MCP 页配置对应 server）</option>
+              <option value="builtin">内置实现（需开发）</option>
+            </select>
+
+            <label *ngIf="adoptForm.impl_type === 'http'">
+              实现来源
+              <span class="muted small"> — HTTP 端点 URL 或说明</span>
+            </label>
+            <input *ngIf="adoptForm.impl_type === 'http'" [(ngModel)]="adoptForm.impl_source" placeholder="https://api.example.com/tool" />
+
+            <label *ngIf="adoptForm.impl_type === 'mcp'">
+              实现来源
+              <span class="muted small"> — MCP server 名称</span>
+            </label>
+            <input *ngIf="adoptForm.impl_type === 'mcp'" [(ngModel)]="adoptForm.impl_source" placeholder="server-name" />
+          </ng-container>
+
+          <div class="muted small" style="margin-top:12px;padding:10px;background:rgba(0,0,0,0.03);border-radius:8px">
+            <strong>提示：</strong>录用后工具会出现在上方「网关工具池」中。如果选择"仅记录"，工具只会被标记为已录用，但不会真正执行（需要后续手动实现）。
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button (click)="closeAdopt()">取消</button>
+          <button class="primary" (click)="adopt()" [disabled]="adopting()">{{ adopting() ? '录用中…' : '确认录用' }}</button>
         </div>
       </div>
     </div>

@@ -25,10 +25,17 @@ export class ToolsComponent implements OnInit, OnDestroy {
   testError = signal('');
   testRunning = signal(false);
 
+  // ---- 外部 Tools 候选 ----
+  externalTools = signal<{ name: string; calls: number; key_count: number; adopted: boolean; kind?: string; impl_type?: string; description?: string }[]>([]);
+  loadingExternalTools = signal(true);
+  adoptTarget = signal<{ name: string; calls?: number; key_count?: number; adopted: boolean; kind?: string } | null>(null);
+  adoptForm = { description: '', kind: 'tool', impl_type: 'none', impl_source: '' };
+  adopting = signal(false);
+
   
   /** 弹窗滚动锁：打开时锁 body，关闭/销毁时恢复（防止滚动穿透母页面）。 */
   private readonly bodyLock = effect(() => {
-    lockBody(!!(this.testing() || this.detailTool()));
+    lockBody(!!(this.testing() || this.detailTool() || this.adoptTarget()));
   });
 
   ngOnDestroy(): void {
@@ -39,6 +46,7 @@ constructor(private api: ApiService) {}
 
   ngOnInit(): void {
     this.loadTools();
+    this.loadExternalTools();
   }
 
   // 保证 loading 骨架至少可见 350ms，避免接口太快导致闪烁不可见。
@@ -163,5 +171,55 @@ constructor(private api: ApiService) {}
     if (src === 'builtin-conditional') return '条件';
     if (src.startsWith('mcp:')) return src.slice(4);
     return src;
+  }
+
+  // ---- 外部 Tools 候选 ----
+
+  loadExternalTools(): void {
+    this.loadingExternalTools.set(true);
+    const t0 = Date.now();
+    this.api.listExternalTools().subscribe({
+      next: (r) => {
+        this.externalTools.set(r.external_tools || []);
+        this.minShown(t0, { done: () => this.loadingExternalTools.set(false) });
+      },
+      error: (e) => { this.error.set(e.error?.error?.message || '加载外部工具候选失败'); this.minShown(t0, { done: () => this.loadingExternalTools.set(false) }); },
+    });
+  }
+
+  refreshExternalTools(): void {
+    this.loadExternalTools();
+  }
+
+  openAdopt(t: { name: string; calls?: number; key_count?: number; adopted: boolean; kind?: string }): void {
+    this.adoptTarget.set(t);
+    this.adoptForm = { description: '', kind: t.kind === 'skill' ? 'skill' : 'tool', impl_type: 'none', impl_source: '' };
+  }
+
+  closeAdopt(): void {
+    if (this.adopting()) return;
+    this.adoptTarget.set(null);
+  }
+
+  adopt(): void {
+    const t = this.adoptTarget();
+    if (!t) return;
+    this.adopting.set(true);
+    this.api.adoptExternalTool(t.name, {
+      description: this.adoptForm.description,
+      kind: this.adoptForm.kind,
+      impl_type: this.adoptForm.kind === 'skill' ? 'none' : this.adoptForm.impl_type,
+      impl_source: this.adoptForm.impl_source || undefined,
+    }).subscribe({
+      next: () => { this.adopting.set(false); this.adoptTarget.set(null); this.loadExternalTools(); this.saved.set('已录用为网关工具'); },
+      error: (e: Error) => { this.adopting.set(false); this.error.set('录用失败：' + e.message); },
+    });
+  }
+
+  unadopt(t: { name: string }): void {
+    this.api.deleteExternalTool(t.name).subscribe({
+      next: () => { this.loadExternalTools(); this.saved.set('已取消录用'); },
+      error: (e: Error) => { this.error.set('取消失败：' + e.message); },
+    });
   }
 }
