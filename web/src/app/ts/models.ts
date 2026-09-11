@@ -35,6 +35,8 @@ export interface Provider {
   weight: number;
   priority: number;
   timeout_ms: number;
+  /** 上游 API 协议：openai（默认）/ anthropic */
+  protocol?: string;
   healthy: boolean;
   latency_ms: number;
   health?: ProviderHealth; // 完整健康状态（failures/last_error/down_until 等）

@@ -184,6 +184,10 @@ type Provider struct {
 	Weight    int               `json:"weight"`
 	Priority  int               `json:"priority"`
 	TimeoutMS int               `json:"timeout_ms"`
+	// Protocol 指定上游 Provider 使用的 API 协议。
+	// 支持："openai"（默认，OpenAI 兼容）、"anthropic"（Anthropic Claude）。
+	// 网关对外只暴露 OpenAI 兼容 API，适配器负责请求/响应格式转换。
+	Protocol  string            `json:"protocol,omitempty"`
 	CreatedAt time.Time         `json:"created_at"`
 	UpdatedAt time.Time         `json:"updated_at"`
 	// ProbeAt 是最近一次探测成功的时间；ProbeModels 是那次探测的模型快照。

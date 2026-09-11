@@ -269,6 +269,8 @@ func isModelNotFound(body string) bool {
 // 返回值 retryable=true 表示本次没有向客户端写出任何字节，可以换下一个候选重试。
 func (p *Proxy) attempt(w http.ResponseWriter, r *http.Request, c router.Candidate, path string, body []byte, req chatRequest) (Result, bool) {
 	started := time.Now()
+	adapter := GetAdapter(c.Provider)
+
 	upBody, err := rewriteBody(body, c.UpstreamModel, req.Stream)
 	if err != nil {
 		// 客户端请求体不合法：直接回 400，且不换候选（换谁都一样）。
@@ -277,6 +279,17 @@ func (p *Proxy) attempt(w http.ResponseWriter, r *http.Request, c router.Candida
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return res, false
 	}
+
+	// 协议适配：把 OpenAI 格式的请求体转换为目标协议格式（如 Anthropic）
+	convertedBody, extraHeaders, err := adapter.ConvertRequest(upBody, c.UpstreamModel)
+	if err != nil {
+		res := Result{ProviderID: c.ProviderID, UpstreamModel: c.UpstreamModel,
+			Status: http.StatusBadGateway, Stream: req.Stream, Latency: time.Since(started),
+			Err: fmt.Sprintf("convert request: %v", err), ProviderFault: true}
+		writeError(w, http.StatusBadGateway, "protocol_error", res.Err)
+		return res, true
+	}
+	upBody = convertedBody
 
 	timeout := time.Duration(c.Provider.TimeoutMS) * time.Millisecond
 	if c.Provider.TimeoutMS <= 0 {
@@ -288,7 +301,7 @@ func (p *Proxy) attempt(w http.ResponseWriter, r *http.Request, c router.Candida
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
 
-	upReq, err := http.NewRequestWithContext(ctx, r.Method, upstreamURL(c.Provider.BaseURL, path), bytes.NewReader(upBody))
+	upReq, err := http.NewRequestWithContext(ctx, r.Method, adapter.UpstreamURL(c.Provider.BaseURL, path), bytes.NewReader(upBody))
 	if err != nil {
 		return Result{ProviderID: c.ProviderID, UpstreamModel: c.UpstreamModel, Status: http.StatusBadGateway,
 			Stream: req.Stream, Latency: time.Since(started), Err: err.Error(), ProviderFault: true}, true
@@ -296,6 +309,9 @@ func (p *Proxy) attempt(w http.ResponseWriter, r *http.Request, c router.Candida
 	copyHeaders(upReq.Header, r.Header)
 	upReq.Header.Set("Authorization", "Bearer "+c.Provider.ResolvedAPIKey())
 	upReq.Header.Set("Content-Type", "application/json")
+	for k, v := range extraHeaders {
+		upReq.Header.Set(k, v)
+	}
 	for k, v := range c.Provider.Headers {
 		upReq.Header.Set(k, v)
 	}
@@ -396,19 +412,19 @@ func (p *Proxy) attempt(w http.ResponseWriter, r *http.Request, c router.Candida
 	}
 
 	if req.Stream {
-		res := p.streamResponse(w, resp, c)
+		res := p.streamResponse(w, resp, c, adapter)
 		res.Latency = time.Since(started)
 		// 首帧之前就失败才允许重试；一旦写过帧就只能认了。
 		return res, false
 	}
 
-	res := p.bufferedResponse(w, resp, c)
+	res := p.bufferedResponse(w, resp, c, adapter)
 	res.Latency = time.Since(started)
 	return res, false
 }
 
 // bufferedResponse 处理非流式响应：整包读完再回传，便于解析 usage。
-func (p *Proxy) bufferedResponse(w http.ResponseWriter, resp *http.Response, c router.Candidate) Result {
+func (p *Proxy) bufferedResponse(w http.ResponseWriter, resp *http.Response, c router.Candidate, adapter ProtocolAdapter) Result {
 	data, err := io.ReadAll(io.LimitReader(resp.Body, p.store.Settings().MaxBodyBytes))
 	res := Result{
 		ProviderID:    c.ProviderID,
@@ -421,6 +437,14 @@ func (p *Proxy) bufferedResponse(w http.ResponseWriter, resp *http.Response, c r
 		writeError(w, http.StatusBadGateway, "upstream_read_error", res.Err)
 		return res
 	}
+
+	// 协议适配：把目标协议的响应转换为 OpenAI 格式
+	if resp.StatusCode < 400 && len(data) > 0 {
+		if converted, err := adapter.ConvertResponse(data); err == nil {
+			data = converted
+		}
+	}
+
 	copyResponseHeaders(w.Header(), resp.Header)
 	w.Header().Set("X-LLM-Router-Provider", c.ProviderID)
 	w.WriteHeader(resp.StatusCode)
@@ -443,7 +467,7 @@ func (p *Proxy) bufferedResponse(w http.ResponseWriter, resp *http.Response, c r
 }
 
 // streamResponse 逐帧转发 SSE，并从最后一帧里取 usage。
-func (p *Proxy) streamResponse(w http.ResponseWriter, resp *http.Response, c router.Candidate) Result {
+func (p *Proxy) streamResponse(w http.ResponseWriter, resp *http.Response, c router.Candidate, adapter ProtocolAdapter) Result {
 	res := Result{
 		ProviderID:    c.ProviderID,
 		UpstreamModel: c.UpstreamModel,
@@ -469,16 +493,25 @@ func (p *Proxy) streamResponse(w http.ResponseWriter, resp *http.Response, c rou
 	for {
 		line, err := br.ReadString('\n')
 		if line != "" {
+			// 协议适配：把目标协议的 SSE 事件转换为 OpenAI 格式
+			if strings.HasPrefix(line, "data:") {
+				payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+				if converted, skip, convErr := adapter.ConvertStreamEvent([]byte(payload)); convErr == nil && !skip {
+					line = "data: " + string(converted) + "\n"
+					// 从转换后的事件里解析 usage
+					if pt, ct, tt, ok := parseSSEUsage(line); ok {
+						prompt, completion, total = pt, ct, tt
+					}
+				} else if skip {
+					// 跳过该事件（如 Anthropic 的 message_start/content_block_start 等）
+					continue
+				}
+			}
 			wrote = true
 			if _, werr := io.WriteString(w, line); werr != nil {
 				res.Err = fmt.Sprintf("write client: %v", werr)
 				res.PromptTokens, res.CompletionToken, res.TotalTokens = prompt, completion, total
 				return res
-			}
-			if strings.HasPrefix(line, "data:") {
-				if pt, ct, tt, ok := parseSSEUsage(line); ok {
-					prompt, completion, total = pt, ct, tt
-				}
 			}
 			if flusher != nil {
 				flusher.Flush()
@@ -549,16 +582,6 @@ func rewriteBody(body []byte, upstreamModel string, stream bool) ([]byte, error)
 // upstreamURL 拼接上游地址。
 //
 // 上游 base_url 常见两种写法：https://api.openai.com/v1 或 https://api.openai.com，
-// 而客户端请求的路径固定带 /v1 前缀（/v1/chat/completions），
-// 因此当 base 已经以 /v1 结尾时，要把 path 的 /v1 前缀去掉，避免拼成 /v1/v1/...。
-func upstreamURL(base, path string) string {
-	base = strings.TrimRight(base, "/")
-	if strings.HasSuffix(base, "/v1") && strings.HasPrefix(path, "/v1/") {
-		path = strings.TrimPrefix(path, "/v1")
-	}
-	return base + path
-}
-
 func allowsModel(allowed []string, model string) bool {
 	for _, m := range allowed {
 		if m == model || m == "*" {
@@ -566,19 +589,6 @@ func allowsModel(allowed []string, model string) bool {
 		}
 	}
 	return false
-}
-
-func copyHeaders(dst, src http.Header) {
-	for k, vs := range src {
-		lk := strings.ToLower(k)
-		if lk == "authorization" || lk == "host" || lk == "content-length" ||
-			lk == "content-encoding" || lk == "transfer-encoding" || lk == "connection" {
-			continue
-		}
-		for _, v := range vs {
-			dst.Add(k, v)
-		}
-	}
 }
 
 func copyResponseHeaders(dst, src http.Header) {

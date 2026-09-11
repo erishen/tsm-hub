@@ -105,7 +105,8 @@ constructor(private api: ApiService) {}
   blank(): Provider {
     return {
       id: '', name: '', base_url: '', api_key: '', models: [], enabled: true,
-      weight: 100, priority: 10, timeout_ms: 120000, healthy: true, latency_ms: 0,
+      weight: 100, priority: 10, timeout_ms: 120000, protocol: 'openai',
+      healthy: true, latency_ms: 0,
     };
   }
 
