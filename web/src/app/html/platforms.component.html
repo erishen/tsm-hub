@@ -1,0 +1,85 @@
+<div class="page-header">
+  <div>
+    <h2>上游平台</h2>
+    <p class="muted">支持 {{ platforms().length }} 种上游 LLM 平台，点击卡片可快速接入</p>
+  </div>
+  <div class="header-actions">
+    <input [(ngModel)]="search" placeholder="搜索平台/模型/特性..." class="search-input" />
+    <select [(ngModel)]="filter" class="filter-select">
+      <option value="all">全部协议</option>
+      <option *ngFor="let p of protocols()" [value]="p">{{ protocolLabels[p] || p }}</option>
+    </select>
+    <button class="btn" (click)="load()" [disabled]="loading()">刷新</button>
+  </div>
+</div>
+
+<div class="banner error" *ngIf="error()">
+  {{ error() }}
+</div>
+
+<div class="loading" *ngIf="loading()">
+  <div class="spinner"></div>
+  <span>加载平台列表...</span>
+</div>
+
+<div class="platforms-grid" *ngIf="!loading() && !error()">
+  <div class="platform-card" *ngFor="let p of filteredPlatforms(); trackBy: trackById">
+    <div class="card-header">
+      <div class="platform-icon" [class]="'icon-' + p.id">
+        {{ p.name.charAt(0) }}
+      </div>
+      <div class="platform-title">
+        <h3>{{ p.name }}</h3>
+        <span class="protocol-badge" [class]="'proto-' + p.protocol">{{ protocolLabels[p.protocol] || p.protocol }}</span>
+      </div>
+    </div>
+
+    <p class="platform-desc">{{ p.description }}</p>
+
+    <div class="platform-meta">
+      <div class="meta-row">
+        <span class="meta-label">Base URL</span>
+        <code class="meta-value mono">{{ p.base_url }}</code>
+      </div>
+      <div class="meta-row">
+        <span class="meta-label">免费额度</span>
+        <span class="meta-value free-tier">{{ p.free_tier }}</span>
+      </div>
+      <div class="meta-row">
+        <span class="meta-label">流式</span>
+        <span class="meta-value">
+          <span class="badge" [class.ok]="p.stream_support" [class.bad]="!p.stream_support">
+            {{ p.stream_support ? '支持' : '不支持' }}
+          </span>
+        </span>
+      </div>
+    </div>
+
+    <div class="platform-models">
+      <div class="meta-label">代表模型</div>
+      <div class="model-tags">
+        <span class="model-tag" *ngFor="let m of p.models.slice(0, 4)">{{ m }}</span>
+        <span class="model-tag more" *ngIf="p.models.length > 4">+{{ p.models.length - 4 }}</span>
+      </div>
+    </div>
+
+    <div class="platform-features">
+      <span class="feature-tag" *ngFor="let f of p.features.slice(0, 4)">{{ f }}</span>
+    </div>
+
+    <div class="card-links">
+      <a [href]="p.website" target="_blank" rel="noopener" class="link-btn">官网</a>
+      <a [href]="p.signup_url" target="_blank" rel="noopener" class="link-btn primary">申请 Key</a>
+      <a [href]="p.docs_url" target="_blank" rel="noopener" class="link-btn">文档</a>
+      <a [href]="p.pricing_url" target="_blank" rel="noopener" class="link-btn">定价</a>
+    </div>
+
+    <div class="card-actions">
+      <button class="btn primary full" (click)="goConfigure(p)">去配置此平台 →</button>
+    </div>
+  </div>
+</div>
+
+<div class="empty-state" *ngIf="!loading() && !error() && filteredPlatforms().length === 0">
+  <p>没有找到匹配的平台</p>
+</div>

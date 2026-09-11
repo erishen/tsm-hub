@@ -3,7 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { Observable, of, throwError } from 'rxjs';
 import { catchError, map, tap } from 'rxjs/operators';
 import {
-  Agg, ApiKey, Balance, CatalogModel, McpServer, ObservabilityResponse, Overview, ProbeModel, Provider, ProviderBalance, ProviderHealth, Quota, RecommendationsResp, Route, SkillDetail, SkillSummary, ToolInfo, UsageResponse,
+  Agg, ApiKey, Balance, CatalogModel, McpServer, ObservabilityResponse, Overview, ProbeModel, Provider, ProviderBalance, ProviderHealth, Quota, RecommendationsResp, Route, SkillDetail, SkillSummary, ToolInfo, UpstreamPlatform, UpstreamPlatformsResp, UsageResponse,
 } from './models';
 
 const SESSION_KEY = 'tsm-hub.session';
@@ -57,6 +57,11 @@ export class ApiService {
 
   listProviders(): Observable<{ providers: Provider[] }> {
     return this.http.get<{ providers: Provider[] }>('/api/admin/providers', { headers: this.headers() })
+      .pipe(catchError(this.handleError));
+  }
+
+  listUpstreamPlatforms(): Observable<UpstreamPlatformsResp> {
+    return this.http.get<UpstreamPlatformsResp>('/api/admin/upstream-platforms', { headers: this.headers() })
       .pipe(catchError(this.handleError));
   }
 

@@ -71,6 +71,7 @@ export class AppComponent {
       name: '网关',
       items: [
         { label: 'Providers', route: '/providers' },
+        { label: '上游平台', route: '/platforms' },
         { label: '路由表', route: '/routes' },
         { label: 'Token Keys', route: '/keys' },
       ],
