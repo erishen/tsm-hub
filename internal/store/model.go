@@ -16,6 +16,23 @@ const CurrentVersion = 1
 // DefaultAdminToken 是初始化配置时写入的占位管理口令，上线前必须改掉。
 const DefaultAdminToken = "change-me-admin"
 
+// NoToolsModels 是已知不支持 tool calling（function calling）的模型静态名单。
+// 来源：实际测试验证 + 模型类型推断（嵌入/内容安全/音频生成等专用模型通常不支持 tools）。
+// 路由选择时：请求带 tools 会自动过滤掉此名单中的模型，避免上游 400 后才 failover。
+// 动态检测：带 tools 请求返回 400 时也会运行时标记为不可用（30 分钟冷却）。
+var NoToolsModels = map[string]bool{
+	// OpenRouter 免费模型：实际测试带 tools 返回 400（model does not support tool calling）
+	"nvidia/nemotron-3-super-120b-a12b:free": true,
+	// 嵌入模型：不支持 chat completions，自然不支持 tools
+	"qwen3.7-text-embedding":       true,
+	"qwen3.7-text-embedding-flash": true,
+	// 内容安全模型：专用分类，不支持 tools
+	"nvidia/nemotron-3.5-content-safety:free": true,
+	// 音频生成模型：不支持 tools
+	"google/lyria-3-clip-preview": true,
+	"google/lyria-3-pro-preview":  true,
+}
+
 // EnvKeyPrefix 表示 api_key 引用环境变量，如 "env:OPENAI_API_KEY"。
 // 真实密钥通过环境变量注入，不必写进 config.json；配置落盘与回显保留该引用本身。
 const EnvKeyPrefix = "env:"

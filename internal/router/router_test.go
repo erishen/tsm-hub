@@ -43,7 +43,7 @@ func TestPickFailoverOrdersByPriority(t *testing.T) {
 		}}},
 	)
 	rt := New(st, NewTracker(3, 60))
-	cands, err := rt.Pick("m")
+	cands, err := rt.Pick("m", false)
 	if err != nil {
 		t.Fatalf("pick: %v", err)
 	}
@@ -60,7 +60,7 @@ func TestPickRewritesUpstreamModel(t *testing.T) {
 		}}},
 	)
 	rt := New(st, NewTracker(3, 60))
-	cands, err := rt.Pick("alias")
+	cands, err := rt.Pick("alias", false)
 	if err != nil {
 		t.Fatalf("pick: %v", err)
 	}
@@ -77,7 +77,7 @@ func TestPickFallsBackToProvidersDeclaringModel(t *testing.T) {
 		{ID: "off", Name: "off", Enabled: false, Models: []string{"m"}},
 	}, nil)
 	rt := New(st, NewTracker(3, 60))
-	cands, err := rt.Pick("m")
+	cands, err := rt.Pick("m", false)
 	if err != nil {
 		t.Fatalf("pick: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestPickSkipsUnhealthyAndKeepsHalfOpen(t *testing.T) {
 	// a 连续失败两次 → 被摘除，只剩 b。
 	tracker.ReportFailure("a", "boom")
 	tracker.ReportFailure("a", "boom")
-	cands, err := rt.Pick("m")
+	cands, err := rt.Pick("m", false)
 	if err != nil {
 		t.Fatalf("pick: %v", err)
 	}
@@ -110,7 +110,7 @@ func TestPickSkipsUnhealthyAndKeepsHalfOpen(t *testing.T) {
 	// 两个都挂：仍要放行一个半开候选，而不是整体不可用。
 	tracker.ReportFailure("b", "boom")
 	tracker.ReportFailure("b", "boom")
-	cands, err = rt.Pick("m")
+	cands, err = rt.Pick("m", false)
 	if err != nil {
 		t.Fatalf("pick when all down: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestPickFailoverUsesTargetPriorityOverProviderPriority(t *testing.T) {
 		}}},
 	)
 	rt := New(st, NewTracker(3, 60))
-	cands, err := rt.Pick("m")
+	cands, err := rt.Pick("m", false)
 	if err != nil {
 		t.Fatalf("pick: %v", err)
 	}
@@ -152,7 +152,7 @@ func TestPickFallsBackToProviderPriorityWhenTargetPriorityZero(t *testing.T) {
 		}}},
 	)
 	rt := New(st, NewTracker(3, 60))
-	cands, err := rt.Pick("m")
+	cands, err := rt.Pick("m", false)
 	if err != nil {
 		t.Fatalf("pick: %v", err)
 	}
@@ -164,10 +164,10 @@ func TestPickFallsBackToProviderPriorityWhenTargetPriorityZero(t *testing.T) {
 func TestPickNoCandidate(t *testing.T) {
 	st := newStore(t, []store.Provider{p("a", 1, 100, "m")}, nil)
 	rt := New(st, NewTracker(3, 60))
-	if _, err := rt.Pick(""); err == nil {
+	if _, err := rt.Pick("", false); err == nil {
 		t.Fatal("empty model should error")
 	}
-	if _, err := rt.Pick("unknown-model"); err == nil {
+	if _, err := rt.Pick("unknown-model", false); err == nil {
 		t.Fatal("unknown model should error")
 	}
 }
@@ -182,7 +182,7 @@ func TestWeightedPrefersHigherWeight(t *testing.T) {
 	rt := New(st, NewTracker(3, 60))
 	heavyFirst := 0
 	for i := 0; i < 200; i++ {
-		cands, err := rt.Pick("m")
+		cands, err := rt.Pick("m", false)
 		if err != nil {
 			t.Fatalf("pick: %v", err)
 		}
@@ -209,7 +209,7 @@ func TestLatencyReducesWeight(t *testing.T) {
 
 	fastFirst := 0
 	for i := 0; i < 200; i++ {
-		cands, _ := rt.Pick("m")
+		cands, _ := rt.Pick("m", false)
 		if cands[0].ProviderID == "fast" {
 			fastFirst++
 		}
@@ -276,7 +276,7 @@ func TestPickSmartPrefersFreeAndCheap(t *testing.T) {
 	st := newStore(t, []store.Provider{paid, free}, nil)
 	rt := New(st, NewTracker(3, 60))
 
-	cands, err := rt.Pick("m")
+	cands, err := rt.Pick("m", false)
 	if err != nil {
 		t.Fatalf("pick: %v", err)
 	}
@@ -295,7 +295,7 @@ func TestPickSmartFreeOverridesLowerPrice(t *testing.T) {
 	st := newStore(t, []store.Provider{cheap, marked}, nil)
 	rt := New(st, NewTracker(3, 60))
 
-	cands, err := rt.Pick("other:free")
+	cands, err := rt.Pick("other:free", false)
 	if err != nil {
 		t.Fatalf("pick: %v", err)
 	}
@@ -312,7 +312,7 @@ func TestPickSkipsModelMarkedUnavailable(t *testing.T) {
 	rt := New(st, NewTracker(3, 60))
 
 	st.MarkModelUnavailable("a", "m", "upstream 404 model not found", time.Hour)
-	cands, err := rt.Pick("m")
+	cands, err := rt.Pick("m", false)
 	if err != nil {
 		t.Fatalf("pick: %v", err)
 	}
@@ -322,7 +322,7 @@ func TestPickSkipsModelMarkedUnavailable(t *testing.T) {
 
 	// 到期后自动恢复。
 	st.MarkModelUnavailable("a", "m", "gone", -time.Minute)
-	cands, err = rt.Pick("m")
+	cands, err = rt.Pick("m", false)
 	if err != nil {
 		t.Fatalf("pick after expiry: %v", err)
 	}
@@ -337,7 +337,7 @@ func TestPickAllMarkedUnavailableErrors(t *testing.T) {
 	rt := New(st, NewTracker(3, 60))
 	st.MarkModelUnavailable("a", "m", "gone", time.Hour)
 
-	if _, err := rt.Pick("m"); err == nil {
+	if _, err := rt.Pick("m", false); err == nil {
 		t.Fatalf("expected error when all candidates unavailable")
 	}
 }
@@ -356,7 +356,7 @@ func TestPickFallsBackToCatchAllRoute(t *testing.T) {
 	)
 	rt := New(st, NewTracker(3, 60))
 
-	cands, err := rt.Pick("m")
+	cands, err := rt.Pick("m", false)
 	if err != nil {
 		t.Fatalf("pick m: %v", err)
 	}
@@ -364,7 +364,7 @@ func TestPickFallsBackToCatchAllRoute(t *testing.T) {
 		t.Fatalf("expected exact route for m, got %+v", cands)
 	}
 
-	cands, err = rt.Pick("anything-else")
+	cands, err = rt.Pick("anything-else", false)
 	if err != nil {
 		t.Fatalf("pick catchall: %v", err)
 	}
