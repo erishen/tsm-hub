@@ -8,7 +8,7 @@ import { ApiService } from './api.service';
   selector: 'app-root',
   standalone: true,
   imports: [CommonModule, FormsModule, RouterLink, RouterLinkActive, RouterOutlet],
-  templateUrl: './app.component.html',
+  templateUrl: '../html/app.component.html',
 })
 export class AppComponent {
   token = '';

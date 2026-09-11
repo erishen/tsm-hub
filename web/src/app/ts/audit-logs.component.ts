@@ -19,8 +19,8 @@ interface AuditLog {
   selector: 'app-audit-logs',
   standalone: true,
   imports: [CommonModule, FormsModule],
-  templateUrl: './audit-logs.component.html',
-  styleUrls: ['./audit-logs.component.css'],
+  templateUrl: '../html/audit-logs.component.html',
+  styleUrls: ['../css/audit-logs.component.css'],
 })
 export class AuditLogsComponent implements OnInit {
   logs = signal<AuditLog[]>([]);

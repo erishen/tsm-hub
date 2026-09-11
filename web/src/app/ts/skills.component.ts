@@ -20,8 +20,8 @@ interface SkillCandidate {
   selector: 'app-skills',
   standalone: true,
   imports: [CommonModule, FormsModule],
-  templateUrl: './skills.component.html',
-  styleUrls: ['./skills.component.css'],
+  templateUrl: '../html/skills.component.html',
+  styleUrls: ['../css/skills.component.css'],
 })
 export class SkillsComponent implements OnInit, OnDestroy {
   readonly skills = signal<SkillSummary[]>([]);

@@ -8,7 +8,7 @@ import { Agg, DailyPoint, UsageRecord, UsageResponse } from './models';
   selector: 'app-usage',
   standalone: true,
   imports: [CommonModule, FormsModule],
-  templateUrl: './usage.component.html',
+  templateUrl: '../html/usage.component.html',
 })
 export class UsageComponent implements OnInit, OnDestroy {
   readonly data = signal<UsageResponse | null>(null);

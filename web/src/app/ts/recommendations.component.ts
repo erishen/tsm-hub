@@ -9,8 +9,8 @@ import { AppScenario, RecommendationsResp } from './models';
   selector: 'app-recommendations',
   standalone: true,
   imports: [CommonModule, FormsModule, RouterLink],
-  templateUrl: './recommendations.component.html',
-  styleUrls: ['./recommendations.component.css'],
+  templateUrl: '../html/recommendations.component.html',
+  styleUrls: ['../css/recommendations.component.css'],
 })
 export class RecommendationsComponent implements OnInit {
   readonly scenarios = signal<AppScenario[]>([]);

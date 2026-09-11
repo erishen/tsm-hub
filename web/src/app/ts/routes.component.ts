@@ -10,7 +10,7 @@ import { Provider, Route, RouteTarget } from './models';
   selector: 'app-routes',
   standalone: true,
   imports: [CommonModule, FormsModule],
-  templateUrl: './routes.component.html',
+  templateUrl: '../html/routes.component.html',
 })
 export class RoutesComponent implements OnInit, OnDestroy {
   readonly routes = signal<Route[]>([]);

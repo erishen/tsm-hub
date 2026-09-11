@@ -7,8 +7,8 @@ import { ApiService } from './api.service';
   selector: 'app-sandbox',
   standalone: true,
   imports: [CommonModule],
-  templateUrl: './sandbox.component.html',
-  styleUrls: ['./sandbox.component.css'],
+  templateUrl: '../html/sandbox.component.html',
+  styleUrls: ['../css/sandbox.component.css'],
 })
 export class SandboxComponent implements OnInit {
   sandbox = signal<{ enabled: boolean; docker_ok: boolean; timeout_sec: number; memory_mb: number; cpus: number; max_output_kb: number; languages: string[] } | null>(null);

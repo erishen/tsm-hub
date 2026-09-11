@@ -11,8 +11,8 @@ interface FastPlugin { name: string; trigger: string; source: string; promoted: 
   selector: 'app-fastpath',
   standalone: true,
   imports: [CommonModule, FormsModule],
-  templateUrl: './fastpath.component.html',
-  styleUrls: ['./fastpath.component.css']
+  templateUrl: '../html/fastpath.component.html',
+  styleUrls: ['../css/fastpath.component.css']
 })
 export class FastpathComponent implements OnInit, OnDestroy {
   builtin: FastMatcher[] = [];

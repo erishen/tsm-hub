@@ -10,8 +10,8 @@ import { McpServer } from './models';
   selector: 'app-mcps',
   standalone: true,
   imports: [CommonModule, FormsModule],
-  templateUrl: './mcps.component.html',
-  styleUrls: ['./mcps.component.css'],
+  templateUrl: '../html/mcps.component.html',
+  styleUrls: ['../css/mcps.component.css'],
 })
 export class McpsComponent implements OnInit, OnDestroy {
   mcps = signal<McpServer[]>([]);
