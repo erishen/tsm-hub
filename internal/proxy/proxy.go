@@ -422,6 +422,26 @@ func (p *Proxy) attempt(w http.ResponseWriter, r *http.Request, c router.Candida
 				Err: fmt.Sprintf("upstream %d (model unavailable): %s", resp.StatusCode, decodeUpstreamBody(resp, b)),
 				ProviderFault: true, ModelFault: true}, true
 		}
+		// 400 且请求带 tools：很可能是该模型不支持 tool calls（如部分免费模型），
+		// 触发 failover 换到下一个候选，避免客户端拿到 400 后无法自动降级。
+		// 注意：不计入 provider 健康熔断（400 是模型能力问题，不是服务端故障），
+		// 但会记录到模型级不可用，后续同模型同 provider 会被路由跳过。
+		if resp.StatusCode == http.StatusBadRequest && len(req.Tools) > 0 {
+			unavailSec := p.store.Settings().Smart.UnavailableSec
+			if unavailSec <= 0 {
+				unavailSec = 1800
+			}
+			p.store.MarkModelUnavailable(c.ProviderID, c.UpstreamModel,
+				"400 with tools: likely unsupported tool calling: "+decodeUpstreamBody(resp, b),
+				time.Duration(unavailSec)*time.Second)
+			slog.Warn("upstream 400 with tools, failover",
+				"provider", c.ProviderID, "model", req.Model, "upstream_model", c.UpstreamModel,
+				"tools_count", len(req.Tools), "body", decodeUpstreamBody(resp, b))
+			return Result{ProviderID: c.ProviderID, UpstreamModel: c.UpstreamModel, Status: resp.StatusCode,
+				Stream: req.Stream, Latency: time.Since(started),
+				Err: fmt.Sprintf("upstream %d (tools unsupported, failover): %s", resp.StatusCode, decodeUpstreamBody(resp, b)),
+				ProviderFault: false, ModelFault: true}, true
+		}
 	}
 
 	if req.Stream {
