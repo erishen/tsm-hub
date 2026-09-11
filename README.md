@@ -6,11 +6,11 @@
 - **Backend**: Go 1.22, **zero third-party runtime deps** (stdlib + modernc.org/sqlite pure-Go), single binary
 - **Frontend**: Angular 19 (standalone + signals), build output `embed`ded into the Go binary
 - **Storage**: JSON config (atomic writes) + JSONL usage logs + SQLite (memory/audit logs), no external DB required
-- **Protocol**: OpenAI-compatible (`/v1/chat/completions`, `/v1/models`, …), with SSE streaming passthrough
+- **Protocol**: OpenAI-compatible client API (`/v1/chat/completions`, `/v1/models`, …), with SSE streaming passthrough; **upstream protocol adapter layer** supports 13 protocols (OpenAI/Anthropic/Azure/Gemini/Bedrock/SageMaker/Cohere/Mistral/HuggingFace/Replicate/Together/Fireworks/Groq) + 12 China platforms (all OpenAI-compatible)
 - **Capability pool**: built-in generic tools + Agent Skills library + MCP servers + Docker sandbox + session memory
 - **Smart routing**: priority failover, weighted distribution, smart cost-aware routing, auto scene routing, deterministic fastpath
-- **Security & compliance**: SHA-256 key hashing, audit logs, automatic usage cleanup, upstream key `env:` references, [Security Guide](./SECURITY.md)
-- **Admin console**: 18 pages (Dashboard/Providers/Routes/Keys/Models/Balances/Usage/Observability/Skills/MCP/Tools/Memory/Sandbox/Fastpath/Recommendations/Playground/Audit Logs), dark mode, global search, PWA
+- **Security & compliance**: SHA-256 key hashing, audit logs, automatic usage cleanup, upstream key `env:` references, [Security Guide](./docs/SECURITY.md)
+- **Admin console**: 18 pages (Dashboard/Providers/Upstream Platforms/Routes/Keys/Models/Balances/Usage/Observability/Skills/MCP/Tools/Memory/Sandbox/Fastpath/Recommendations/Playground/Audit Logs), dark mode, global search, PWA
 
 ---
 
@@ -80,14 +80,16 @@ Client (sk-tr-…)
 │ 2. Rate limit  RPM sliding window + token/cost/daily quota   │
 │ 3. Route    alias → candidate list: priority sort + weight    │
 │            filter out cooling providers, keep one half-open slot│
-│ 4. Forward  swap Authorization, rewrite model, inject stream_options │
-│ 5. Respond  non-streaming full response; streaming SSE frame-by-frame │
+│ 4. Adapt    protocol adapter: OpenAI→Anthropic/Azure/Gemini/…  │
+│            request/response/stream format conversion + SigV4 sign│
+│ 5. Forward  swap Authorization, rewrite model, inject stream_options │
+│ 6. Respond  non-streaming full response; streaming SSE frame-by-frame │
 │            response header X-LLM-Router-Provider: <provider_id> │
-│ 6. Account  usage → memory aggregation + data/usage/YYYY-MM-DD.jsonl │
+│ 7. Account  usage → memory aggregation + data/usage/YYYY-MM-DD.jsonl │
 └────────────────────────────────────────────────────────────┘
    │                    │                    │
    ▼                    ▼                    ▼
-OpenAI            DeepSeek / Tongyi         Local Ollama
+OpenAI            DeepSeek / Tongyi         Anthropic / Gemini
 (failover to next candidate on failure; consecutive failures → removal + cooldown + half-open probe)
 ```
 
