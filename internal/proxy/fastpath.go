@@ -226,6 +226,19 @@ func formatNum(v float64) string {
 }
 
 func tryArithmetic(text string) *fastAnswer {
+	runeLen := len([]rune(text))
+	// 防误匹配：算术问题通常很短（<100 字符），长文本（文章写作/代码生成等）不进算术快路径。
+	if runeLen > 100 {
+		return nil
+	}
+	// 中等长度文本（50-100 字符）需要明确的算术关键词，避免章节编号/列表项被误识别。
+	// 短文本（<50 字符）很可能是纯算术问题（如 "2+3"、"7*6"），直接匹配。
+	if runeLen >= 50 {
+		arithmeticHintRe := regexp.MustCompile(`(?i)(等于|计算|算一下|算算|多少|几|=|what\s+is|how\s+much|compute|calculate)`)
+		if !arithmeticHintRe.MatchString(text) {
+			return nil
+		}
+	}
 	norm := normalizeCNMath(text)
 	var exprs []string
 	for _, m := range exprRe.FindAllString(norm, -1) {
