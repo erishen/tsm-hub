@@ -24,6 +24,7 @@ import (
 
 	"github.com/dop251/goja"
 
+	"github.com/erishen/tsm-hub/internal/proxy/adapter"
 	"github.com/erishen/tsm-hub/internal/store"
 )
 
@@ -499,7 +500,7 @@ func (p *Proxy) complete(r *http.Request, key store.APIKey, path string, msgs []
 			timeout = time.Duration(p.store.Settings().DefaultTimeoutMS) * time.Millisecond
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), timeout)
-		upReq, err := http.NewRequestWithContext(ctx, http.MethodPost, upstreamURL(c.Provider.BaseURL, path), bytes.NewReader(raw))
+		upReq, err := http.NewRequestWithContext(ctx, http.MethodPost, adapter.UpstreamURL(c.Provider.BaseURL, path), bytes.NewReader(raw))
 		if err != nil {
 			cancel()
 			lastWhy = "codegen: 构造请求失败"

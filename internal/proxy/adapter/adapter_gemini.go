@@ -1,4 +1,4 @@
-package proxy
+package adapter
 
 import (
 	"encoding/json"
@@ -280,14 +280,4 @@ func (a *GeminiAdapter) ConvertStreamEvent(data []byte) ([]byte, bool, error) {
 
 func (a *GeminiAdapter) StreamDoneEvent() string {
 	return "[DONE]"
-}
-
-// randomHex 生成指定长度的随机十六进制字符串。
-func randomHex(n int) string {
-	const hexChars = "0123456789abcdef"
-	b := make([]byte, n)
-	for i := range b {
-		b[i] = hexChars[i%len(hexChars)]
-	}
-	return string(b)
 }

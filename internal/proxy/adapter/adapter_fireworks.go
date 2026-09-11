@@ -1,4 +1,4 @@
-package proxy
+package adapter
 
 import (
 	"github.com/erishen/tsm-hub/internal/store"

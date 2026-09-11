@@ -1,7 +1,7 @@
-package proxy
+package adapter
 
 import (
-	"strings"
+	"encoding/json"
 
 	"github.com/erishen/tsm-hub/internal/store"
 )
@@ -21,7 +21,19 @@ func (a *OpenAIAdapter) AuthHeader(provider store.Provider) (key, value string) 
 }
 
 func (a *OpenAIAdapter) ConvertRequest(body []byte, upstreamModel string) ([]byte, map[string]string, error) {
-	// OpenAI 协议不需要转换请求体（模型名替换由 rewriteBody 统一处理）
+	// OpenAI 适配器不做请求体转换，但需要替换模型名
+	var req openAIRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		return body, nil, nil // 解析失败就原样透传
+	}
+	if upstreamModel != "" && upstreamModel != "*" {
+		req.Model = upstreamModel
+		out, err := json.Marshal(req)
+		if err != nil {
+			return body, nil, nil
+		}
+		return out, nil, nil
+	}
 	return body, nil, nil
 }
 
@@ -35,17 +47,4 @@ func (a *OpenAIAdapter) ConvertStreamEvent(data []byte) ([]byte, bool, error) {
 
 func (a *OpenAIAdapter) StreamDoneEvent() string {
 	return "[DONE]"
-}
-
-// upstreamURL 拼接上游地址。
-//
-// 上游 base_url 常见两种写法：https://api.openai.com/v1 或 https://api.openai.com，
-// 而客户端请求的路径固定带 /v1 前缀（/v1/chat/completions），
-// 因此当 base 已经以 /v1 结尾时，要把 path 的 /v1 前缀去掉，避免拼成 /v1/v1/...。
-func upstreamURL(base, path string) string {
-	base = strings.TrimRight(base, "/")
-	if strings.HasSuffix(base, "/v1") && strings.HasPrefix(path, "/v1/") {
-		path = strings.TrimPrefix(path, "/v1")
-	}
-	return base + path
 }

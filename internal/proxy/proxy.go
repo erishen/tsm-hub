@@ -21,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/erishen/tsm-hub/internal/proxy/adapter"
 	"github.com/erishen/tsm-hub/internal/quota"
 	"github.com/erishen/tsm-hub/internal/router"
 	"github.com/erishen/tsm-hub/internal/skills"
@@ -269,7 +270,7 @@ func isModelNotFound(body string) bool {
 // 返回值 retryable=true 表示本次没有向客户端写出任何字节，可以换下一个候选重试。
 func (p *Proxy) attempt(w http.ResponseWriter, r *http.Request, c router.Candidate, path string, body []byte, req chatRequest) (Result, bool) {
 	started := time.Now()
-	adapter := GetAdapter(c.Provider)
+	ad := adapter.GetAdapter(c.Provider)
 
 	upBody, err := rewriteBody(body, c.UpstreamModel, req.Stream)
 	if err != nil {
@@ -281,7 +282,7 @@ func (p *Proxy) attempt(w http.ResponseWriter, r *http.Request, c router.Candida
 	}
 
 	// 协议适配：把 OpenAI 格式的请求体转换为目标协议格式（如 Anthropic）
-	convertedBody, extraHeaders, err := adapter.ConvertRequest(upBody, c.UpstreamModel)
+	convertedBody, extraHeaders, err := ad.ConvertRequest(upBody, c.UpstreamModel)
 	if err != nil {
 		res := Result{ProviderID: c.ProviderID, UpstreamModel: c.UpstreamModel,
 			Status: http.StatusBadGateway, Stream: req.Stream, Latency: time.Since(started),
@@ -301,14 +302,14 @@ func (p *Proxy) attempt(w http.ResponseWriter, r *http.Request, c router.Candida
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
 
-	upReq, err := http.NewRequestWithContext(ctx, r.Method, adapter.UpstreamURL(c.Provider, path), bytes.NewReader(upBody))
+	upReq, err := http.NewRequestWithContext(ctx, r.Method, ad.UpstreamURL(c.Provider, path), bytes.NewReader(upBody))
 	if err != nil {
 		return Result{ProviderID: c.ProviderID, UpstreamModel: c.UpstreamModel, Status: http.StatusBadGateway,
 			Stream: req.Stream, Latency: time.Since(started), Err: err.Error(), ProviderFault: true}, true
 	}
-	copyHeaders(upReq.Header, r.Header)
+	adapter.CopyHeaders(upReq.Header, r.Header)
 	// 协议适配器自定义认证头（如 Azure 用 api-key，Gemini 用 URL 参数不需要认证头）
-	if authKey, authVal := adapter.AuthHeader(c.Provider); authKey != "" {
+	if authKey, authVal := ad.AuthHeader(c.Provider); authKey != "" {
 		upReq.Header.Set(authKey, authVal)
 	}
 	upReq.Header.Set("Content-Type", "application/json")
@@ -321,7 +322,7 @@ func (p *Proxy) attempt(w http.ResponseWriter, r *http.Request, c router.Candida
 	upReq.ContentLength = int64(len(upBody))
 
 	// 协议适配器可选的请求签名（如 AWS Bedrock 的 SigV4）
-	if signer, ok := adapter.(RequestSigner); ok {
+	if signer, ok := ad.(adapter.RequestSigner); ok {
 		if err := signer.SignRequest(upReq, upBody, c.Provider); err != nil {
 			return Result{ProviderID: c.ProviderID, UpstreamModel: c.UpstreamModel, Status: http.StatusBadGateway,
 				Stream: req.Stream, Latency: time.Since(started),
@@ -424,19 +425,19 @@ func (p *Proxy) attempt(w http.ResponseWriter, r *http.Request, c router.Candida
 	}
 
 	if req.Stream {
-		res := p.streamResponse(w, resp, c, adapter)
+		res := p.streamResponse(w, resp, c, ad)
 		res.Latency = time.Since(started)
 		// 首帧之前就失败才允许重试；一旦写过帧就只能认了。
 		return res, false
 	}
 
-	res := p.bufferedResponse(w, resp, c, adapter)
+	res := p.bufferedResponse(w, resp, c, ad)
 	res.Latency = time.Since(started)
 	return res, false
 }
 
 // bufferedResponse 处理非流式响应：整包读完再回传，便于解析 usage。
-func (p *Proxy) bufferedResponse(w http.ResponseWriter, resp *http.Response, c router.Candidate, adapter ProtocolAdapter) Result {
+func (p *Proxy) bufferedResponse(w http.ResponseWriter, resp *http.Response, c router.Candidate, ad adapter.ProtocolAdapter) Result {
 	data, err := io.ReadAll(io.LimitReader(resp.Body, p.store.Settings().MaxBodyBytes))
 	res := Result{
 		ProviderID:    c.ProviderID,
@@ -452,7 +453,7 @@ func (p *Proxy) bufferedResponse(w http.ResponseWriter, resp *http.Response, c r
 
 	// 协议适配：把目标协议的响应转换为 OpenAI 格式
 	if resp.StatusCode < 400 && len(data) > 0 {
-		if converted, err := adapter.ConvertResponse(data); err == nil {
+		if converted, err := ad.ConvertResponse(data); err == nil {
 			data = converted
 		}
 	}
@@ -479,7 +480,7 @@ func (p *Proxy) bufferedResponse(w http.ResponseWriter, resp *http.Response, c r
 }
 
 // streamResponse 逐帧转发 SSE，并从最后一帧里取 usage。
-func (p *Proxy) streamResponse(w http.ResponseWriter, resp *http.Response, c router.Candidate, adapter ProtocolAdapter) Result {
+func (p *Proxy) streamResponse(w http.ResponseWriter, resp *http.Response, c router.Candidate, ad adapter.ProtocolAdapter) Result {
 	res := Result{
 		ProviderID:    c.ProviderID,
 		UpstreamModel: c.UpstreamModel,
@@ -508,7 +509,7 @@ func (p *Proxy) streamResponse(w http.ResponseWriter, resp *http.Response, c rou
 			// 协议适配：把目标协议的 SSE 事件转换为 OpenAI 格式
 			if strings.HasPrefix(line, "data:") {
 				payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-				if converted, skip, convErr := adapter.ConvertStreamEvent([]byte(payload)); convErr == nil && !skip {
+				if converted, skip, convErr := ad.ConvertStreamEvent([]byte(payload)); convErr == nil && !skip {
 					line = "data: " + string(converted) + "\n"
 					// 从转换后的事件里解析 usage
 					if pt, ct, tt, ok := parseSSEUsage(line); ok {

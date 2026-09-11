@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/erishen/tsm-hub/internal/proxy/adapter"
 	"github.com/erishen/tsm-hub/internal/router"
 	"github.com/erishen/tsm-hub/internal/store"
 )
@@ -343,7 +344,7 @@ func (p *Proxy) agentUpstream(r *http.Request, c router.Candidate, path string, 
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
-	upReq, err := http.NewRequestWithContext(ctx, http.MethodPost, upstreamURL(c.Provider.BaseURL, path), bytes.NewReader(raw))
+	upReq, err := http.NewRequestWithContext(ctx, http.MethodPost, adapter.UpstreamURL(c.Provider.BaseURL, path), bytes.NewReader(raw))
 	if err != nil {
 		return nil, err.Error(), 0
 	}
