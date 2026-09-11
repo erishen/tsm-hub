@@ -1,7 +1,8 @@
 # tsm-hub
 
-> Self-issued Token Key + smart routing LLM gateway: expose only your own `sk-tr-…` keys to clients,
-> internally route OpenAI-compatible requests to multiple configured upstream providers.
+> **AI Capability Hub & LLM Gateway** — unify models, tools, skills, MCPs, sandbox, memory with discovery and promotion across 13+ providers.
+> Expose only your own `sk-tr-…` keys to clients; internally route OpenAI-compatible requests to multiple configured upstream providers,
+> with a built-in capability pool (generic tools + Agent Skills + MCP servers + Docker sandbox + session memory) that every downstream client gets for free.
 
 - **Backend**: Go 1.22, **zero third-party runtime deps** (stdlib + modernc.org/sqlite pure-Go), single binary
 - **Frontend**: Angular 19 (standalone + signals), build output `embed`ded into the Go binary
@@ -9,7 +10,7 @@
 - **Protocol**: OpenAI-compatible client API (`/v1/chat/completions`, `/v1/models`, …), with SSE streaming passthrough; **upstream protocol adapter layer** supports 13 protocols (OpenAI/Anthropic/Azure/Gemini/Bedrock/SageMaker/Cohere/Mistral/HuggingFace/Replicate/Together/Fireworks/Groq) + 12 China platforms (all OpenAI-compatible)
 - **Capability pool**: built-in generic tools + Agent Skills library + MCP servers + Docker sandbox + session memory
 - **Smart routing**: priority failover, weighted distribution, smart cost-aware routing, auto scene routing, deterministic fastpath
-- **Security & compliance**: SHA-256 key hashing, audit logs, automatic usage cleanup, upstream key `env:` references, [Security Guide](./docs/SECURITY.md)
+- **Security & compliance**: SHA-256 key hashing, audit logs (auto-redacted secrets), automatic usage cleanup, upstream key `env:` references, native TLS/HTTPS, CORS middleware, startup security self-check (config permissions / plaintext key warnings / TLS warnings), [Security Guide](./docs/SECURITY.md), [Privacy Policy](./docs/PRIVACY.md), [DPA Template](./docs/DPA.md)
 - **Admin console**: 18 pages (Dashboard/Providers/Upstream Platforms/Routes/Keys/Models/Balances/Usage/Observability/Skills/MCP/Tools/Memory/Sandbox/Fastpath/Recommendations/Playground/Audit Logs), dark mode, global search, PWA
 
 ---
@@ -139,6 +140,8 @@ tsm-hub/
 | `settings.mcps` | External MCP servers (stdio or Streamable HTTP), their tools register as `mcp_<server>_<tool>` in the gateway tool pool |
 | `settings.audit_retention_days` | Audit log retention days (default 90), auto-cleanup expired entries |
 | `settings.usage_retention_days` | Usage log retention days (default 0 = no auto-cleanup), delete expired files on startup |
+| `settings.tls.*` | Native TLS/HTTPS: `enabled` / `cert_file` / `key_file`; when enabled the gateway listens directly on HTTPS (no reverse proxy needed). Startup validates cert files and warns if TLS is disabled in production. |
+| `settings.cors.*` | CORS middleware: `enabled` / `allowed_origins` / `allowed_methods` / `allowed_headers` / `allow_credentials` / `max_age`; disabled by default (secure default — prevents unauthorized cross-origin calls). Preflight OPTIONS requests are handled automatically. |
 | `settings.sandbox.*` | Docker sandbox config (execute_code tool), see below |
 
 **Gateway agent (built-in generic tools)**: When the client request **does not include `tools`**, the gateway automatically appends the built-in tool pool
@@ -278,7 +281,7 @@ object ID, and pagination.
 **External discovery & promotion mechanism**: The gateway automatically records `tools`, `skills`, `mcps` declared in client requests,
 displayed as external candidates in admin "Tools", "Skills", "MCP" pages. Admins can view usage statistics and selectively "adopt"
 as gateway built-in capabilities (tools promoted to built-in tools or fastpath plugins, skills integrated into skill library, MCP integrated into gateway tool pool).
-This way best practices from external clients can be沉淀 as gateway generic capabilities, subsequent clients don't need to re-declare.
+This way best practices from external clients can be **promoted** into gateway generic capabilities, subsequent clients don't need to re-declare.
 
 ---
 
@@ -436,7 +439,7 @@ make cover   # Coverage
 
 - **Self-made key plaintext appears only once**: after issuance API returns, server only keeps hash; if lost, must re-issue.
 - **Upstream keys recommended to use `env:VAR` references**, avoiding secrets on disk; plaintext also supported (simpler deployment).
-- Startup self-check: if admin password is still default placeholder, or no providers configured, WARN logs are printed.
+- **Startup security self-check**: if admin password is still default placeholder, no providers configured, `config.json` is group/other-readable (not 600), plaintext upstream API keys are detected (recommend `env:` references), or TLS is not enabled, WARN logs are printed on startup.
 - **Quota alerts**: When key usage reaches 80% of any limit, a warn log is printed (same type only alerted once,
   resets after falling back below line), suitable for connecting to log monitoring for cost control.
 - **`data/` directory contains upstream API keys and usage logs**, already in `.gitignore`, don't commit to public repos.
@@ -451,3 +454,16 @@ make cover   # Coverage
 - Every response carries `X-Request-ID`, logs with same ID can be correlated; panic auto-falls back to 500 with that ID.
 - Request body exceeding `settings.max_body_bytes` directly returns 413 (no misleading error after truncation).
 - `/healthz` additionally carries `degraded` and `providers[]` fields, can distinguish "gateway down" vs "some upstream removed".
+
+---
+
+## Related documentation
+
+| Document | Description |
+|----------|-------------|
+| [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) | System architecture, request pipeline, component design |
+| [docs/SECURITY.md](./docs/SECURITY.md) | Security deployment guide: TLS, CORS, key management, hardening checklist |
+| [docs/PRIVACY.md](./docs/PRIVACY.md) | Privacy policy: data collection, usage, storage, data subject rights |
+| [docs/DPA.md](./docs/DPA.md) | Data Processing Agreement template (for B2B deployments) |
+| [docs/PRIVACY_AUDIT.md](./docs/PRIVACY_AUDIT.md) | Privacy compliance audit report with findings and remediation |
+| [docs/TODO.md](./docs/TODO.md) | Roadmap and planned features |
