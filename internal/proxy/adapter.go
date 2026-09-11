@@ -74,6 +74,9 @@ func init() {
 	RegisterAdapter(&BedrockAdapter{})
 	RegisterAdapter(&CohereAdapter{})
 	RegisterAdapter(&MistralAdapter{})
+	RegisterAdapter(&SageMakerAdapter{})
+	RegisterAdapter(&HuggingFaceAdapter{})
+	RegisterAdapter(&ReplicateAdapter{})
 }
 
 // copyHeaders 复制客户端请求头到上游请求（跳过逐跳头和鉴权头）。
