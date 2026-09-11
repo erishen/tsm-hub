@@ -173,7 +173,7 @@ func (p *Proxy) Handle(w http.ResponseWriter, r *http.Request, key store.APIKey,
 			fmt.Sprintf("key is not allowed to use model %q", req.Model), scene)
 	}
 	// 网关 agent：客户端不传 tools 时，自动附加内置工具并在服务端执行循环。
-	if p.agentChat(body, r) {
+	if p.agentChat(body, r, key) {
 		if handled, res := p.agentRun(w, r, key, path, body, req, scene); handled {
 			res.Scene = scene
 			return res
