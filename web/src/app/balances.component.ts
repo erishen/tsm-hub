@@ -50,78 +50,78 @@ import { Balance, ProviderBalance } from './models';
         <!-- 额度详情 -->
         <div class="balance-body" *ngIf="b.balance; else noBal">
           <!-- Moonshot / Kimi -->
-          <ng-container *ngIf="b.balance?.kind === 'moonshot'">
+          <ng-container *ngIf="b.balance.kind === 'moonshot'">
             <div class="balance-main">
-              <span class="balance-amount">¥{{ b.balance?.available?.toFixed(2) }}</span>
+              <span class="balance-amount">¥{{ b.balance.available?.toFixed(2) }}</span>
               <span class="balance-label">可用余额</span>
             </div>
             <div class="balance-detail-row">
               <div class="detail-item">
                 <span class="detail-label">赠送券</span>
-                <span class="detail-value">¥{{ b.balance?.voucher?.toFixed(2) }}</span>
+                <span class="detail-value">¥{{ b.balance.voucher?.toFixed(2) }}</span>
               </div>
               <div class="detail-item">
                 <span class="detail-label">现金</span>
-                <span class="detail-value">¥{{ b.balance?.cash?.toFixed(2) }}</span>
+                <span class="detail-value">¥{{ b.balance.cash?.toFixed(2) }}</span>
               </div>
             </div>
-            <div class="progress-bar" *ngIf="(b.balance?.voucher || 0) + (b.balance?.cash || 0) > 0">
+            <div class="progress-bar" *ngIf="(b.balance.voucher || 0) + (b.balance.cash || 0) > 0">
               <div class="progress-fill" [style.width.%]="voucherPct(b.balance)"></div>
               <div class="progress-label">赠送 {{ voucherPct(b.balance) | number:'1.0-0' }}% · 现金 {{ 100 - voucherPct(b.balance) | number:'1.0-0' }}%</div>
             </div>
           </ng-container>
 
           <!-- DeepSeek -->
-          <ng-container *ngIf="b.balance?.kind === 'deepseek'">
+          <ng-container *ngIf="b.balance.kind === 'deepseek'">
             <div class="balance-main">
-              <span class="balance-amount">{{ b.balance?.total?.toFixed(2) }} {{ b.balance?.currency || '' }}</span>
+              <span class="balance-amount">{{ b.balance.total?.toFixed(2) }} {{ b.balance.currency || '' }}</span>
               <span class="balance-label">总余额</span>
             </div>
             <div class="balance-detail-row">
               <div class="detail-item">
                 <span class="detail-label">赠送</span>
-                <span class="detail-value">{{ b.balance?.granted?.toFixed(2) }} {{ b.balance?.currency || '' }}</span>
+                <span class="detail-value">{{ b.balance.granted?.toFixed(2) }} {{ b.balance.currency || '' }}</span>
               </div>
               <div class="detail-item">
                 <span class="detail-label">充值</span>
-                <span class="detail-value">{{ b.balance?.topped_up?.toFixed(2) }} {{ b.balance?.currency || '' }}</span>
+                <span class="detail-value">{{ b.balance.topped_up?.toFixed(2) }} {{ b.balance.currency || '' }}</span>
               </div>
             </div>
           </ng-container>
 
           <!-- OpenRouter -->
-          <ng-container *ngIf="b.balance?.kind === 'openrouter'">
-            <div class="balance-main" *ngIf="b.balance?.total_credits">
-              <span class="balance-amount">\${{ b.balance?.total_credits?.toFixed(2) }}</span>
+          <ng-container *ngIf="b.balance.kind === 'openrouter'">
+            <div class="balance-main" *ngIf="b.balance.total_credits">
+              <span class="balance-amount">\${{ b.balance.total_credits?.toFixed(2) }}</span>
               <span class="balance-label">总额度</span>
             </div>
-            <div class="balance-main" *ngIf="!b.balance?.total_credits && b.balance?.limit">
-              <span class="balance-amount">\${{ b.balance?.limit?.toFixed(2) }}</span>
+            <div class="balance-main" *ngIf="!b.balance.total_credits && b.balance.limit">
+              <span class="balance-amount">\${{ b.balance.limit?.toFixed(2) }}</span>
               <span class="balance-label">额度上限</span>
             </div>
-            <div class="balance-main" *ngIf="!b.balance?.total_credits && !b.balance?.limit">
+            <div class="balance-main" *ngIf="!b.balance.total_credits && !b.balance.limit">
               <span class="balance-amount">无上限</span>
               <span class="balance-label">额度</span>
             </div>
             <div class="balance-detail-row">
               <div class="detail-item">
                 <span class="detail-label">已用</span>
-                <span class="detail-value">\${{ usageAmount(b.balance)?.toFixed(2) }}</span>
+                <span class="detail-value">\${{ usageAmount(b.balance).toFixed(2) }}</span>
               </div>
-              <div class="detail-item" *ngIf="b.balance?.limit_remaining">
+              <div class="detail-item" *ngIf="b.balance.limit_remaining">
                 <span class="detail-label">剩余</span>
-                <span class="detail-value">\${{ b.balance?.limit_remaining?.toFixed(2) }}</span>
+                <span class="detail-value">\${{ b.balance.limit_remaining?.toFixed(2) }}</span>
               </div>
-              <div class="detail-item" *ngIf="b.balance?.hard_limit_usd">
+              <div class="detail-item" *ngIf="b.balance.hard_limit_usd">
                 <span class="detail-label">订阅上限</span>
-                <span class="detail-value">\${{ b.balance?.hard_limit_usd?.toFixed(2) }}</span>
+                <span class="detail-value">\${{ b.balance.hard_limit_usd?.toFixed(2) }}</span>
               </div>
             </div>
             <div class="progress-bar" *ngIf="usagePct(b.balance) > -1">
               <div class="progress-fill" [class.warn]="usagePct(b.balance) > 80" [style.width.%]="usagePct(b.balance)"></div>
               <div class="progress-label">已用 {{ usagePct(b.balance) | number:'1.0-0' }}%</div>
             </div>
-            <div class="balance-meta" *ngIf="b.balance?.expires_at">
+            <div class="balance-meta" *ngIf="b.balance.expires_at">
               <span class="meta-label">有效期至</span>
               <span class="meta-value" [class.warn]="keyExpiryClass(b.balance) === 'warn'" [class.bad]="keyExpiryClass(b.balance) === 'err'">
                 {{ keyExpiry(b.balance) }}
@@ -130,40 +130,40 @@ import { Balance, ProviderBalance } from './models';
           </ng-container>
 
           <!-- OpenAI -->
-          <ng-container *ngIf="b.balance?.kind === 'openai'">
-            <div class="balance-main" *ngIf="b.balance?.hard_limit_usd">
-              <span class="balance-amount">\${{ b.balance?.hard_limit_usd?.toFixed(2) }}</span>
+          <ng-container *ngIf="b.balance.kind === 'openai'">
+            <div class="balance-main" *ngIf="b.balance.hard_limit_usd">
+              <span class="balance-amount">\${{ b.balance.hard_limit_usd?.toFixed(2) }}</span>
               <span class="balance-label">订阅上限</span>
             </div>
             <div class="balance-detail-row">
               <div class="detail-item">
                 <span class="detail-label">已用</span>
-                <span class="detail-value">\${{ b.balance?.total_usage_usd?.toFixed(2) }}</span>
+                <span class="detail-value">\${{ b.balance.total_usage_usd?.toFixed(2) }}</span>
               </div>
             </div>
           </ng-container>
 
           <!-- Platform Note（无公开余额接口） -->
-          <ng-container *ngIf="b.balance?.kind === 'platform_note'">
+          <ng-container *ngIf="b.balance.kind === 'platform_note'">
             <div class="balance-main">
-              <span class="balance-plan">{{ b.balance?.plan || '免费套餐' }}</span>
+              <span class="balance-plan">{{ b.balance.plan || '免费套餐' }}</span>
             </div>
-            <div class="quota-list" *ngIf="b.balance?.quota">
-              <div class="quota-item" *ngFor="let q of parseQuota(b.balance?.quota)">
+            <div class="quota-list" *ngIf="b.balance.quota">
+              <div class="quota-item" *ngFor="let q of parseQuota(b.balance.quota)">
                 <span class="quota-model">{{ q.model }}</span>
                 <span class="quota-amount">{{ q.amount }}</span>
               </div>
             </div>
-            <div class="balance-meta" *ngIf="b.balance?.reset">
+            <div class="balance-meta" *ngIf="b.balance.reset">
               <span class="meta-label">重置周期</span>
-              <span class="meta-value">{{ b.balance?.reset }}</span>
+              <span class="meta-value">{{ b.balance.reset }}</span>
             </div>
-            <div class="balance-note" *ngIf="b.balance?.note">{{ b.balance?.note }}</div>
+            <div class="balance-note" *ngIf="b.balance.note">{{ b.balance.note }}</div>
           </ng-container>
 
           <!-- 控制台链接 -->
-          <div class="balance-footer" *ngIf="b.balance?.url">
-            <a [href]="b.balance?.url" target="_blank" rel="noopener" class="console-link">
+          <div class="balance-footer" *ngIf="b.balance.url">
+            <a [href]="b.balance.url" target="_blank" rel="noopener" class="console-link">
               前往控制台查看详情 ↗
             </a>
           </div>
