@@ -89,7 +89,24 @@ route.model 命中路由表？
 2. 若全部冷却中，放行一个"半开"候选做探测（避免整体不可用）；
 3. `failover`：按 `priority` 升序分组，组内按权重随机；
 4. `weighted`：所有候选同池，按 `weight × 延迟因子` 加权随机排序；
-5. `smart`：按「免费加分 + 单价档位 + 健康度 + 冷却」综合评分选候选。
+5. `smart`：按可配置的多维度综合评分选候选（策略模式 + 各维度权重）。
+
+**smart 策略模式**（`settings.smart.strategy_mode`）：
+
+| 模式 | 成本权重 | 稳定性权重 | 延迟权重 | 适用场景 |
+|------|---------|-----------|---------|---------|
+| `cost_first` | 100 | 40 | 30 | 成本敏感场景，免费/低价优先 |
+| `stability_first` | 30 | 100 | 50 | 生产服务，可靠性优先 |
+| `task_aware` | 50 | 80 | 70 | 混合负载，平衡质量与速度 |
+| `balanced` | 60 | 70 | 70 | 通用场景，各维度均衡 |
+
+各维度评分：
+- **成本**：免费模型加分 + 单价档位加分（可配置 `free_bonus` / `price_tiers`）
+- **稳定性**：历史成功率 `(requests - errors) / requests` × 100，连续失败惩罚；新 provider 给 70 分鼓励探索
+- **延迟**：EWMA 延迟，100ms 以内 100 分，1000ms 以上 0 分；无数据给 60 分
+- **通用惩罚**：半开候选扣分，429 限流期间大幅降权（-1000）
+
+各维度权重可通过 `settings.smart.cost_weight` / `stability_weight` / `latency_weight` 单独覆盖（0 表示用策略默认值）。也可通过环境变量 `TSM_HUB_SMART_STRATEGY` / `TSM_HUB_SMART_*_WEIGHT` 或 `.env` 文件配置。
 
 延迟因子：`w' = w × 1000 / (1000 + latency_ewma_ms)`，即延迟 1s 时权重减半，让快节点自然多拿流量。半开候选额外乘 0.1。
 
@@ -304,7 +321,54 @@ healthy ──────► healthy   healthy ──────────�
 
 `data/fastpath_plugins/`、`data/fastpath_promoted/`：快路径插件 JS 文件，按 mtime 热重载。
 
-## 13. 管理台架构
+## 13. 容器化部署
+
+### 13.1 构建策略
+
+采用多阶段构建（`Dockerfile`）：
+- **构建阶段**：`golang:1.25-alpine`，编译 Go 二进制（CGO_ENABLED=1，external linkmode 兼容 musl）
+- **运行阶段**：`alpine:3.20`，仅包含二进制 + ca-certificates + tzdata，以非 root 用户 `tsmhub` 运行
+
+前端构建产物不在镜像内编译（避免镜像内装 Node.js），而是由宿主机 `make web-build` 构建后同步到 `internal/web/dist/browser/`，通过 `go:embed` 嵌入二进制。`make docker-build` 和 `make docker-up` 会自动先运行 `web-build`，确保管理台始终是最新版本。
+
+### 13.2 数据持久化
+
+容器通过卷挂载 `./data:/data` 持久化所有数据：
+- `config.json` — 全部配置（providers / routes / keys / settings）
+- `usage/YYYY-MM-DD.jsonl` — 用量流水
+- `memory.db` — SQLite 会话记忆
+- `audit.db` — SQLite 审计日志
+- `unavailable.json` — 模型不可用冷却状态
+- `fastpath_plugins/`、`fastpath_promoted/` — 快路径插件
+
+容器删除和重建不会丢失数据，只需保持 `./data` 目录完整。
+
+### 13.3 配置注入
+
+优先级：**命令行 flag > 环境变量 > .env 文件 > data/config.json**
+
+容器支持通过环境变量覆盖配置（见 `.env.example`）：
+- 基础配置：`TSM_HUB_ADDR`、`TSM_HUB_DATA_DIR`、`TSM_HUB_ADMIN_TOKEN`、`TSM_HUB_LOG_LEVEL`
+- 智能路由：`TSM_HUB_SMART_STRATEGY`（cost_first / stability_first / task_aware / balanced）、`TSM_HUB_SMART_*_WEIGHT`
+- 上游密钥：`OPENAI_API_KEY`、`DEEPSEEK_API_KEY` 等（配合 config.json 中的 `env:VAR_NAME` 引用）
+
+`docker compose` 自动加载项目根目录的 `.env` 文件。
+
+### 13.4 健康检查与运维
+
+- **健康检查端点**：`GET /healthz`，返回所有 provider 健康状态、请求数、运行时间
+- **docker compose healthcheck**：每 30s 检查一次，超时 5s，重试 3 次
+- **Makefile 运维命令**：`docker-up` / `docker-down` / `docker-stop` / `docker-start` / `docker-restart` / `docker-logs` / `docker-status`
+- **配置热加载**：`config.json` 变更后自动热重载（fsnotify），无需重启容器
+
+### 13.5 安全设计
+
+- 容器以非 root 用户 `tsmhub` 运行，最小权限原则
+- 数据目录挂载需确保容器内用户有读写权限
+- 生产环境建议启用 TLS（`settings.tls`）或前置反向代理（Nginx / Caddy）
+- Admin Token 建议通过环境变量注入，不写入 config.json
+
+## 14. 管理台架构
 
 Angular 19 standalone + signals，18 个页面，全部懒加载：
 
@@ -320,7 +384,7 @@ Angular 19 standalone + signals，18 个页面，全部懒加载：
 批量操作（providers/routes/keys 复选框批量启用/禁用/删除）、导出 CSV（usage/observability）、
 自动刷新开关（dashboard/usage）、PWA（manifest + 图标，支持添加到主屏幕）、键盘快捷键。
 
-## 14. 已知边界与后续
+## 15. 已知边界与后续
 
 见 `TODO.md`。主要待办：多实例下的共享状态、Key 速率限制确认、Provider API Key 加密存储、
 按 Key 的用量清理、流式 token 估算兜底、Prometheus 延迟分位指标。

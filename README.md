@@ -124,6 +124,33 @@ tsm-hub/
 
 ## Configuration
 
+Configuration priority: **command-line flags > environment variables > `.env` file > `data/config.json`**.
+
+### `.env` file support
+
+Copy `.env.example` to `.env` and customize. The `.env` file is loaded automatically on startup
+(current directory first, then project root). It will **not** override already-set environment variables.
+
+Common `.env` variables:
+
+```bash
+# Basic
+TSM_HUB_ADDR=:9070
+TSM_HUB_DATA_DIR=./data
+TSM_HUB_ADMIN_TOKEN=your-admin-token
+TSM_HUB_LOG_LEVEL=info
+
+# Smart routing strategy
+TSM_HUB_SMART_STRATEGY=stability_first  # cost_first / stability_first / task_aware / balanced
+TSM_HUB_SMART_COST_WEIGHT=50
+TSM_HUB_SMART_STABILITY_WEIGHT=100
+TSM_HUB_SMART_LATENCY_WEIGHT=70
+```
+
+Legacy prefixes `LLM_ROUTER_*` are also supported for migration.
+
+### `config.json`
+
 `data/config.json` is auto-generated on first start, see `config.example.json` for structure:
 
 | Field | Description |
@@ -239,16 +266,33 @@ put the real key in an environment variable before startup (admin console echoes
 
 Fallback when route table doesn't match: directly find all enabled providers declaring support for that model, distribute by weight.
 
-**smart cost-aware routing**: When `strategy: "smart"`, candidates are selected by composite scoring of "free bonus + price tier + health +
-cooldown", all parameters adjustable (0 = default):
+**Configurable smart routing**: When `strategy: "smart"`, candidates are selected by multi-dimensional composite scoring.
+The strategy mode and dimension weights are fully configurable (0 = use the strategy's built-in weights):
 
-| Field | Default | Description |
+| Field | Built-in | Description |
 |-------|---------|-------------|
+| `smart.strategy_mode` | configurable | Strategy mode: `cost_first` / `stability_first` / `task_aware` / `balanced` |
+| `smart.cost_weight` | per mode | Cost dimension weight (0-200) |
+| `smart.stability_weight` | per mode | Stability/success-rate dimension weight (0-200) |
+| `smart.latency_weight` | per mode | Latency dimension weight (0-200) |
 | `smart.free_bonus` | 100 | Base bonus for free models |
 | `smart.half_open_penalty` | 30 | Penalty for half-open (post-cooldown probing) candidates |
 | `smart.throttle_sec` | 60 | Cooldown seconds after upstream 429, provider not selected during this period |
 | `smart.unavailable_sec` | 1800 | Mark duration for upstream 404 "model not found" |
 | `smart.price_tiers` | `[{0,60},{0.5,40},{2,20},{10,5}]` | Price tier bonus: prompt price ≤ max tier gets score (match high→low) |
+
+**Strategy modes**:
+
+| Mode | Cost | Stability | Latency | Use case |
+|------|------|-----------|---------|----------|
+| `cost_first` | 100 | 40 | 30 | Cost-sensitive workloads, free/cheap models preferred |
+| `stability_first` | 30 | 100 | 50 | Production services where reliability matters most |
+| `task_aware` | 50 | 80 | 70 | Mixed workloads, balance quality and speed |
+| `balanced` | 60 | 70 | 70 | General purpose, balanced across all dimensions |
+
+Stability score is calculated from historical success rate (`(requests - errors) / requests`) and consecutive failure count.
+Latency score uses EWMA-smoothed latency (100ms = 100 points, 1000ms+ = 0 points).
+New providers with no history get a neutral score (70 stability, 60 latency) to encourage exploration.
 
 **Scene routing (auto brainless call)**: When client `model` is not provided or is `"auto"`, the gateway automatically
 classifies by request content and routes to the corresponding scene (`chat` / `reason` / `code` / `fast`), response header
@@ -409,13 +453,61 @@ Ports can be changed with `make dev ROUTER_PORT=9080 WEB_PORT=4300`.
 
 ## Container deployment
 
+### Quick start
+
 ```bash
-make web-install && make web-build   # Build admin console first (output will be baked into image)
-docker compose up -d --build          # or docker build -t tsm-hub . && docker run ...
+make docker-up    # Build frontend + image, start container in background
 ```
 
-Only Go is compiled in the image (no need to install Node in-image), frontend output is copied from host `internal/web/dist/browser`;
-skipping frontend build still runs, just admin console is a placeholder page. Data persisted via `./data` volume.
+Visit http://localhost:9070 for the admin console.
+
+### Makefile commands
+
+| Command | Description |
+|---------|-------------|
+| `make docker-build` | Build Docker image (auto-builds frontend first) |
+| `make docker-up` | Build and start container in background (mounts `./data`) |
+| `make docker-down` | Stop and remove container (keeps `./data` volume) |
+| `make docker-stop` | Stop container (keep it, can restart with `docker-start`) |
+| `make docker-start` | Start a previously stopped container |
+| `make docker-restart` | Restart container |
+| `make docker-logs` | Follow container logs (Ctrl-C to exit) |
+| `make docker-status` | Show container status + health check |
+
+### Manual docker run
+
+```bash
+docker build -t tsm-hub .
+docker run -d --name tsm-hub \
+  -p 9070:9070 \
+  -v "$(pwd)/data:/data" \
+  -e TSM_HUB_LOG_LEVEL=info \
+  tsm-hub
+```
+
+### How it works
+
+- Only Go is compiled in the image (no Node.js needed in-image); frontend output is copied from host `internal/web/dist/browser` (auto-synced by `make web-build`).
+- `make docker-build` and `make docker-up` automatically run `web-build` first, ensuring the admin console is always up-to-date.
+- Data is persisted via the `./data` volume mount — all config, usage logs, memory, and audit data survive container restarts and removals.
+- The container runs as non-root user `tsmhub` for security.
+- Health check: `GET /healthz` returns provider health status and uptime.
+
+### Environment variables
+
+You can configure the container via environment variables (see `.env.example` for full list):
+
+```bash
+docker run -d \
+  -e TSM_HUB_ADMIN_TOKEN=your-secret-token \
+  -e TSM_HUB_SMART_STRATEGY=stability_first \
+  -e TSM_HUB_SMART_STABILITY_WEIGHT=100 \
+  -v "$(pwd)/data:/data" \
+  -p 9070:9070 \
+  tsm-hub
+```
+
+Or use a `.env` file with docker compose (already supported — just create `.env` from `.env.example`).
 
 ## Testing
 
