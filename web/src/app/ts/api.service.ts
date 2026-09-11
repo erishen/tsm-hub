@@ -7,28 +7,60 @@ import {
 } from './models';
 
 const SESSION_KEY = 'tsm-hub.session';
+// 兼容旧版本的 session key（项目改名后旧 session 不自动迁移）
+const LEGACY_SESSION_KEYS = ['tsm-gateway.session', 'llm-router.session'];
+
+function readSessionFromStorage(): string | null {
+  // 优先读取当前版本的 session key
+  let token = localStorage.getItem(SESSION_KEY);
+  if (token) return token;
+  // 兼容旧版本的 session key，自动迁移
+  for (const legacyKey of LEGACY_SESSION_KEYS) {
+    token = localStorage.getItem(legacyKey);
+    if (token) {
+      localStorage.setItem(SESSION_KEY, token);
+      return token;
+    }
+  }
+  return null;
+}
 
 /** 统一封装管理 API：自动带上会话 token，401 时清空登录态。 */
 @Injectable({ providedIn: 'root' })
 export class ApiService {
-  readonly session = signal<string | null>(localStorage.getItem(SESSION_KEY));
+  readonly session = signal<string | null>(readSessionFromStorage());
   readonly lastError = signal<string>('');
 
-  constructor(private http: HttpClient) {}
+  constructor(private http: HttpClient) {
+    // 构造函数中再次读取，确保 session 信号被正确初始化（避免模块加载时 localStorage 未就绪）
+    const token = readSessionFromStorage();
+    if (token && !this.session()) {
+      this.session.set(token);
+    }
+  }
 
   get loggedIn(): boolean {
     return !!this.session();
   }
 
   private headers(): Record<string, string> {
-    const s = this.session();
+    // 直接从 localStorage 读取，确保 session 被正确发送（避免信号初始化时序问题）
+    const s = readSessionFromStorage() || this.session();
     return s ? { 'X-Session-Token': s } : {};
   }
 
   private handleError = (err: any): Observable<never> => {
     const msg = err?.error?.error?.message || err?.message || '请求失败';
     if (err?.status === 401) {
-      this.logout();
+      // 只有当 localStorage 中没有 session token 时才清空登录态
+      // 避免因时序问题导致的误清空（页面刷新时组件初始化 API 调用可能先于 session 信号初始化）
+      const hasSession = !!readSessionFromStorage();
+      if (!hasSession) {
+        this.logout();
+      } else {
+        // 只清空 session 信号，保留 localStorage，下次请求时会重新读取
+        this.session.set(null);
+      }
     }
     this.lastError.set(msg);
     return throwError(() => new Error(msg));
@@ -47,6 +79,10 @@ export class ApiService {
 
   logout(): void {
     localStorage.removeItem(SESSION_KEY);
+    // 同时清除旧版本的 session key
+    for (const legacyKey of LEGACY_SESSION_KEYS) {
+      localStorage.removeItem(legacyKey);
+    }
     this.session.set(null);
   }
 

@@ -1,6 +1,6 @@
     <div class="login-wrap" *ngIf="!api.loggedIn">
       <div class="card">
-        <h2>LLM Token Router</h2>
+        <h2>TSM Hub</h2>
         <p class="muted">请输入管理口令（data/config.json 的 settings.admin_token）</p>
         <div class="banner error" *ngIf="error">{{ error }}</div>
         <label for="admin-token">管理口令</label>
@@ -17,8 +17,8 @@
     <div class="app-shell" *ngIf="api.loggedIn">
       <aside class="sidebar">
         <div class="brand">
-          LLM Token Router
-          <small>自制 Key · 智能路由</small>
+          TSM Hub
+          <small>Tools · Skills · MCPs 能力中心</small>
         </div>
         <div class="global-search">
           <input #searchInput type="text" [(ngModel)]="searchQuery" (ngModelChange)="onSearch()"
