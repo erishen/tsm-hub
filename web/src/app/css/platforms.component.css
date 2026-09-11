@@ -90,6 +90,18 @@
 .icon-together { background: linear-gradient(135deg, #1c1c1c, #444); }
 .icon-fireworks { background: linear-gradient(135deg, #6366f1, #4f46e5); }
 .icon-groq { background: linear-gradient(135deg, #f55036, #c93a24); }
+.icon-zhipu { background: linear-gradient(135deg, #3b82f6, #1d4ed8); }
+.icon-qwen { background: linear-gradient(135deg, #6366f1, #4338ca); }
+.icon-ernie { background: linear-gradient(135deg, #2932e1, #1e24b0); }
+.icon-hunyuan { background: linear-gradient(135deg, #006eff, #0052cc); }
+.icon-doubao { background: linear-gradient(135deg, #3370ff, #1a56e6); }
+.icon-kimi { background: linear-gradient(135deg, #8b5cf6, #7c3aed); }
+.icon-yi { background: linear-gradient(135deg, #0ea5e9, #0284c7); }
+.icon-deepseek { background: linear-gradient(135deg, #4d6bfe, #3b54d4); }
+.icon-sensenova { background: linear-gradient(135deg, #10b981, #059669); }
+.icon-siliconflow { background: linear-gradient(135deg, #f59e0b, #d97706); }
+.icon-minimax { background: linear-gradient(135deg, #ec4899, #db2777); }
+.icon-spark { background: linear-gradient(135deg, #0ea5e9, #0369a1); }
 
 .platform-title {
   flex: 1;
