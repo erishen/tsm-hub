@@ -301,13 +301,16 @@ func (p *Proxy) attempt(w http.ResponseWriter, r *http.Request, c router.Candida
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
 
-	upReq, err := http.NewRequestWithContext(ctx, r.Method, adapter.UpstreamURL(c.Provider.BaseURL, path), bytes.NewReader(upBody))
+	upReq, err := http.NewRequestWithContext(ctx, r.Method, adapter.UpstreamURL(c.Provider, path), bytes.NewReader(upBody))
 	if err != nil {
 		return Result{ProviderID: c.ProviderID, UpstreamModel: c.UpstreamModel, Status: http.StatusBadGateway,
 			Stream: req.Stream, Latency: time.Since(started), Err: err.Error(), ProviderFault: true}, true
 	}
 	copyHeaders(upReq.Header, r.Header)
-	upReq.Header.Set("Authorization", "Bearer "+c.Provider.ResolvedAPIKey())
+	// 协议适配器自定义认证头（如 Azure 用 api-key，Gemini 用 URL 参数不需要认证头）
+	if authKey, authVal := adapter.AuthHeader(c.Provider); authKey != "" {
+		upReq.Header.Set(authKey, authVal)
+	}
 	upReq.Header.Set("Content-Type", "application/json")
 	for k, v := range extraHeaders {
 		upReq.Header.Set(k, v)

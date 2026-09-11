@@ -13,8 +13,13 @@ type ProtocolAdapter interface {
 	// Name 返回适配器名称（与 Provider.Protocol 对应）。
 	Name() string
 
-	// UpstreamURL 根据 Provider 的 base_url 和客户端请求路径，构造上游请求 URL。
-	UpstreamURL(baseURL, clientPath string) string
+	// UpstreamURL 根据 Provider 和客户端请求路径，构造上游请求 URL。
+	// provider 参数用于访问 BaseURL、APIKey 等配置（如 Gemini 需要把 key 加到 URL）。
+	UpstreamURL(provider store.Provider, clientPath string) string
+
+	// AuthHeader 返回认证请求头的 key 和 value。
+	// 如果 key 为空，则不设置认证头（由适配器自己在 URL 中处理，如 Gemini）。
+	AuthHeader(provider store.Provider) (key, value string)
 
 	// ConvertRequest 把 OpenAI 格式的请求体转换为目标协议格式。
 	// 返回转换后的请求体和需要额外设置的请求头（如 anthropic-version）。
@@ -56,6 +61,8 @@ func GetAdapter(p store.Provider) ProtocolAdapter {
 func init() {
 	RegisterAdapter(&OpenAIAdapter{})
 	RegisterAdapter(&AnthropicAdapter{})
+	RegisterAdapter(&AzureAdapter{})
+	RegisterAdapter(&GeminiAdapter{})
 }
 
 // copyHeaders 复制客户端请求头到上游请求（跳过逐跳头和鉴权头）。
