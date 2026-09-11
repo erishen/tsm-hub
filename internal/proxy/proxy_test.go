@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/erishen/tsm-hub/internal/proxy/adapter"
 	"github.com/erishen/tsm-hub/internal/router"
 )
 
@@ -105,7 +106,7 @@ func TestUpstreamURL(t *testing.T) {
 		{"https://openrouter.ai/api/v1", "/v1/chat/completions", "https://openrouter.ai/api/v1/chat/completions"},
 	}
 	for _, c := range cases {
-		if got := upstreamURL(c.base, c.path); got != c.want {
+		if got := adapter.UpstreamURL(c.base, c.path); got != c.want {
 			t.Fatalf("upstreamURL(%q, %q) = %q, want %q", c.base, c.path, got, c.want)
 		}
 	}
