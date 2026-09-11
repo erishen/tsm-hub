@@ -23,16 +23,16 @@ import (
 // chatMessage 是 OpenAI messages 的通用结构。
 type chatMessage map[string]any
 
-// agentChat 判断是否走网关 agent：客户端未传 tools 且未显式关闭。
-func (p *Proxy) agentChat(body []byte, r *http.Request) bool {
+// agentChat 判断是否走网关 agent：客户端未传 tools 且未显式关闭（全局/key 级/请求头）。
+func (p *Proxy) agentChat(body []byte, r *http.Request, key store.APIKey) bool {
 	headerOff := strings.EqualFold(r.Header.Get("X-Llm-Router-Agent"), "off")
-	return agentGate(body, p.store.Settings().Agent.Disabled, headerOff)
+	return agentGate(body, p.store.Settings().Agent.Disabled, key.AgentDisabled, headerOff)
 }
 
 // agentGate 是 agent 启用判断的纯函数（便于测试）。
-// 启用条件：未禁用 + 请求头未关 + 无客户端 tools + 有 messages。
-func agentGate(body []byte, disabled, headerOff bool) bool {
-	if disabled || headerOff {
+// 启用条件：全局未禁用 + key 未禁用 + 请求头未关 + 无客户端 tools + 有 messages。
+func agentGate(body []byte, disabled, keyDisabled, headerOff bool) bool {
+	if disabled || keyDisabled || headerOff {
 		return false
 	}
 	var m map[string]json.RawMessage

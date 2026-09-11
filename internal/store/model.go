@@ -295,6 +295,9 @@ type APIKey struct {
 	// InjectSkills 技能注入模式：""=不注入；"list"=技能清单；
 	// "all"=全部技能全文；其他值=单个技能名。转发 chat 请求时注入 system prompt。
 	InjectSkills string `json:"inject_skills,omitempty"`
+	// AgentDisabled 为 true 时，该 key 的请求不经过网关 agent（即使客户端未传 tools），
+	// 直接透传到上游模型。适用于客户端自己有完整 Agent 流水线的场景（如 crewai-pse）。
+	AgentDisabled bool `json:"agent_disabled,omitempty"`
 }
 
 // Config 是 data/config.json 的整体结构。

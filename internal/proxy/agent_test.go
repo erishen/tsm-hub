@@ -126,27 +126,31 @@ func TestExecToolBasic(t *testing.T) {
 
 func TestAgentChatGate(t *testing.T) {
 	// 未传 tools → 启用
-	if !agentGate([]byte(`{"model":"m","messages":[{"role":"user","content":"x"}]}`), false, false) {
+	if !agentGate([]byte(`{"model":"m","messages":[{"role":"user","content":"x"}]}`), false, false, false) {
 		t.Fatal("no tools should enable agent")
 	}
 	// 传了 tools → 不启用（尊重客户端）
-	if agentGate([]byte(`{"model":"m","messages":[],"tools":[{"type":"function"}]}`), false, false) {
+	if agentGate([]byte(`{"model":"m","messages":[],"tools":[{"type":"function"}]}`), false, false, false) {
 		t.Fatal("client tools should disable agent")
 	}
 	// tools:null → 启用
-	if !agentGate([]byte(`{"model":"m","messages":[{"role":"user","content":"x"}],"tools":null}`), false, false) {
+	if !agentGate([]byte(`{"model":"m","messages":[{"role":"user","content":"x"}],"tools":null}`), false, false, false) {
 		t.Fatal("null tools should enable agent")
 	}
 	// disabled 配置 → 不启用
-	if agentGate([]byte(`{"model":"m","messages":[]}`), true, false) {
+	if agentGate([]byte(`{"model":"m","messages":[]}`), true, false, false) {
 		t.Fatal("disabled should disable agent")
 	}
+	// key 级 disabled → 不启用
+	if agentGate([]byte(`{"model":"m","messages":[{"role":"user","content":"x"}]}`), false, true, false) {
+		t.Fatal("key disabled should disable agent")
+	}
 	// 请求头 off → 不启用
-	if agentGate([]byte(`{"model":"m","messages":[]}`), false, true) {
+	if agentGate([]byte(`{"model":"m","messages":[]}`), false, false, true) {
 		t.Fatal("header off should disable agent")
 	}
 	// 无 messages → 不启用（保持旧路径兼容）
-	if agentGate([]byte(`{"model":"m"}`), false, false) {
+	if agentGate([]byte(`{"model":"m"}`), false, false, false) {
 		t.Fatal("no messages should disable agent")
 	}
 }
