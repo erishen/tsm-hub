@@ -1,16 +1,18 @@
-// Package config 解析进程启动参数（命令行 + 环境变量）。
+// Package config 解析进程启动参数（命令行 + 环境变量 + .env 文件）。
 //
-// 优先级：命令行 flag > 环境变量 > data/config.json 里的 settings。
+// 优先级：命令行 flag > 环境变量 > .env 文件 > data/config.json 里的 settings。
 //
 // 环境变量前缀：TSM_HUB_*（最新），兼容 TSM_HUB_* 和 LLM_ROUTER_*（按优先级 fallback）。
 package config
 
 import (
+	"bufio"
 	"errors"
 	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // ErrFlagParse 表示命令行参数解析失败（含 -h），调用方据此选择退出码。
@@ -104,4 +106,65 @@ flags:
 
 环境变量兼容：新前缀 TSM_HUB_* 优先，兼容 TSM_HUB_* 和 LLM_ROUTER_*。
 `
+}
+
+// LoadDotEnv 从指定路径加载 .env 文件，设置环境变量（不会覆盖已存在的环境变量）。
+// 支持的格式：
+//   - KEY=VALUE
+//   - KEY="VALUE WITH SPACES"
+//   - KEY='VALUE WITH SPACES'
+//   - # 注释行
+//   - 空行
+//
+// 如果文件不存在，静默返回（不报错）。
+func LoadDotEnv(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // .env 文件不存在是正常的
+		}
+		return err
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		// 跳过空行和注释
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		// 解析 KEY=VALUE
+		idx := strings.Index(line, "=")
+		if idx <= 0 {
+			continue
+		}
+		key := strings.TrimSpace(line[:idx])
+		value := strings.TrimSpace(line[idx+1:])
+		// 去除引号
+		if len(value) >= 2 {
+			if (value[0] == '"' && value[len(value)-1] == '"') ||
+				(value[0] == '\'' && value[len(value)-1] == '\'') {
+				value = value[1 : len(value)-1]
+			}
+		}
+		// 不覆盖已存在的环境变量
+		if os.Getenv(key) == "" {
+			os.Setenv(key, value)
+		}
+	}
+	return scanner.Err()
+}
+
+// LoadDefaultDotEnv 从默认路径加载 .env 文件：当前目录 .env，然后数据目录 ../.env。
+func LoadDefaultDotEnv(dataDir string) {
+	// 优先当前目录
+	if err := LoadDotEnv(".env"); err == nil {
+		return
+	}
+	// 其次数据目录的上级目录（项目根目录）
+	parent := filepath.Dir(dataDir)
+	if err := LoadDotEnv(filepath.Join(parent, ".env")); err == nil {
+		return
+	}
 }

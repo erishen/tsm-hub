@@ -28,6 +28,9 @@ import (
 var version = "dev"
 
 func main() {
+	// 先加载 .env 文件（不会覆盖已存在的环境变量）
+	config.LoadDefaultDotEnv("data")
+
 	cfg, err := config.Parse(os.Args[1:])
 	if err != nil {
 		if errors.Is(err, config.ErrFlagParse) {
