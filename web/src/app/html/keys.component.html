@@ -228,10 +228,12 @@
             <td class="num">{{ compact(k.usage?.total_tokens ?? 0) }}</td>
             <td class="num">{{ usd(k.usage?.cost_usd ?? 0) }}</td>
             <td class="num">{{ k.rpm_current }}/{{ k.quota.rpm || '∞' }}</td>
-            <td style="font-size:12px;max-width:220px">
+            <td style="font-size:12px;max-width:200px;overflow:hidden;">
               <ng-container *ngIf="k.tools_used && k.tools_used.length; else noTools">
-                <span class="mono" style="margin-right:4px" *ngFor="let t of k.tools_used; let last = last">{{ t }}{{ last ? '' : ',' }}</span>
-                <div class="muted" *ngIf="k.tools_declared && k.tools_declared.length" title="该 Key 请求中声明过的工具（含系统外）">
+                <div class="tools-used" [title]="k.tools_used.join(', ')" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                  <span class="mono" style="margin-right:4px" *ngFor="let t of k.tools_used; let last = last">{{ t }}{{ last ? '' : ',' }}</span>
+                </div>
+                <div class="muted tools-declared" *ngIf="k.tools_declared && k.tools_declared.length" [title]="'声明：' + k.tools_declared.join(', ')" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px;">
                   声明：{{ k.tools_declared.join(', ') }}
                 </div>
               </ng-container>
