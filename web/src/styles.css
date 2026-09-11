@@ -83,13 +83,15 @@ a:hover { text-decoration: underline; }
 .search-dropdown {
   position: absolute; top: 100%; left: 4px; right: 4px; z-index: 100;
   background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.12); max-height: 360px; overflow-y: auto;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12); max-height: 360px; overflow-y: auto; overflow-x: hidden;
   margin-top: 4px;
 }
 .search-dropdown a {
-  display: block; padding: 6px 10px; font-size: 12px; color: var(--text);
-  text-decoration: none; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 6px; padding: 6px 10px; font-size: 12px; color: var(--text);
+  text-decoration: none; border-bottom: 1px solid var(--border); overflow: hidden;
 }
+.search-dropdown a .mono { flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60%; }
+.search-dropdown a .muted { flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 35%; }
 .search-dropdown a:hover { background: var(--bg); }
 .search-group-title {
   padding: 6px 10px 4px; font-size: 11px; font-weight: 600; color: var(--muted);
