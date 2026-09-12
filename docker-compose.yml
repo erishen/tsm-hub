@@ -8,6 +8,8 @@ services:
       - "9070:9070"
     volumes:
       - ./data:/data
+      # 技能库（gitmodules 子模块）只读挂载进容器，供技能注入/执行使用
+      - ./skills:/skills:ro
     environment:
       # 生产环境务必改成强口令；未设置时回落到 config.json 里的 admin_token。
       # 如果想复用挂载的 ./data/config.json 中的 admin_token，注释掉下面这行即可
