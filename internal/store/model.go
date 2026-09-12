@@ -174,9 +174,9 @@ type SmartScoreCfg struct {
 	// - balanced: 平衡模式，综合考虑所有维度
 	StrategyMode string `json:"strategy_mode,omitempty"`
 	// 各维度权重（0表示用默认值，范围0-200）
-	CostWeight      int `json:"cost_weight,omitempty"`      // 成本权重
-	StabilityWeight int `json:"stability_weight,omitempty"`  // 稳定性权重（成功率）
-	LatencyWeight   int `json:"latency_weight,omitempty"`    // 延迟权重
+	CostWeight       int `json:"cost_weight,omitempty"`       // 成本权重
+	StabilityWeight  int `json:"stability_weight,omitempty"`  // 稳定性权重（成功率）
+	LatencyWeight    int `json:"latency_weight,omitempty"`    // 延迟权重
 	CapabilityWeight int `json:"capability_weight,omitempty"` // 能力匹配权重
 	// FreeBonus 免费模型的基础加分（默认 100）。
 	FreeBonus int `json:"free_bonus"`
@@ -218,9 +218,9 @@ type UnavailableModelView struct {
 // 免费/价格/上下文会随上游调整（OpenRouter :free 列表、agnes 促销免费等），
 // 目录页优先用最近一次探测的快照，静态知识表兜底。
 type ProbeModel struct {
-	ID            string  `json:"id"`
-	ContextLength int     `json:"context_length,omitempty"`
-	Free          bool    `json:"free,omitempty"`
+	ID            string   `json:"id"`
+	ContextLength int      `json:"context_length,omitempty"`
+	Free          bool     `json:"free,omitempty"`
 	Pricing       *Pricing `json:"pricing,omitempty"`
 }
 
@@ -245,12 +245,12 @@ type Provider struct {
 	// Protocol 指定上游 Provider 使用的 API 协议。
 	// 支持："openai"（默认，OpenAI 兼容）、"anthropic"（Anthropic Claude）。
 	// 网关对外只暴露 OpenAI 兼容 API，适配器负责请求/响应格式转换。
-	Protocol  string            `json:"protocol,omitempty"`
-	CreatedAt time.Time         `json:"created_at"`
-	UpdatedAt time.Time         `json:"updated_at"`
+	Protocol  string    `json:"protocol,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 	// ProbeAt 是最近一次探测成功的时间；ProbeModels 是那次探测的模型快照。
-	ProbeAt     time.Time     `json:"probe_at,omitempty"`
-	ProbeModels []ProbeModel  `json:"probe_models,omitempty"`
+	ProbeAt     time.Time    `json:"probe_at,omitempty"`
+	ProbeModels []ProbeModel `json:"probe_models,omitempty"`
 }
 
 // ResolvedAPIKey 返回实际用于上游鉴权的 Key：
@@ -309,6 +309,15 @@ type APIKey struct {
 	// AgentDisabled 为 true 时，该 key 的请求不经过网关 agent（即使客户端未传 tools），
 	// 直接透传到上游模型。适用于客户端自己有完整 Agent 流水线的场景（如 crewai-pse）。
 	AgentDisabled bool `json:"agent_disabled,omitempty"`
+	// ToolsAllow 工具白名单（精确工具名，如 calc / mcp_fs_read_file）：
+	// 非空时网关 agent 只把名单内的工具 schema 发给上游，其余全部裁掉。
+	// 空 = 不限制（全量注入）。用于按客户端裁剪 token 开销。
+	ToolsAllow []string `json:"tools_allow,omitempty"`
+	// McpsAllow MCP server 白名单：非空时只对名单内的 server 建连并暴露其工具，
+	// 其余 server 既不建连也不出现在 tool schemas（省 token + 省握手）。
+	// 空 = 不限制。与 ToolsAllow 叠加生效（两者都非空时取交集语义：MCP 工具
+	// 需同时满足 server 在 McpsAllow 内且完整工具名在 ToolsAllow 内）。
+	McpsAllow []string `json:"mcps_allow,omitempty"`
 }
 
 // Config 是 data/config.json 的整体结构。

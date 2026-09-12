@@ -60,9 +60,9 @@ func beijingNow() time.Time {
 
 // ToolInfo 是工具池目录项（管理台 /mcps 页展示）。
 type ToolInfo struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	Source      string         `json:"source"` // builtin / builtin-conditional / mcp:<server>
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Source      string `json:"source"` // builtin / builtin-conditional / mcp:<server>
 	// Parameters 是 OpenAI function parameters schema（管理台一键测试动态表单用）。
 	Parameters map[string]any `json:"parameters"`
 }
@@ -261,10 +261,10 @@ func (p *Proxy) execTool(keyID, name string, args toolArgs) string {
 		if tool == "" {
 			return fmt.Sprintf("error: bad mcp tool name %q", name)
 		}
-	return p.mcpExec(server, tool, args)
-}
-// MCP 客户端命名风格 server__tool（如 fs__read_file）：网关已配置该 server 时，
-// 归一化到 mcp_server_tool 执行，保证外部调用方按自己习惯声明也能命中网关能力。
+		return p.mcpExec(server, tool, args)
+	}
+	// MCP 客户端命名风格 server__tool（如 fs__read_file）：网关已配置该 server 时，
+	// 归一化到 mcp_server_tool 执行，保证外部调用方按自己习惯声明也能命中网关能力。
 	if p.store != nil {
 		if i := strings.Index(name, "__"); i > 0 {
 			server, tool := name[:i], name[i+2:]
@@ -294,17 +294,17 @@ func (p *Proxy) execTool(keyID, name string, args toolArgs) string {
 		if t, ok := p.store.ExternalTool(name); ok {
 			// 录用的外部工具：按实现方式执行。
 			switch t.ImplType {
-		case "js":
-			q := args.str("query")
-			if q == "" {
-				return "error: missing 'query'"
-			}
-			if ans, hit := runJSDetector(t.ImplSource, q); hit {
-				return ans
-			}
-			return fmt.Sprintf("no match: external tool %s 未命中问题", name)
-		case "alias":
-			return p.execTool(keyID, t.ImplSource, args)
+			case "js":
+				q := args.str("query")
+				if q == "" {
+					return "error: missing 'query'"
+				}
+				if ans, hit := runJSDetector(t.ImplSource, q); hit {
+					return ans
+				}
+				return fmt.Sprintf("no match: external tool %s 未命中问题", name)
+			case "alias":
+				return p.execTool(keyID, t.ImplSource, args)
 			default:
 				return fmt.Sprintf("error: external tool %q 无网关实现（由调用方侧执行）", name)
 			}
@@ -314,20 +314,40 @@ func (p *Proxy) execTool(keyID, name string, args toolArgs) string {
 }
 
 // toolSchemas 返回 OpenAI tools 参数（内置工具 + 按配置启用的条件工具 + MCP 工具）。
+// 不带白名单的全量版本（兼容旧调用与测试）。
 func (p *Proxy) toolSchemas() []map[string]any {
+	return p.toolSchemasAllow(nil, nil)
+}
+
+// toolSchemasAllow 是 toolSchemas 的白名单版本：
+//   - toolAllow 非空时只保留名单内的工具名（内置工具、MCP 工具按
+//     mcp_server_tool 完整名匹配、外部录用工具）；
+//   - serverAllow 非空时 MCP 层只对名单内 server 建连与枚举。
+//   - 两者为 nil 表示不限制（全量）。
+func (p *Proxy) toolSchemasAllow(serverAllow, toolAllow map[string]bool) []map[string]any {
+	keep := func(name string) bool { return toolAllow == nil || toolAllow[name] }
 	out := make([]map[string]any, 0, len(builtinTools)+2)
 	for _, n := range builtinTools {
-		out = append(out, toolSchema(n, toolDef(n)))
+		if keep(n) {
+			out = append(out, toolSchema(n, toolDef(n)))
+		}
 	}
 	if p.store.Settings().Agent.ReadRoot != "" {
-		out = append(out, toolSchema("read_file", "读取本地文件内容（仅限白名单根目录内；目录返回其内容列表）。"))
-		out = append(out, toolSchema("csv_analyze", toolDef("csv_analyze")))
+		if keep("read_file") {
+			out = append(out, toolSchema("read_file", "读取本地文件内容（仅限白名单根目录内；目录返回其内容列表）。"))
+		}
+		if keep("csv_analyze") {
+			out = append(out, toolSchema("csv_analyze", toolDef("csv_analyze")))
+		}
 	}
-	if p.store.Settings().Sandbox.Enabled {
+	if p.store.Settings().Sandbox.Enabled && keep("execute_code") {
 		out = append(out, toolSchema("execute_code", toolDef("execute_code")))
 	}
-	out = append(out, p.mcpToolSchemas()...)
+	out = append(out, p.mcpToolSchemasAllow(serverAllow, toolAllow)...)
 	for _, pl := range p.FastToolPlugins() {
+		if !keep(pl.Name) {
+			continue
+		}
 		desc := "FastPath 检测器（晋升为工具，由 LLM 生成）：输入问题文本，返回确定性答案。"
 		if pl.Trigger != "" {
 			desc = "FastPath 检测器：" + pl.Trigger
@@ -335,7 +355,9 @@ func (p *Proxy) toolSchemas() []map[string]any {
 		out = append(out, toolSchema(pl.Name, desc))
 	}
 	for _, t := range p.store.ListExternalTools() {
-		out = append(out, toolSchema(t.Name, orDesc(t.Description, "外部调用方声明并录用的工具")))
+		if keep(t.Name) {
+			out = append(out, toolSchema(t.Name, orDesc(t.Description, "外部调用方声明并录用的工具")))
+		}
 	}
 	return out
 }
@@ -773,4 +795,3 @@ func (p *Proxy) toolCSVAnalyze(args toolArgs) (string, error) {
 	}
 	return sb.String(), nil
 }
-

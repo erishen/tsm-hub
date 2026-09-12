@@ -231,16 +231,16 @@ func (p *Proxy) agentRun(w http.ResponseWriter, r *http.Request, key store.APIKe
 	}
 
 	result := Result{
-		ProviderID:     res.provider,
-		UpstreamModel:  res.model,
-		Status:         http.StatusOK,
-		Stream:         req.Stream,
-		Latency:        time.Since(started),
-		PromptTokens:   res.usage.prompt,
+		ProviderID:      res.provider,
+		UpstreamModel:   res.model,
+		Status:          http.StatusOK,
+		Stream:          req.Stream,
+		Latency:         time.Since(started),
+		PromptTokens:    res.usage.prompt,
 		CompletionToken: res.usage.completion,
-		TotalTokens:    res.usage.total,
-		ClientTools:    clientTools(req.Tools),
-		ExecTools:      res.execTools,
+		TotalTokens:     res.usage.total,
+		ClientTools:     clientTools(req.Tools),
+		ExecTools:       res.execTools,
 	}
 	if res.err != "" {
 		result.Status = http.StatusBadGateway
@@ -309,9 +309,12 @@ func (p *Proxy) agentRound(r *http.Request, key store.APIKey, path, model string
 	if err != nil {
 		return nil, "", err.Error(), 0, false
 	}
+	// per-key 能力白名单：ToolsAllow/McpsAllow 任一配置时裁剪注入的工具池
+	// （nil = 不限制）。白名单在候选循环外算一次。
+	serverAllow, toolAllow := keyAllowSets(key)
 	var lastErr string
 	for _, c := range cands {
-		body, errMsg, status := p.agentUpstream(r, c, path, msgs)
+		body, errMsg, status := p.agentUpstream(r, c, path, msgs, serverAllow, toolAllow)
 		if status > 0 {
 			return nil, c.ProviderID, errMsg, status, false
 		}
@@ -324,14 +327,31 @@ func (p *Proxy) agentRound(r *http.Request, key store.APIKey, path, model string
 	return nil, "", orDefault(lastErr, "all upstream providers failed"), 0, false
 }
 
+// keyAllowSets 把 key 的白名单配置转成集合：nil 表示不限制。
+func keyAllowSets(key store.APIKey) (serverAllow, toolAllow map[string]bool) {
+	if len(key.McpsAllow) > 0 {
+		serverAllow = make(map[string]bool, len(key.McpsAllow))
+		for _, n := range key.McpsAllow {
+			serverAllow[n] = true
+		}
+	}
+	if len(key.ToolsAllow) > 0 {
+		toolAllow = make(map[string]bool, len(key.ToolsAllow))
+		for _, n := range key.ToolsAllow {
+			toolAllow[n] = true
+		}
+	}
+	return serverAllow, toolAllow
+}
+
 // agentUpstream 构造并发送一轮上游请求（非流式）。
 // 返回 status>0 表示该状态应原样透传给客户端（4xx）。
-func (p *Proxy) agentUpstream(r *http.Request, c router.Candidate, path string, msgs []chatMessage) ([]byte, string, int) {
+func (p *Proxy) agentUpstream(r *http.Request, c router.Candidate, path string, msgs []chatMessage, serverAllow, toolAllow map[string]bool) ([]byte, string, int) {
 	reqBody := map[string]any{
 		"model":       c.UpstreamModel,
 		"messages":    msgs,
 		"stream":      false,
-		"tools":       p.toolSchemas(),
+		"tools":       p.toolSchemasAllow(serverAllow, toolAllow),
 		"tool_choice": "auto",
 	}
 	raw, err := json.Marshal(reqBody)
@@ -404,7 +424,7 @@ func parseAgentResponse(body []byte) (toolCalls []map[string]any, finalText stri
 		Error   map[string]any `json:"error"`
 		Choices []struct {
 			Message struct {
-				Content   any               `json:"content"`
+				Content   any              `json:"content"`
 				ToolCalls []map[string]any `json:"tool_calls"`
 			} `json:"message"`
 		} `json:"choices"`
