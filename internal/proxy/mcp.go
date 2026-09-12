@@ -569,13 +569,28 @@ func (s *mcpServer) toolNames() []string {
 // mcpToolSchemas 返回全部已连接 MCP server 的工具 schema（mcp_<server>_<tool>）。
 // 首次会并行触发各 server 连接，避免一个慢 server 拖住整个工具池。
 func (p *Proxy) mcpToolSchemas() []map[string]any {
+	return p.mcpToolSchemasAllow(nil, nil)
+}
+
+// mcpToolSchemasAllow 枚举已配置 MCP server 的工具 schema。
+//   - serverAllow 非 nil 时：不在名单内的 server 直接跳过——既不建连也不枚举
+//     （对应 key.McpsAllow，省 token + 省握手）。
+//   - toolAllow 非 nil 时：只保留完整工具名（mcp_server_tool）在名单内的工具
+//     （对应 key.ToolsAllow）。
+func (p *Proxy) mcpToolSchemasAllow(serverAllow, toolAllow map[string]bool) []map[string]any {
 	cfg := p.store.Settings().Mcps
 	if len(cfg) == 0 {
 		return nil
 	}
 	names := make([]string, 0, len(cfg))
 	for n := range cfg {
+		if serverAllow != nil && !serverAllow[n] {
+			continue
+		}
 		names = append(names, n)
+	}
+	if len(names) == 0 {
+		return nil
 	}
 	sort.Strings(names)
 	results := make([][]map[string]any, len(names))
@@ -589,12 +604,16 @@ func (p *Proxy) mcpToolSchemas() []map[string]any {
 				return // 连不上的 server 本次不提供工具
 			}
 			for _, t := range s.tools {
+				full := mcpToolName(name, t.Name)
+				if toolAllow != nil && !toolAllow[full] {
+					continue
+				}
 				params := cleanSchema(t.InputSchema)
 				results[i] = append(results[i], map[string]any{
 					"type": "function",
 					"function": map[string]any{
-						"name":        mcpToolName(name, t.Name),
-						"description": t.Description,
+						"name":        full,
+						"description": truncateDesc(t.Description, maxToolDescRunes),
 						"parameters":  params,
 					},
 				})
@@ -677,6 +696,8 @@ func splitMCPToolName(full string) (server, tool string) {
 }
 
 // cleanSchema 把 MCP inputSchema 清洗成 OpenAI function parameters。
+// 同时做描述瘦身：截断 property 级 description（官方 MCP 的参数描述普遍啰嗦，
+// 是 schema token 的大头）。
 func cleanSchema(s map[string]any) map[string]any {
 	if s == nil {
 		return map[string]any{"type": "object", "properties": map[string]any{}}
@@ -688,6 +709,18 @@ func cleanSchema(s map[string]any) map[string]any {
 		}
 		out[k] = v
 	}
+	if props, ok := out["properties"].(map[string]any); ok {
+		for name, pv := range props {
+			pm, ok := pv.(map[string]any)
+			if !ok {
+				continue
+			}
+			if d, ok := pm["description"].(string); ok && len(d) > 0 {
+				pm["description"] = truncateDesc(d, maxParamDescRunes)
+			}
+			props[name] = pm
+		}
+	}
 	if _, ok := out["type"]; !ok {
 		out["type"] = "object"
 	}
@@ -695,6 +728,44 @@ func cleanSchema(s map[string]any) map[string]any {
 		out["properties"] = map[string]any{}
 	}
 	return out
+}
+
+// 描述截断预算（rune 数）：官方 MCP 工具描述动辄数百字，是 schema token 大头。
+// 截断保留首句（到中/英文句号、问叹号为止）且不超预算，语义足够模型选型。
+const (
+	maxToolDescRunes  = 200
+	maxParamDescRunes = 120
+)
+
+// truncateDesc 把描述截到预算内：优先在句子边界截断（保留完整首句），
+// 首句本身超预算时硬截 rune（不会切出半个多字节字符）。
+func truncateDesc(s string, max int) string {
+	if max <= 0 || len(s) <= max { // len(s) 是字节下界：字节都不超则 rune 必不超
+		return s
+	}
+	runes := []rune(s)
+	if len(runes) <= max {
+		return s
+	}
+	// 在前 max 个 rune 里找最后一个句子边界（。／.／！／?／！／？）。
+	last := -1
+	for i := 0; i < max; i++ {
+		r := runes[i]
+		isSent := r == '。' || r == '！' || r == '？' || r == '!' || r == '?' || r == '.'
+		if !isSent {
+			continue
+		}
+		// 英文句号排除小数/版本号（前后都是数字则不算边界）。
+		if r == '.' && i > 0 && i < max-1 &&
+			runes[i-1] >= '0' && runes[i-1] <= '9' && runes[i+1] >= '0' && runes[i+1] <= '9' {
+			continue
+		}
+		last = i + 1
+	}
+	if last > 0 && last >= max/3 { // 边界太靠前（如 "e.g." 之后）不如硬截
+		return string(runes[:last])
+	}
+	return string(runes[:max])
 }
 
 func envMap(extra map[string]string) []string {
