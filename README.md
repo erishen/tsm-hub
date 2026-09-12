@@ -187,6 +187,7 @@ and executes the `tool_calls` loop server-side, ultimately returning the answer 
 | `execute_code` | Docker sandbox code execution (only available if `settings.sandbox.enabled=true` and docker is installed) |
 | `query_exchange_rate` | Real-time exchange rate query (open.er-api.com free API) |
 | `system_info` | Server OS/arch/CPU/memory/disk/uptime |
+| `tool_search` | Search the full tool catalog by keywords (miss-fallback for dynamic injection, see below) |
 
 `settings.agent` config:
 
@@ -197,6 +198,15 @@ and executes the `tool_calls` loop server-side, ultimately returning the answer 
 | `allow_private_url` | `fetch_url` allow internal/loopback addresses (rejected by default) |
 | `read_root` | Root directory allowed for `read_file` (empty = tool not available) |
 | `memory_file` | `remember` persistence file (empty = memory only) |
+| `dynamic_tools` | Enable dynamic tool injection: send only "resident core + top-K request-relevant tools + `tool_search`" to save tokens (off by default) |
+| `dynamic_top_k` | Max number of relevant tools injected dynamically (default 8, max 20) |
+| `core_tools` | Resident tool names in dynamic mode; empty = `calc/fetch_url/get_time/remember/recall/skill-run` |
+
+Dynamic injection: when `dynamic_tools` is on, the gateway scores the tool catalog against the user's request text
+(English tokens + Chinese bigrams matched against tool names/descriptions) and sends only the core set plus the
+top-K most relevant schemas. If the model needs a tool that is not in the list, it calls `tool_search` to retrieve
+the full catalog and then invokes tools by name. Small pools (≤ core + topK + 4) fall back to full injection.
+Composes with per-key `tools_allow`/`mcps_allow` (allowlist filters first, dynamic selection picks from the rest).
 
 Request-level switch: `X-Llm-Router-Agent: off` header can disable agent for this request; when client provides
 `tools`, the gateway always respects the client (pure passthrough, no injection, no execution).

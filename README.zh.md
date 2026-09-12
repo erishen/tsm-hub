@@ -157,6 +157,7 @@ tsm-hub/
 | `execute_code` | Docker 沙箱执行代码（需 `settings.sandbox.enabled=true` 且本机有 docker 才提供）|
 | `query_exchange_rate` | 实时汇率查询（open.er-api.com 免费接口）|
 | `system_info` | 服务器 OS/架构/CPU/内存/磁盘/运行时长 |
+| `tool_search` | 按关键词检索完整工具目录（动态注入模式的漏选兜底，见下）|
 
 `settings.agent` 配置：
 
@@ -167,6 +168,16 @@ tsm-hub/
 | `allow_private_url` | `fetch_url` 放行内网/环回地址（默认拒绝）|
 | `read_root` | `read_file` 允许的根目录（空 = 不提供该工具）|
 | `memory_file` | `remember` 持久化文件（空 = 仅内存）|
+| `dynamic_tools` | 开启动态工具注入：只下发「常驻核心 + 按请求检索的 top-K 相关工具 + `tool_search`」，大幅省 token（默认关闭）|
+| `dynamic_top_k` | 动态注入的相关工具上限（默认 8，最大 20）|
+| `core_tools` | 动态模式常驻工具名；空 = `calc/fetch_url/get_time/remember/recall/skill-run`|
+
+动态注入说明：`dynamic_tools` 开启后，agent 按用户请求文本对工具目录做关键词
+打分（英文 token + 中文 bigram 匹配工具名/描述），只把核心集与最相关的 top-K
+工具 schema 发给上游；模型发现需要的工具不在列表时，先调 `tool_search`
+检索完整目录，再按返回的名称与参数直接调用。工具池较小（≤ 核心 + topK + 4）
+时自动退回全量注入。与 per-key `tools_allow`/`mcps_allow` 白名单可叠加
+（白名单先过滤，动态检索在剩余池子里选）。
 
 请求级开关：`X-Llm-Router-Agent: off` 请求头可对本请求关闭 agent；客户端自带
 `tools` 时网关始终尊重客户端（纯透传，不注入、不执行）。

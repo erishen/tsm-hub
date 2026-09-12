@@ -98,11 +98,25 @@ func (p *Proxy) agentRun(w http.ResponseWriter, r *http.Request, key store.APIKe
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid messages: "+err.Error())
 		return true, Result{Status: http.StatusBadRequest, Err: err.Error()}
 	}
+	// 动态工具注入（agent.dynamic_tools）：只注入常驻核心 + 与请求相关的
+	// top-K 工具 + tool_search 元工具；关闭时全量注入（旧行为）。
+	// 工具池与白名单集合整个 agent 生命周期算一次，供各轮复用与
+	// tool_search 执行使用。
+	dynamic := p.store.Settings().Agent.DynamicTools
+	serverAllow, toolAllow := keyAllowSets(key)
+	var tools []map[string]any
+	if dynamic {
+		tools = p.dynamicToolSchemas(userContextText(msgs), serverAllow, toolAllow)
+	} else {
+		tools = p.toolSchemasAllow(serverAllow, toolAllow)
+	}
+
 	// 加一条 system 说明工具池语义。
-	msgs = append([]chatMessage{{
-		"role":    "system",
-		"content": "你是运行在 tsm-hub 网关上的 agent。你可以调用网关提供的工具来回答问题；工具由网关执行，你不需要向用户解释工具调用过程，直接给出基于工具结果的最终回答。",
-	}}, msgs...)
+	sys := "你是运行在 tsm-hub 网关上的 agent。你可以调用网关提供的工具来回答问题；工具由网关执行，你不需要向用户解释工具调用过程，直接给出基于工具结果的最终回答。"
+	if dynamic {
+		sys += "本轮只注入了与请求最相关的部分工具；如果列表里没有你需要的工具，先调用 tool_search 检索完整工具目录，再按返回的名称与参数定义直接调用对应工具。"
+	}
+	msgs = append([]chatMessage{{"role": "system", "content": sys}}, msgs...)
 
 	// 确定性快路径：纯代码能回答的问题（算术/时间/日期/换算/统计/进制/字数）
 	// 直接返回，零模型调用、零上游消耗。内置匹配器未命中时尝试已生成插件
@@ -153,7 +167,7 @@ func (p *Proxy) agentRun(w http.ResponseWriter, r *http.Request, key store.APIKe
 			res.err = fmt.Sprintf("tool loop exceeded %d rounds", maxRounds)
 			break
 		}
-		upBody, upProvider, upErr, upStatus, ok := p.agentRound(r, key, path, req.Model, msgs)
+		upBody, upProvider, upErr, upStatus, ok := p.agentRound(r, path, req.Model, msgs, tools)
 		if !ok {
 			// 上游 4xx：原样透传给客户端（不 502、不换候选）。
 			if upStatus > 0 {
@@ -299,22 +313,20 @@ func lastUserText(msgs []chatMessage) string {
 // agentRound 对上游发起一轮非流式请求（带工具 schema），返回上游响应体。
 // ok=false 时 err 非空；status=0 表示可重试（网络/5xx/429），status>0 表示
 // 客户端级错误（4xx），直接透传不换候选。
-// agentRound 走候选链做一轮上游补全。
+// agentRound 走候选链做一轮上游补全；tools 由调用方（agentRun）按
+// 动态/全量模式构建一次后传入，各候选共用。
 // 返回 (body, providerID, errText, status, ok)：ok=true 表示 body 有效；
 // status>0 表示上游 4xx（应原样透传），providerID 为该候选的真实 id；
 // 其他失败时 errText 描述原因。
-func (p *Proxy) agentRound(r *http.Request, key store.APIKey, path, model string, msgs []chatMessage) ([]byte, string, string, int, bool) {
+func (p *Proxy) agentRound(r *http.Request, path, model string, msgs []chatMessage, tools []map[string]any) ([]byte, string, string, int, bool) {
 	// 网关 agent 始终带工具 schema 向上游发起请求，所以 hasTools=true。
 	cands, err := p.router.Pick(model, true)
 	if err != nil {
 		return nil, "", err.Error(), 0, false
 	}
-	// per-key 能力白名单：ToolsAllow/McpsAllow 任一配置时裁剪注入的工具池
-	// （nil = 不限制）。白名单在候选循环外算一次。
-	serverAllow, toolAllow := keyAllowSets(key)
 	var lastErr string
 	for _, c := range cands {
-		body, errMsg, status := p.agentUpstream(r, c, path, msgs, serverAllow, toolAllow)
+		body, errMsg, status := p.agentUpstream(r, c, path, msgs, tools)
 		if status > 0 {
 			return nil, c.ProviderID, errMsg, status, false
 		}
@@ -346,12 +358,12 @@ func keyAllowSets(key store.APIKey) (serverAllow, toolAllow map[string]bool) {
 
 // agentUpstream 构造并发送一轮上游请求（非流式）。
 // 返回 status>0 表示该状态应原样透传给客户端（4xx）。
-func (p *Proxy) agentUpstream(r *http.Request, c router.Candidate, path string, msgs []chatMessage, serverAllow, toolAllow map[string]bool) ([]byte, string, int) {
+func (p *Proxy) agentUpstream(r *http.Request, c router.Candidate, path string, msgs []chatMessage, tools []map[string]any) ([]byte, string, int) {
 	reqBody := map[string]any{
 		"model":       c.UpstreamModel,
 		"messages":    msgs,
 		"stream":      false,
-		"tools":       p.toolSchemasAllow(serverAllow, toolAllow),
+		"tools":       tools,
 		"tool_choice": "auto",
 	}
 	raw, err := json.Marshal(reqBody)
