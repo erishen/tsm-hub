@@ -79,12 +79,11 @@ func (p *Proxy) agentRun(w http.ResponseWriter, r *http.Request, key store.APIKe
 	started := time.Now()
 	res := agentResult{id: newID("chatcmpl")}
 
-	// 注入技能（key 已配置 inject_skills 时，与普通路径一致）。
-	if key.InjectSkills != "" && p.skills != nil {
-		if inj := p.skills.Render(key.InjectSkills); inj != "" {
-			body = injectSkillBody(body, inj)
-		}
-	}
+	// 注入技能（key 已配置 inject_skills 时）。
+	// 注意：API 层（api.go）对 chat/completions 已统一注入过一次技能 system
+	// 消息（agent 路径与透传路径共用该入口），这里不再重复注入，否则同一份
+	// 技能清单会出现两遍，浪费上下文 token。
+	_ = key.InjectSkills // inject handled at API layer; see api.go withRecovery
 
 	maxRounds := p.store.Settings().Agent.MaxRounds
 	if maxRounds <= 0 {
