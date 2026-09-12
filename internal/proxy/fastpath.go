@@ -302,7 +302,7 @@ func tryTime(text string) *fastAnswer {
 	if !timeRe.MatchString(text) {
 		return nil
 	}
-	now := time.Now()
+	now := beijingNow()
 	wd := weekdays[int(now.Weekday()+6)%7]
 	answer := fmt.Sprintf("现在是 %s（%s）。", now.Format("2006-01-02 15:04:05"), wd)
 	return &fastAnswer{query: text, method: "time", answer: answer, detail: now.Format(time.RFC3339)}

@@ -52,6 +52,12 @@ func (a toolArgs) num(k string) float64 {
 // 内置工具名（工具池的排序与 schema 输出）。
 var builtinTools = []string{"calc", "echo", "fetch_url", "get_time", "query_exchange_rate", "recall", "remember", "skill-run", "system_info"}
 
+// beijingNow 返回北京时间（UTC+8）。用固定偏移 zone，不依赖容器本地时区或
+// tzdata——Docker 镜像默认无 tzdata 时 localtime 会落到 UTC，导致 get_time 慢 8 小时。
+func beijingNow() time.Time {
+	return time.Now().In(time.FixedZone("Beijing", 8*3600))
+}
+
 // ToolInfo 是工具池目录项（管理台 /mcps 页展示）。
 type ToolInfo struct {
 	Name        string         `json:"name"`
@@ -183,7 +189,7 @@ func (p *Proxy) InvokeTool(name string, args map[string]any) string {
 func (p *Proxy) execTool(keyID, name string, args toolArgs) string {
 	switch name {
 	case "get_time":
-		return time.Now().Format("2006-01-02 15:04:05 MST")
+		return beijingNow().Format("2006-01-02 15:04:05 MST")
 	case "echo":
 		return args.str("text")
 	case "calc":
@@ -255,10 +261,10 @@ func (p *Proxy) execTool(keyID, name string, args toolArgs) string {
 		if tool == "" {
 			return fmt.Sprintf("error: bad mcp tool name %q", name)
 		}
-		return p.mcpExec(server, tool, args)
-	}
-	// MCP 客户端命名风格 server__tool（如 fs__read_file）：网关已配置该 server 时，
-	// 归一化到 mcp_server_tool 执行，保证外部调用方按自己习惯声明也能命中网关能力。
+	return p.mcpExec(server, tool, args)
+}
+// MCP 客户端命名风格 server__tool（如 fs__read_file）：网关已配置该 server 时，
+// 归一化到 mcp_server_tool 执行，保证外部调用方按自己习惯声明也能命中网关能力。
 	if p.store != nil {
 		if i := strings.Index(name, "__"); i > 0 {
 			server, tool := name[:i], name[i+2:]
@@ -421,7 +427,7 @@ func toolSchema(name, desc string) map[string]any {
 func toolDef(name string) string {
 	switch name {
 	case "get_time":
-		return "获取服务器当前本地时间（含时区）。"
+		return "获取当前北京时间（UTC+8，固定偏移，不依赖服务器本地时区）。"
 	case "echo":
 		return "原样回显文本，用于测试。"
 	case "calc":
