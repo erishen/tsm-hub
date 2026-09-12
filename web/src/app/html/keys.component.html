@@ -136,6 +136,29 @@
               <div><label>允许模型（逗号分隔，留空=全部）</label><input [(ngModel)]="modelsText" placeholder="smart,fast" /></div>
             </div>
             <div class="form-row">
+              <div style="flex:1">
+                <label>工具白名单（多选，不选=全部）</label>
+                <div class="allow-grid">
+                  <label class="allow-item" *ngFor="let t of toolOptions()">
+                    <input type="checkbox" [checked]="selectedTools.includes(t.name)" (change)="toggleTool(t.name, $event)" />
+                    {{ t.name }}
+                  </label>
+                </div>
+              </div>
+              <div style="flex:1">
+                <label>MCP 白名单（多选，不选=全部）</label>
+                <div class="allow-grid">
+                  <label class="allow-item" *ngFor="let m of mcpOptions()">
+                    <input type="checkbox" [checked]="selectedMcps.includes(m.name)" (change)="toggleMcp(m.name, $event)" />
+                    {{ m.name }}
+                  </label>
+                </div>
+              </div>
+            </div>
+            <div class="form-hint" style="font-size:12px;color:#6B7280;margin-top:-8px;">
+              工具白名单只把勾选工具 schema 发给上游（其余裁掉）；MCP 白名单只对勾选的 server 建连并暴露工具。都不勾选 = 不限制。属于<b>配置</b>，只影响之后请求的注入；列表上的「工具使用统计」是自动记录，两者不同。
+            </div>
+            <div class="form-row">
               <div>
                 <label>技能注入（可选）</label>
                 <select [(ngModel)]="injectSkills">
@@ -197,7 +220,7 @@
             <th style="width:32px"><input type="checkbox" [checked]="allSelected()" (change)="toggleAll($event)" /></th>
             <th>名称 / Prefix</th><th>状态</th><th>模型</th><th>技能注入</th><th>Agent</th>
             <th class="num">用量 Tokens</th><th class="num">成本</th>
-            <th class="num">RPM</th><th>工具使用 <span class="muted" style="font-weight:400;font-size:11px">（执行 / 声明）</span></th><th>剩余 / 配额</th><th>操作</th>
+            <th class="num">RPM</th><th>白名单 <span class="muted" style="font-weight:400;font-size:11px" title="该 Key 允许使用的工具 / MCP（配置，可改，只影响之后请求）">（工具 / MCP）</span></th><th>工具使用统计 <span class="muted" style="font-weight:400;font-size:11px" title="最近 5 个，按次数降序，自动统计，非配置">（执行 / 声明）</span></th><th>剩余 / 配额</th><th>操作</th>
           </tr>
         </thead>
         <tbody>
@@ -228,6 +251,10 @@
             <td class="num">{{ compact(k.usage?.total_tokens ?? 0) }}</td>
             <td class="num">{{ usd(k.usage?.cost_usd ?? 0) }}</td>
             <td class="num">{{ k.rpm_current }}/{{ k.quota.rpm || '∞' }}</td>
+            <td style="font-size:12px;max-width:180px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;" [title]="allowTitle(k)">
+              <span *ngIf="k.tools_allow && k.tools_allow.length" class="mono">{{ k.tools_allow.join(', ') }}</span><span *ngIf="k.tools_allow && k.tools_allow.length && k.mcps_allow && k.mcps_allow.length"> · </span><span *ngIf="k.mcps_allow && k.mcps_allow.length" class="mono">{{ k.mcps_allow.join(', ') }}</span>
+              <span class="muted" *ngIf="(!k.tools_allow || !k.tools_allow.length) && (!k.mcps_allow || !k.mcps_allow.length)">全部</span>
+            </td>
             <td style="font-size:12px;max-width:200px;overflow:hidden;">
               <ng-container *ngIf="k.tools_used && k.tools_used.length; else noTools">
                 <div class="tools-used" [title]="k.tools_used.join(', ')" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
