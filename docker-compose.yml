@@ -23,3 +23,44 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+
+  # MCP stdio -> Streamable HTTP 桥接（deploy/mcp-bridge.Dockerfile，supergateway）。
+  # tsm-hub 容器无 node/宿主路径，stdio 型 MCP 无法本地 spawn；改为把官方 stdio
+  # server 包成 HTTP，tsm-hub config 里用 transport=http + url 远程调用。
+  # fs 服务把项目目录挂到容器内同路径（:ro），保证工具调用的路径参数不变。
+  mcp-fs:
+    image: mcp-bridge:latest
+    container_name: mcp-fs
+    restart: unless-stopped
+    volumes:
+      - ./mcp/node_modules:/mcp/node_modules:ro
+      - /Users/erishen/Workspace/CNB/individular-invest:/Users/erishen/Workspace/CNB/individular-invest:ro
+    command: >
+      --stdio "node /mcp/node_modules/@modelcontextprotocol/server-filesystem/dist/index.js /Users/erishen/Workspace/CNB/individular-invest"
+      --stateful --outputTransport streamableHttp --host 0.0.0.0 --port 8000
+
+  mcp-memory:
+    image: mcp-bridge:latest
+    container_name: mcp-memory
+    restart: unless-stopped
+    environment:
+      MEMORY_FILE_PATH: /memory/memory.json
+    volumes:
+      - ./mcp/node_modules:/mcp/node_modules:ro
+      - mcp-memory-data:/memory
+    command: >
+      --stdio "node /mcp/node_modules/@modelcontextprotocol/server-memory/dist/index.js"
+      --stateful --outputTransport streamableHttp --host 0.0.0.0 --port 8000
+
+  mcp-think:
+    image: mcp-bridge:latest
+    container_name: mcp-think
+    restart: unless-stopped
+    volumes:
+      - ./mcp/node_modules:/mcp/node_modules:ro
+    command: >
+      --stdio "node /mcp/node_modules/@modelcontextprotocol/server-sequential-thinking/dist/index.js"
+      --stateful --outputTransport streamableHttp --host 0.0.0.0 --port 8000
+
+volumes:
+  mcp-memory-data:
