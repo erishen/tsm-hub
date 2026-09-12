@@ -255,6 +255,10 @@ func (p *Proxy) execTool(keyID, name string, args toolArgs) string {
 			return fmt.Sprintf("error: nothing remembered for %q", args.str("key"))
 		}
 		return v
+	case toolSearchName:
+		// 管理台/直调路径：无白名单限制。agent 路径在 agent.go 特判后带
+		// key 白名单调用 toolSearchText。
+		return p.toolSearchText(args.str("query"), nil, nil)
 	}
 	if strings.HasPrefix(name, "mcp_") {
 		server, tool := splitMCPToolName(name)

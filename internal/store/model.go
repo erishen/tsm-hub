@@ -163,6 +163,16 @@ type AgentCfg struct {
 	ReadRoot string `json:"read_root,omitempty"`
 	// MemoryFile 为 remember 的持久化文件；空 = 仅进程内存（重启丢失）。
 	MemoryFile string `json:"memory_file,omitempty"`
+	// DynamicTools 开启动态工具注入：agent 不再全量下发工具 schema，而是
+	// 「常驻核心工具（core_tools）+ 按用户请求文本检索出的 top-K 相关工具」，
+	// 并同时注入 tool_search 元工具供模型按需检索完整目录（漏选兜底）。
+	// 默认关闭（全量注入，保持旧行为）。
+	DynamicTools bool `json:"dynamic_tools,omitempty"`
+	// DynamicTopK 动态注入的相关工具上限（默认 8，最大 20）。
+	DynamicTopK int `json:"dynamic_top_k,omitempty"`
+	// CoreTools 动态模式下常驻注入的工具名；空 = 默认核心集
+	// （calc/fetch_url/get_time/remember/recall/skill-run）。
+	CoreTools []string `json:"core_tools,omitempty"`
 }
 
 // SmartScoreCfg 是 smart 策略的可调参数。0 值表示用默认值。

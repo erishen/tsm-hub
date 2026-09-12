@@ -26,7 +26,10 @@
       "max_rounds": 4,
       "allow_private_url": false,
       "read_root": "",
-      "memory_file": ""
+      "memory_file": "",
+      "dynamic_tools": false,
+      "dynamic_top_k": 8,
+      "core_tools": []
     },
     "mcps": {
       "demo": {
