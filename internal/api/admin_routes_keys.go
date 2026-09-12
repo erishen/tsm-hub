@@ -88,6 +88,9 @@ func (s *Server) handleListKeys(w http.ResponseWriter, r *http.Request) {
 			// 工具归因：该调用方实际执行过 + 声明过的工具（按次数降序）。
 			"tools_used":     topTools(s.rec.KeyTools(k.ID), 5),
 			"tools_declared": topTools(s.rec.KeyClientTools(k.ID), 5),
+			// 白名单配置：与上面的统计列并列展示，便于区分"配置 vs 统计"。
+			"tools_allow": k.ToolsAllow,
+			"mcps_allow": k.McpsAllow,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"keys": out})
@@ -103,6 +106,8 @@ func (s *Server) handleCreateKey(w http.ResponseWriter, r *http.Request) {
 		ExpiresIn     int64       `json:"expires_in_seconds"`
 		InjectSkills  string      `json:"inject_skills"`
 		AgentDisabled bool        `json:"agent_disabled"`
+		ToolsAllow    []string    `json:"tools_allow"`
+		McpsAllow     []string    `json:"mcps_allow"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid json: "+err.Error())
@@ -128,6 +133,8 @@ func (s *Server) handleCreateKey(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:     time.Now(),
 		InjectSkills:  req.InjectSkills,
 		AgentDisabled: req.AgentDisabled,
+		ToolsAllow:    req.ToolsAllow,
+		McpsAllow:     req.McpsAllow,
 	}
 	if req.ExpiresIn > 0 {
 		k.ExpiresAt = time.Now().Add(time.Duration(req.ExpiresIn) * time.Second)
@@ -221,12 +228,14 @@ func (s *Server) handleUpdateKey(w http.ResponseWriter, r *http.Request) {
 		Quota         store.Quota `json:"quota"`
 		InjectSkills  string      `json:"inject_skills"`
 		AgentDisabled bool        `json:"agent_disabled"`
+		ToolsAllow    []string    `json:"tools_allow"`
+		McpsAllow     []string    `json:"mcps_allow"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid json: "+err.Error())
 		return
 	}
-	if err := s.store.UpdateKey(r.PathValue("id"), req.Name, req.Models, req.Quota, req.InjectSkills, req.AgentDisabled); err != nil {
+	if err := s.store.UpdateKey(r.PathValue("id"), req.Name, req.Models, req.Quota, req.InjectSkills, req.AgentDisabled, req.ToolsAllow, req.McpsAllow); err != nil {
 		writeError(w, http.StatusNotFound, "not_found", err.Error())
 		return
 	}

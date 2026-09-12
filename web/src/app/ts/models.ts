@@ -75,6 +75,10 @@ export interface ApiKey {
   inject_skills?: string;
   /** 禁用网关 agent：true=该 key 的请求不经过网关 agent（即使客户端未传 tools），直接透传到上游模型。适用于客户端自己有完整 Agent 流水线的场景。 */
   agent_disabled?: boolean;
+  /** 工具白名单：非空时只把名单内的工具 schema 发给上游，其余裁掉；空 = 全部。 */
+  tools_allow?: string[];
+  /** MCP server 白名单：非空时只对名单内的 server 建连并暴露其工具；空 = 全部。 */
+  mcps_allow?: string[];
 }
 
 export interface Overview {

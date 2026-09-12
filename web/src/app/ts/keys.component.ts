@@ -4,7 +4,7 @@ import { lockBody, unlockBody } from './scroll-lock';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ApiService, compact, usd } from './api.service';
-import { ApiKey, Quota, SkillSummary } from './models';
+import { ApiKey, Quota, SkillSummary, ToolInfo, McpServer } from './models';
 
 @Component({
   selector: 'app-keys',
@@ -84,6 +84,12 @@ export class KeysComponent implements OnInit, OnDestroy {
 
   modelsText = '';
   expireDays = 0;
+  /** 工具/MCP 白名单选项（来自管理台工具目录与 MCP 配置）。 */
+  readonly toolOptions = signal<ToolInfo[]>([]);
+  readonly mcpOptions = signal<McpServer[]>([]);
+  /** 已选工具/MCP 白名单（空数组 = 不限制）。 */
+  selectedTools: string[] = [];
+  selectedMcps: string[] = [];
   form: { name: string; quota: Quota; agent_disabled: boolean } = { name: '', quota: this.blankQuota(), agent_disabled: false };
   /** 技能注入：''=不注入 | list | all | __name__(指定技能)，默认 list（技能清单）。 */
   injectSkills = 'list';
@@ -115,6 +121,34 @@ constructor(private api: ApiService) {}
       next: (r) => this.skillOptions.set(r.skills ?? []),
       error: () => this.skillOptions.set([]),
     });
+    this.api.listTools().subscribe({
+      // 只展示内置/条件工具；MCP 工具由 MCP 白名单（server 级）管理，不在此重复展示。
+      next: (r) => this.toolOptions.set((r.tools ?? []).filter((t) => !t.name.startsWith('mcp_'))),
+      error: () => this.toolOptions.set([]),
+    });
+    this.api.listMcps().subscribe({
+      next: (r) => this.mcpOptions.set(r.mcps ?? []),
+      error: () => this.mcpOptions.set([]),
+    });
+  }
+
+  /** 切换工具白名单勾选。 */
+  toggleTool(name: string, ev: Event): void {
+    const checked = (ev.target as HTMLInputElement).checked;
+    this.selectedTools = checked ? [...this.selectedTools, name] : this.selectedTools.filter((n) => n !== name);
+  }
+
+  /** 切换 MCP 白名单勾选。 */
+  toggleMcp(name: string, ev: Event): void {
+    const checked = (ev.target as HTMLInputElement).checked;
+    this.selectedMcps = checked ? [...this.selectedMcps, name] : this.selectedMcps.filter((n) => n !== name);
+  }
+
+  /** 白名单列的 hover 提示：配置 vs 统计说明。 */
+  allowTitle(k: ApiKey): string {
+    const t = (k.tools_allow && k.tools_allow.length) ? '工具: ' + k.tools_allow.join(', ') : '工具: 全部';
+    const m = (k.mcps_allow && k.mcps_allow.length) ? 'MCP: ' + k.mcps_allow.join(', ') : 'MCP: 全部';
+    return `${t}；${m}（配置，只影响之后请求的注入）`;
   }
 
   injectLabel(v: string): string {
@@ -191,6 +225,8 @@ constructor(private api: ApiService) {}
     this.expireDays = 0;
     this.injectSkills = 'list';
     this.injectSkillName = '';
+    this.selectedTools = [];
+    this.selectedMcps = [];
     this.creating.set(true);
   }
 
@@ -206,6 +242,8 @@ constructor(private api: ApiService) {}
       agent_disabled: k.agent_disabled ?? false,
     };
     this.modelsText = (k.models && k.models.length) ? k.models.join(',') : '';
+    this.selectedTools = k.tools_allow ?? [];
+    this.selectedMcps = k.mcps_allow ?? [];
     this.expireDays = 0; // 编辑不改有效期
     const inj = k.inject_skills || '';
     if (inj === 'list' || inj === 'all' || inj === '') {
@@ -240,6 +278,8 @@ constructor(private api: ApiService) {}
       quota: this.form.quota,
       inject_skills: inject,
       agent_disabled: this.form.agent_disabled,
+      tools_allow: this.selectedTools,
+      mcps_allow: this.selectedMcps,
     }).subscribe({
       next: () => {
         this.saving.set(false);
@@ -264,6 +304,8 @@ constructor(private api: ApiService) {}
       expires_in_seconds: this.expireDays > 0 ? this.expireDays * 86400 : undefined,
       inject_skills: inject || undefined,
       agent_disabled: this.form.agent_disabled,
+      tools_allow: this.selectedTools.length ? this.selectedTools : undefined,
+      mcps_allow: this.selectedMcps.length ? this.selectedMcps : undefined,
     }).subscribe({
       next: (res) => {
         this.saving.set(false);
@@ -271,6 +313,8 @@ constructor(private api: ApiService) {}
         this.creating.set(false);
         this.form = { name: '', quota: this.blankQuota(), agent_disabled: false };
         this.modelsText = '';
+        this.selectedTools = [];
+        this.selectedMcps = [];
         this.injectSkills = '';
         this.injectSkillName = '';
         this.load();
