@@ -218,9 +218,12 @@ func (p *Proxy) Handle(w http.ResponseWriter, r *http.Request, key store.APIKey,
 		return res
 	}
 	// 所有候选都失败。
+	// 透传最后一个候选的真实状态码（429/403/402 等）而不是压平成 502：
+	// 客户端（如 ax-explorer 的退避策略）据此区分「限流可重试」与
+	// 「配额耗尽别再试」；5xx/网络错误仍报 502。
 	res := Result{
 		ProviderID: strings.Join(providerIDs(cands), ","),
-		Status:     http.StatusBadGateway,
+		Status:     lastUpstreamStatus(lastErr),
 		Stream:     req.Stream,
 		Latency:    time.Since(started),
 		Err:        lastErr,
@@ -229,8 +232,33 @@ func (p *Proxy) Handle(w http.ResponseWriter, r *http.Request, key store.APIKey,
 		Failover:   failChain,
 	}
 	p.account(key, req.Model, res)
-	writeError(w, res.Status, "upstream_unavailable", orDefault(lastErr, "all upstream providers failed"))
+	writeError(w, res.Status, httpStatusSlug(res.Status), orDefault(lastErr, "all upstream providers failed"))
 	return res
+}
+
+// lastUpstreamStatus 从失败链的 error 文本里解析最后一步的上游状态码
+// （attempt 生成 "upstream 429: …" / "upstream 403: …" 格式）。解析不出
+// 按网络故障处理（502）。
+func lastUpstreamStatus(lastErr string) int {
+	// 找最后一个 "upstream <code>" 前缀。
+	for i := len(lastErr) - 8; i >= 0; i-- {
+		if strings.HasPrefix(lastErr[i:], "upstream ") {
+			// 状态码至少 3 位；截取时做上界保护，避免未来新增
+			// "upstream <code>" 无后缀格式时 slice 越界 panic。
+			end := i + 12
+			if end > len(lastErr) {
+				end = len(lastErr)
+			}
+			if code, err := strconv.Atoi(lastErr[i+9 : end]); err == nil {
+				switch code {
+				case http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden,
+					http.StatusNotFound, http.StatusTooManyRequests, http.StatusPaymentRequired:
+					return code
+				}
+			}
+		}
+	}
+	return http.StatusBadGateway
 }
 
 func providerIDs(cs []router.Candidate) []string {
@@ -366,8 +394,9 @@ func (p *Proxy) attempt(w http.ResponseWriter, r *http.Request, c router.Candida
 	}
 	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusForbidden {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
+		bodyText := decodeUpstreamBody(resp, b)
 		slog.Warn("upstream throttled", "provider", c.ProviderID, "model", req.Model, "upstream_model", c.UpstreamModel,
-			"status", resp.StatusCode, "body", decodeUpstreamBody(resp, b))
+			"status", resp.StatusCode, "body", bodyText)
 		// 429（tpm/rpm 限流）通常秒级恢复，短冷却即可；403（免费额度耗尽 /
 		// key 无权限）持续较久，用配置的长冷却（默认 120s）。避免限流家被
 		// 长时间摘除后只剩同样不可用的候选。
@@ -378,10 +407,22 @@ func (p *Proxy) attempt(w http.ResponseWriter, r *http.Request, c router.Candida
 		if resp.StatusCode == http.StatusTooManyRequests {
 			throttleSec = 15
 		}
-		p.health.ReportThrottle(c.ProviderID, decodeUpstreamBody(resp, b), time.Duration(throttleSec)*time.Second)
+		// 「免费额度耗尽 / 日配额用完」（free quota exhausted / free-models-per-day）：
+		// 到下个计费周期才会恢复，短冷却只会让每批请求都先白吃一次 403。
+		// 识别到该语义时冷却拉长到 6 小时（远小于一天，恢复后能自动回来）。
+		lower := strings.ToLower(bodyText)
+		quotaGone := strings.Contains(lower, "quota exhausted") ||
+			strings.Contains(lower, "quota_exhausted") ||
+			strings.Contains(lower, "free quota") ||
+			strings.Contains(lower, "free-models-per-day") ||
+			strings.Contains(lower, "额度耗尽")
+		if quotaGone {
+			throttleSec = 6 * 3600
+		}
+		p.health.ReportThrottle(c.ProviderID, bodyText, time.Duration(throttleSec)*time.Second)
 		return Result{ProviderID: c.ProviderID, UpstreamModel: c.UpstreamModel, Status: resp.StatusCode,
 			Stream: req.Stream, Latency: time.Since(started),
-			Err: fmt.Sprintf("upstream %d: %s", resp.StatusCode, decodeUpstreamBody(resp, b)), ProviderFault: true}, true
+			Err: fmt.Sprintf("upstream %d: %s", resp.StatusCode, bodyText)}, true
 	}
 
 	// 非流式且上游返回 2xx/3xx 但 body 带 OpenAI error（部分供应商过载时如此）：
@@ -751,10 +792,16 @@ func httpStatusSlug(status int) string {
 	switch status {
 	case http.StatusBadRequest:
 		return "bad_request"
+	case http.StatusUnauthorized:
+		return "unauthorized"
 	case http.StatusForbidden:
 		return "forbidden"
+	case http.StatusNotFound:
+		return "not_found"
 	case http.StatusTooManyRequests:
 		return "rate_limited"
+	case http.StatusPaymentRequired:
+		return "payment_required"
 	default:
 		return "bad_gateway"
 	}
