@@ -81,21 +81,28 @@ func upstreamURL(base, path string) string {
 // CopyHeaders 复制客户端请求头到上游请求（跳过逐跳头和鉴权头）。
 func CopyHeaders(dst, src http.Header) {
 	hopByHop := map[string]bool{
-		"host":              true,
-		"authorization":     true,
-		"content-length":    true,
-		"content-encoding":  true,
-		"transfer-encoding": true,
-		"connection":        true,
-		"keep-alive":        true,
-		"proxy-authenticate": true,
+		"host":                true,
+		"authorization":       true,
+		"content-length":      true,
+		"content-encoding":    true,
+		"transfer-encoding":   true,
+		"connection":          true,
+		"keep-alive":          true,
+		"proxy-authenticate":  true,
 		"proxy-authorization": true,
-		"te":                true,
-		"trailer":           true,
-		"upgrade":           true,
+		"te":                  true,
+		"trailer":             true,
+		"upgrade":             true,
+		// 内部认证 / 会话 / Cookie 不透传给上游 LLM 供应商
+		"x-admin-token":   true,
+		"x-session-token": true,
+		"cookie":          true,
+		"x-forwarded-for": true,
 	}
 	for k, vs := range src {
-		if hopByHop[strings.ToLower(k)] {
+		lk := strings.ToLower(k)
+		// 网关内部路由控制头（X-Llm-Router-*）也不外泄
+		if hopByHop[lk] || strings.HasPrefix(lk, "x-llm-router-") {
 			continue
 		}
 		for _, v := range vs {
