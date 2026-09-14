@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -407,6 +408,23 @@ func (p *Proxy) agentUpstream(r *http.Request, c router.Candidate, path string, 
 		p.health.ReportThrottle(c.ProviderID, compact(string(b)), time.Duration(throttleSec)*time.Second)
 		return nil, fmt.Sprintf("upstream 429: %s", compact(string(b))), 0
 	}
+	// 403 免费额度耗尽（free quota exhausted / insufficient_quota）：与 429 不同，
+	// 免费包到期/日配额用尽要到下个计费周期才恢复，长冷却 6 小时并 failover，
+	// 避免每批请求都先白吃一次 403（与 proxy.go 非 agent 路径的 quotaGone 处理对齐）。
+	if resp.StatusCode == http.StatusForbidden {
+		bodyText := compact(string(b))
+		lower := strings.ToLower(bodyText)
+		quotaGone := strings.Contains(lower, "quota exhausted") ||
+			strings.Contains(lower, "quota_exhausted") ||
+			strings.Contains(lower, "free quota") ||
+			strings.Contains(lower, "free-models-per-day") ||
+			strings.Contains(lower, "insufficient_quota") ||
+			strings.Contains(lower, "额度耗尽")
+		if quotaGone {
+			p.health.ReportThrottle(c.ProviderID, bodyText, 6*time.Hour)
+			return nil, fmt.Sprintf("upstream 403 (free quota exhausted): %s", bodyText), 0
+		}
+	}
 	if resp.StatusCode < 400 {
 		// 部分上游（如 openrouter 免费模型过载）返回 200 + {"error":{...}} 或空 body：
 		// 视为上游故障，触发 failover 换下一候选，而不是把坏响应当成功。
@@ -423,6 +441,26 @@ func (p *Proxy) agentUpstream(r *http.Request, c router.Candidate, path string, 
 		}
 	}
 	if resp.StatusCode >= 400 {
+		// 400 且语义为「余额不足 / 配额不足」（DeepSeek 用 400 表达 insufficient balance）：
+		// 与 402 同等对待——长冷却 1 小时（余额需充值才恢复），failover 换下一候选，
+		// 而不是把每次请求都透传成 400 让客户端（如 hot-news 流水线）直接崩。
+		if resp.StatusCode == http.StatusBadRequest {
+			bodyText := compact(string(b))
+			lower := strings.ToLower(bodyText)
+			balanceGone := strings.Contains(lower, "insufficient_user_quota") ||
+				strings.Contains(lower, "insufficient balance") ||
+				strings.Contains(lower, "credit insufficient") ||
+				strings.Contains(lower, "balance exhausted") ||
+				strings.Contains(lower, "余额不足") ||
+				strings.Contains(lower, "insufficient quota")
+			if balanceGone {
+				slog.Warn("upstream 400 balance exhausted",
+					"provider", c.ProviderID, "upstream_model", c.UpstreamModel,
+					"body", bodyText)
+				p.health.ReportThrottle(c.ProviderID, "balance exhausted: "+bodyText, time.Hour)
+				return nil, fmt.Sprintf("upstream %d: %s", resp.StatusCode, bodyText), 0
+			}
+		}
 		// 4xx 是客户端/上游固定错误：原样透传，不换候选、不驱逐 provider。
 		return b, compact(string(b)), resp.StatusCode
 	}

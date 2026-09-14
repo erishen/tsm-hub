@@ -425,6 +425,32 @@ func (p *Proxy) attempt(w http.ResponseWriter, r *http.Request, c router.Candida
 			Err: fmt.Sprintf("upstream %d: %s", resp.StatusCode, bodyText)}, true
 	}
 
+	// 400 且语义为「余额不足 / 配额不足」：部分上游（如 DeepSeek）用 400 而非
+	// 402 表达 insufficient balance / insufficient_user_quota。与 402 同等对待：
+	// 长冷却 1 小时（余额需充值才恢复，避免每次请求都先白吃一次 400），并 failover。
+	if resp.StatusCode == http.StatusBadRequest {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
+		bodyText := decodeUpstreamBody(resp, b)
+		lower := strings.ToLower(bodyText)
+		balanceGone := strings.Contains(lower, "insufficient_user_quota") ||
+			strings.Contains(lower, "insufficient balance") ||
+			strings.Contains(lower, "credit insufficient") ||
+			strings.Contains(lower, "balance exhausted") ||
+			strings.Contains(lower, "余额不足") ||
+			strings.Contains(lower, "insufficient quota")
+		if balanceGone {
+			resp.Body = io.NopCloser(bytes.NewReader(b))
+			slog.Warn("upstream 400 balance exhausted",
+				"provider", c.ProviderID, "model", req.Model, "upstream_model", c.UpstreamModel,
+				"body", bodyText)
+			p.health.ReportThrottle(c.ProviderID, "balance exhausted: "+bodyText, time.Hour)
+			return Result{ProviderID: c.ProviderID, UpstreamModel: c.UpstreamModel, Status: resp.StatusCode,
+				Stream: req.Stream, Latency: time.Since(started),
+				Err: fmt.Sprintf("upstream %d: %s", resp.StatusCode, bodyText), ProviderFault: true}, true
+		}
+		resp.Body = io.NopCloser(bytes.NewReader(b))
+	}
+
 	// 非流式且上游返回 2xx/3xx 但 body 带 OpenAI error（部分供应商过载时如此）：
 	// 视为上游故障换下一候选，避免把坏响应当成功透传给客户端。
 	// 注意：只 peek 前 8KB 判断结构，完整 body 仍要透传，不能把响应截断给客户端。
