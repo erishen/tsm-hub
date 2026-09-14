@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"sync"
@@ -618,6 +619,18 @@ func (s *Server) handleProbeModels(w http.ResponseWriter, r *http.Request) {
 // 返回约定：网络/解析错误 → err；上游非 200 → (nil, statusCode, body, nil)；成功 → (out, 0, nil, nil)。
 
 func (s *Server) probeModelsOnce(ctx context.Context, baseURL, key string) ([]map[string]any, int, []byte, error) {
+	// Google Gemini 官方端点：认证用 x-goog-api-key 头（Bearer 会被拒为
+	// "Expected OAuth 2 access token"），模型列表响应也是 {"models":[...]} 而非 {"data":[...]}。
+	gemini := strings.Contains(baseURL, "generativelanguage.googleapis.com")
+	if gemini {
+		// 用户可能误填 /v1beta/interactions 等具体端点；模型列表固定是 /v1beta/models，
+		// 统一归一化到 /v1beta（探测函数会再拼 /models）。
+		if u, err := url.Parse(baseURL); err == nil {
+			u.Path = "/v1beta"
+			u.RawQuery = ""
+			baseURL = strings.TrimRight(u.String(), "/")
+		}
+	}
 	probeOnce := func() (*http.Response, []byte, error) {
 		ctx2, cancel := context.WithTimeout(ctx, 12*time.Second)
 		defer cancel()
@@ -626,7 +639,11 @@ func (s *Server) probeModelsOnce(ctx context.Context, baseURL, key string) ([]ma
 			return nil, nil, err
 		}
 		if key != "" {
-			upReq.Header.Set("Authorization", "Bearer "+key)
+			if gemini {
+				upReq.Header.Set("x-goog-api-key", key)
+			} else {
+				upReq.Header.Set("Authorization", "Bearer "+key)
+			}
 		}
 		resp, err := http.DefaultClient.Do(upReq)
 		if err != nil {
@@ -648,6 +665,28 @@ func (s *Server) probeModelsOnce(ctx context.Context, baseURL, key string) ([]ma
 	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, resp.StatusCode, body, nil
+	}
+	if gemini {
+		// Gemini 模型列表：{"models":[{"name":"models/gemini-3-flash","displayName":...}]}
+		var g struct {
+			Models []struct {
+				Name string `json:"name"`
+			} `json:"models"`
+		}
+		if err := json.Unmarshal(body, &g); err != nil {
+			return nil, 0, nil, fmt.Errorf("invalid_models: %w", err)
+		}
+		seen := map[string]bool{}
+		out := make([]map[string]any, 0, len(g.Models))
+		for _, m := range g.Models {
+			id := strings.TrimPrefix(strings.TrimSpace(m.Name), "models/")
+			if id == "" || seen[id] {
+				continue
+			}
+			seen[id] = true
+			out = append(out, map[string]any{"id": id})
+		}
+		return out, 0, nil, nil
 	}
 	var payload struct {
 		Data []struct {
