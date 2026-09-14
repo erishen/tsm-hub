@@ -618,6 +618,23 @@ func (s *Server) handleProbeModels(w http.ResponseWriter, r *http.Request) {
 // 返回去重排序的模型信息列表（含定价补齐与免费判定）。
 // 返回约定：网络/解析错误 → err；上游非 200 → (nil, statusCode, body, nil)；成功 → (out, 0, nil, nil)。
 
+// geminiFreeModel 判断 Gemini 模型是否在 API 免费层（Free Tier）内可用。
+// 免费层覆盖 Flash / Flash-Lite 系列文本模型（输入输出全免费、限速）；
+// 图像（Nano Banana）、音频（TTS/Live/Transcribe）、视频（Lyria/Veo/Omni）、
+// Pro、Embedding 等不在免费层。来源：ai.google.dev/gemini-api/docs/pricing（2026-09-14）。
+func geminiFreeModel(id string) bool {
+	l := strings.ToLower(id)
+	if !strings.Contains(l, "flash") {
+		return false
+	}
+	for _, excl := range []string{"image", "live", "tts", "transcribe", "lyria", "veo", "omni", "embedding", "pro"} {
+		if strings.Contains(l, excl) {
+			return false
+		}
+	}
+	return true
+}
+
 func (s *Server) probeModelsOnce(ctx context.Context, baseURL, key string) ([]map[string]any, int, []byte, error) {
 	// Google Gemini 官方端点：认证用 x-goog-api-key 头（Bearer 会被拒为
 	// "Expected OAuth 2 access token"），模型列表响应也是 {"models":[...]} 而非 {"data":[...]}。
@@ -684,7 +701,15 @@ func (s *Server) probeModelsOnce(ctx context.Context, baseURL, key string) ([]ma
 				continue
 			}
 			seen[id] = true
-			out = append(out, map[string]any{"id": id})
+			info := map[string]any{"id": id}
+			// Gemini API 免费层（Free Tier）：Flash / Flash-Lite 文本模型输入输出全免费
+			// （限速），官方定价页 https://ai.google.dev/gemini-api/docs/pricing（2026-09-14 抓取）。
+			// 按 id 关键词判定：含 flash 且非 image/音频/视频/embedding 的文本模型视为免费；
+			// Pro / Nano Banana / Lyria / Veo / TTS / Live / Transcribe / Embedding 不在免费层。
+			if geminiFreeModel(id) {
+				info["free"] = true
+			}
+			out = append(out, info)
 		}
 		return out, 0, nil, nil
 	}
