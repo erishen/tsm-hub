@@ -68,6 +68,7 @@
           <button class="icon" (click)="cancel()" aria-label="关闭">×</button>
         </div>
         <div class="modal-body">
+          <div class="banner error" *ngIf="formError()" style="margin-bottom:12px">{{ formError() }}</div>
           <div class="form-section">
             <h3>基础信息</h3>
             <div class="form-row">

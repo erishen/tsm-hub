@@ -21,6 +21,7 @@ export class ProvidersComponent implements OnInit, OnDestroy {
   readonly probing = signal(false);
   readonly probeModels = signal<ProbeModel[]>([]);
   readonly probeError = signal('');
+  readonly formError = signal('');
   readonly balance = signal<Balance | null>(null);
   readonly probeQuery = signal('');
   /** 模型多选列表按 id 过滤（忽略大小写）。 */
@@ -138,6 +139,7 @@ constructor(private api: ApiService) {}
     this.modelSet = new Set();
     this.probeModels.set([]);
     this.probeError.set('');
+    this.formError.set('');
     this.balance.set(null);
     this.editing.set(true);
   }
@@ -148,6 +150,7 @@ constructor(private api: ApiService) {}
     this.modelSet = new Set(p.models || []);
     this.probeModels.set([]);
     this.probeError.set('');
+    this.formError.set('');
     this.balance.set(null);
     this.editing.set(true);
   }
@@ -219,10 +222,12 @@ constructor(private api: ApiService) {}
 
   cancel(): void {
     this.editing.set(false);
+    this.formError.set('');
   }
 
   save(): void {
     this.saving.set(true);
+    this.formError.set('');
     const models = this.modelsText.split(',').map((s) => s.trim()).filter(Boolean);
     const payload = { ...this.form, models };
     // 编辑时若 Key 未改动（脱敏展示），原样提交，由后端识别省略号保留真实值；
@@ -235,7 +240,7 @@ constructor(private api: ApiService) {}
       },
       error: (e: Error) => {
         this.saving.set(false);
-        this.error.set(e.message);
+        this.formError.set(e.message);
       },
     });
   }
