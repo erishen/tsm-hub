@@ -147,6 +147,49 @@ var baiFreeModels = map[string]bool{
 	"hy3": true, "mimo-v2.5": true, "qwen3.8-flash": true,
 }
 
+// glmFreeModels：智谱 bigmodel（open.bigmodel.cn）当前（本账户，2026-09-14 实测）
+// 在 /v1/models 下仅返回 10 个模型且全部为付费款（glm-4.5 ~ glm-5.3-flash），
+// 无任何免费模型；此前网页搜索到的 "glm-4.7-flash 免费" 等说法与该账户不符，
+// 故此处不声明任何免费模型，避免把付费模型误标 FREE。
+// 若未来账户开通免费档，再按实际 /v1/models 返回的 id 补充。
+
+// siliconflowFreeModels 是硅基流动（api.siliconflow.cn）永久免费阵容（输入+输出均 0 元，官方 2026 文档）。
+// 平台策略：9B 及以下模型全部永久免费；Pro/ 前缀为付费加速版。上游 /v1/models 不返回
+// pricing/free 字段，探测无法自动识别；以下为官方「免费模型」清单代表项，以模型广场为准。
+var siliconflowFreeModels = map[string]bool{
+	// 通用 / 推理 LLM（免费）
+	"Qwen/Qwen3-8B":                      true,
+	"Qwen/Qwen2.5-7B-Instruct":           true,
+	"Qwen/Qwen2.5-Coder-7B-Instruct":     true,
+	"THUDM/GLM-4-9B-0414":                true,
+	"THUDM/GLM-Z1-9B-0414":               true,
+	"THUDM/glm-4-9b-chat":                true,
+	"THUDM/GLM-4.1V-9B-Thinking":         true,
+	"deepseek-ai/DeepSeek-R1-Distill-Qwen-7B":   true,
+	"deepseek-ai/DeepSeek-R1-0528-Qwen3-8B":      true,
+	"deepseek-ai/DeepSeek-OCR":           true,
+	"tencent/Hunyuan-MT-7B":              true,
+	"internlm/internlm2_5-7b-chat":       true,
+	"PaddlePaddle/PaddleOCR-VL":          true,
+	"PaddlePaddle/PaddleOCR-VL-1.5":      true,
+	"nex-agi/Nex-N2-Pro":                 true,
+	// 嵌入 / 重排（免费）
+	"BAAI/bge-m3":                    true,
+	"BAAI/bge-reranker-v2-m3":        true,
+	"BAAI/bge-large-en-v1.5":         true,
+	"BAAI/bge-large-zh-v1.5":         true,
+	"Qwen/Qwen3-Embedding-0.6B":      true,
+	"Qwen/Qwen3-Embedding-4B":        true,
+	"Qwen/Qwen3-Embedding-8B":        true,
+	"Qwen/Qwen3-Reranker-0.6B":       true,
+	"Qwen/Qwen3-Reranker-4B":         true,
+	"Qwen/Qwen3-Reranker-8B":         true,
+	// 语音（免费）
+	"FunAudioLLM/CosyVoice2-0.5B": true,
+	"FunAudioLLM/SenseVoiceSmall":  true,
+	"fnlp/MOSS-TTSD-v0.5":          true,
+}
+
 // markFreeByProvider 按 Provider 免费名单修正探测结果：
 //   - bai：官方免费阵容（上游 /v1/models 不带 is_free 字段，探测无法自动识别）；
 //   - alibailian：用户确认当前已配置模型均有免费额度（上游同样不带免费字段），
@@ -167,9 +210,30 @@ func markFreeByProvider(p store.Provider, models []map[string]any) []map[string]
 			m["free"] = true
 		case p.ID == "alibailian" && configured[id]:
 			m["free"] = true
+		case p.ID == "siliconflow" && siliconflowFreeModels[id]:
+			m["free"] = true
 		}
 	}
 	return models
+}
+
+// markFreeByBaseURL 按 Base URL 主机匹配上游免费阵容，给探测到的模型补打 free 标记。
+// 「按 Key 查询」这类探测只有 base_url（无 provider ID），不经过 markFreeByProvider，
+// 而硅基流动等上游 /v1/models 又不返回 is_free/pricing 字段，故按主机名兜底识别。
+// 注：智谱 bigmodel 当前（本账户 2026-09-14 实测）在 /v1/models 下无免费模型，故不在此处理。
+func markFreeByBaseURL(baseURL string, models []map[string]any) {
+	var freeSet map[string]bool
+	switch {
+	case strings.Contains(baseURL, "api.siliconflow.cn"):
+		freeSet = siliconflowFreeModels
+	default:
+		return
+	}
+	for _, m := range models {
+		if id, _ := m["id"].(string); freeSet[id] {
+			m["free"] = true
+		}
+	}
 }
 
 
@@ -500,6 +564,9 @@ func (s *Server) buildCatalog() map[string]any {
 			} else if p.ID == "bai" && baiFreeModels[id] {
 				// B.AI 免费阵容（探测无 is_free 字段时的静态兜底）。
 				it.Free = true
+			} else if p.ID == "siliconflow" && siliconflowFreeModels[id] {
+				// 硅基流动免费阵容（探测无 is_free 字段时的静态兜底）。
+				it.Free = true
 			} else if p.ID == "alibailian" {
 				// 阿里云百炼：上游 /v1/models 不带免费字段，当前已配置模型均确认有免费额度。
 				it.Free = true
@@ -768,6 +835,8 @@ func (s *Server) probeModelsOnce(ctx context.Context, baseURL, key string) ([]ma
 		}
 		out = append(out, info)
 	}
+	// 上游 /v1/models 不返回免费字段时（智谱 / 硅基流动等），按主机名用静态名单兜底标记。
+	markFreeByBaseURL(baseURL, out)
 	// 排序：FREE 模型在前，其余按 id 字典序（免费模型更常用，置顶便于选择）。
 	sort.Slice(out, func(i, j int) bool {
 		fi, _ := out[i]["free"].(bool)
