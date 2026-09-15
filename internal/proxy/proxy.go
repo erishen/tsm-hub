@@ -405,7 +405,10 @@ func (p *Proxy) attempt(w http.ResponseWriter, r *http.Request, c router.Candida
 			throttleSec = 120
 		}
 		if resp.StatusCode == http.StatusTooManyRequests {
-			throttleSec = 15
+			// 429（tpm/rpm 限流）通常秒级恢复，但免费家限流频发（sensenova
+			// TPM/RPM、openrouter/agnes free 限流），15s 冷却会让突发请求
+			// 每 15s 白吃一次 429；提到 60s 显著减少重复白吃。
+			throttleSec = 60
 		}
 		// 「免费额度耗尽 / 日配额用完」（free quota exhausted / free-models-per-day）：
 		// 到下个计费周期才会恢复，短冷却只会让每批请求都先白吃一次 403。
@@ -672,11 +675,29 @@ func rewriteBody(body []byte, upstreamModel string, stream bool) ([]byte, error)
 			m["stream_options"] = json.RawMessage(`{"include_usage":true}`)
 		}
 	}
+	adaptModelParams(m, upstreamModel)
 	out, err := json.Marshal(m)
 	if err != nil {
 		return nil, fmt.Errorf("re-marshal body: %w", err)
 	}
 	return out, nil
+}
+
+// adaptModelParams 按上游模型修正请求参数（各家的 API 约束）。
+//
+// 目前已知约束：
+//   - Kimi K2 系列（kimi-k2.6 等）只接受 temperature=1，传其他值返回
+//     400 "invalid temperature: only 1 is allowed for this model"。
+//     客户端可能传默认 temperature（如 0.7/1.0 之外的值），这里统一钳到 1。
+func adaptModelParams(m map[string]json.RawMessage, upstreamModel string) {
+	if strings.HasPrefix(upstreamModel, "kimi-k2") {
+		if raw, has := m["temperature"]; has {
+			var t float64
+			if err := json.Unmarshal(raw, &t); err == nil && t != 1 {
+				m["temperature"] = json.RawMessage("1")
+			}
+		}
+	}
 }
 
 // upstreamURL 拼接上游地址。

@@ -69,6 +69,44 @@ func TestRewriteBodyRejectsInvalidJSON(t *testing.T) {
 	}
 }
 
+func TestRewriteBodyAdaptsKimiTemperature(t *testing.T) {
+	// kimi-k2.6 只接受 temperature=1，其他值应被钳到 1
+	in := []byte(`{"model":"smart","temperature":0.7}`)
+	out, err := rewriteBody(in, "kimi-k2.6", false)
+	if err != nil {
+		t.Fatalf("rewriteBody: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("invalid json: %v", err)
+	}
+	if got["temperature"] != float64(1) {
+		t.Fatalf("kimi temperature = %v, want 1", got["temperature"])
+	}
+	// 已经是 1 的不动
+	in2 := []byte(`{"model":"smart","temperature":1}`)
+	out2, _ := rewriteBody(in2, "kimi-k2.6", false)
+	_ = json.Unmarshal(out2, &got)
+	if got["temperature"] != float64(1) {
+		t.Fatalf("temperature 1 must be preserved, got %v", got["temperature"])
+	}
+	// 非 kimi 模型不钳制
+	in3 := []byte(`{"model":"smart","temperature":0.7}`)
+	out3, _ := rewriteBody(in3, "gpt-4o", false)
+	_ = json.Unmarshal(out3, &got)
+	if got["temperature"] != 0.7 {
+		t.Fatalf("non-kimi temperature = %v, want 0.7", got["temperature"])
+	}
+	// 未传 temperature 时不需要注入
+	in4 := []byte(`{"model":"smart"}`)
+	out4, _ := rewriteBody(in4, "kimi-k2.6", false)
+	var got4 map[string]any
+	_ = json.Unmarshal(out4, &got4)
+	if _, has := got4["temperature"]; has {
+		t.Fatalf("kimi without temperature must not get one injected")
+	}
+}
+
 func TestParseSSEUsage(t *testing.T) {
 	cases := []struct {
 		line    string
