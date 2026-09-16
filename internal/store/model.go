@@ -252,6 +252,9 @@ type Provider struct {
 	Weight    int               `json:"weight"`
 	Priority  int               `json:"priority"`
 	TimeoutMS int               `json:"timeout_ms"`
+	// DisabledModels 是探测/使用确认不可用的模型（额度耗尽、403/404 等），
+	// 仅作标记供管理台与配置审计，不再被选为路由候选。
+	DisabledModels []string `json:"disabled_models,omitempty"`
 	// Protocol 指定上游 Provider 使用的 API 协议。
 	// 支持："openai"（默认，OpenAI 兼容）、"anthropic"（Anthropic Claude）。
 	// 网关对外只暴露 OpenAI 兼容 API，适配器负责请求/响应格式转换。

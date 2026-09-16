@@ -23,6 +23,7 @@ func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 			"api_key": displaySecret(p.APIKey), "models": p.Models, "headers": p.Headers,
 			"enabled": p.Enabled, "weight": p.Weight, "priority": p.Priority,
 			"timeout_ms": p.TimeoutMS,
+			"disabled_models": p.DisabledModels,
 			"healthy":    h.Healthy,
 			"latency_ms": h.LatencyMS,
 			"health":     h,
