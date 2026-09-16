@@ -5,7 +5,7 @@ services:
     container_name: tsm-hub
     restart: unless-stopped
     ports:
-      - "127.0.0.1:9070:9070"  # 仅本机回环可访问管理台/API，局域网不可达
+      - "127.0.0.1:19070:9070"  # 仅本机回环可访问（外部端口 >10000），容器内仍监听 9070
     volumes:
       - ./data:/data
       # 技能库（gitmodules 子模块）只读挂载进容器，供技能注入/执行使用
