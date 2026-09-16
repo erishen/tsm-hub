@@ -16,9 +16,11 @@ import (
 	"log"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/erishen/tsm-hub/internal/proxy/adapter"
@@ -38,6 +40,10 @@ type Proxy struct {
 	skills *skills.Library
 	mcps   *mcpManager
 	fastMgr fastPathMgr
+	// proxiedClients 缓存按 Provider 的 ProxyURL 构建的独立 http.Client；
+	// 无代理的 provider 统一走 client（直连）。
+	proxiedClients map[string]*http.Client
+	proxiedMu      sync.Mutex
 	// mem 是 remember/recall 的 SQLite 持久化存储；打开失败时为 nil（降级：工具返回错误）。
 	mem *memoryStore
 }
@@ -59,6 +65,7 @@ func New(s *store.Store, rt *router.Router, h *router.Tracker, rec *quota.Record
 				IdleConnTimeout:     90 * time.Second,
 			},
 		},
+		proxiedClients: make(map[string]*http.Client),
 	}
 	if mem, err := openMemory(filepath.Join(s.DataDir(), "memory.db")); err != nil {
 		// 记忆库打不开不拖垮网关：remember/recall 返回错误，其余能力不受影响。
@@ -296,6 +303,37 @@ func isModelNotFound(body string) bool {
 
 // attempt 尝试把请求转发给某个候选。
 // 返回值 retryable=true 表示本次没有向客户端写出任何字节，可以换下一个候选重试。
+// clientFor 返回该 Provider 使用的 http.Client：
+// 配置了 ProxyURL 的走独立带代理 Transport（按 provider 缓存），否则共用直连 client。
+func (p *Proxy) clientFor(pr store.Provider) *http.Client {
+	if pr.ProxyURL == "" {
+		return p.client
+	}
+	p.proxiedMu.Lock()
+	defer p.proxiedMu.Unlock()
+	if cl, ok := p.proxiedClients[pr.ID]; ok {
+		return cl
+	}
+	proxyURL, err := url.Parse(pr.ProxyURL)
+	if err != nil {
+		// 配置了非法代理 URL：降级直连，并记录日志便于排查。
+		log.Printf("[proxy] provider %s invalid proxy_url %q, fallback to direct: %v", pr.ID, pr.ProxyURL, err)
+		return p.client
+	}
+	cl := &http.Client{
+		Transport: &http.Transport{
+			Proxy: http.ProxyURL(proxyURL),
+			// 复刻直连 Transport 的连接池参数。
+			MaxIdleConns:        256,
+			MaxIdleConnsPerHost: 32,
+			IdleConnTimeout:     90 * time.Second,
+		},
+	}
+	p.proxiedClients[pr.ID] = cl
+	log.Printf("[proxy] provider %s using proxy %s", pr.ID, pr.ProxyURL)
+	return cl
+}
+
 func (p *Proxy) attempt(w http.ResponseWriter, r *http.Request, c router.Candidate, path string, body []byte, req chatRequest) (Result, bool) {
 	started := time.Now()
 	ad := adapter.GetAdapter(c.Provider)
@@ -358,7 +396,7 @@ func (p *Proxy) attempt(w http.ResponseWriter, r *http.Request, c router.Candida
 		}
 	}
 
-	resp, err := p.client.Do(upReq)
+	resp, err := p.clientFor(c.Provider).Do(upReq)
 	if err != nil {
 		slog.Warn("upstream request failed", "provider", c.ProviderID, "model", req.Model, "upstream_model", c.UpstreamModel, "err", err.Error())
 		return Result{ProviderID: c.ProviderID, UpstreamModel: c.UpstreamModel, Status: http.StatusBadGateway,

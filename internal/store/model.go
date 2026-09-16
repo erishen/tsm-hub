@@ -255,6 +255,9 @@ type Provider struct {
 	// DisabledModels 是探测/使用确认不可用的模型（额度耗尽、403/404 等），
 	// 仅作标记供管理台与配置审计，不再被选为路由候选。
 	DisabledModels []string `json:"disabled_models,omitempty"`
+	// ProxyURL 指定该 Provider 的 HTTP 代理（如 "http://192.168.3.57:7897"）。
+	// 为空时直连（默认）；非空时该 Provider 的请求经代理发出，用于绕过地域限制。
+	ProxyURL string `json:"proxy_url,omitempty"`
 	// Protocol 指定上游 Provider 使用的 API 协议。
 	// 支持："openai"（默认，OpenAI 兼容）、"anthropic"（Anthropic Claude）。
 	// 网关对外只暴露 OpenAI 兼容 API，适配器负责请求/响应格式转换。
