@@ -29,16 +29,17 @@ services:
   # MCP stdio -> Streamable HTTP 桥接（deploy/mcp-bridge.Dockerfile，supergateway）。
   # tsm-hub 容器无 node/宿主路径，stdio 型 MCP 无法本地 spawn；改为把官方 stdio
   # server 包成 HTTP，tsm-hub config 里用 transport=http + url 远程调用。
-  # fs 服务把项目目录挂到容器内同路径（:ro），保证工具调用的路径参数不变。
+  # fs 服务把宿主工作区挂到容器内同路径（:ro），路径通过 WORKSPACE 环境变量注入
+  #（见 .env.example），避免把绝对路径写死进仓库；host==container 保持一致。
   mcp-fs:
     image: mcp-bridge:latest
     container_name: mcp-fs
     restart: unless-stopped
     volumes:
       - ./mcp/node_modules:/mcp/node_modules:ro
-      - <PROJECT_ROOT>:<PROJECT_ROOT>:ro
+      - ${WORKSPACE}:${WORKSPACE}:ro
     command: >
-      --stdio "node /mcp/node_modules/@modelcontextprotocol/server-filesystem/dist/index.js <PROJECT_ROOT>"
+      --stdio "node /mcp/node_modules/@modelcontextprotocol/server-filesystem/dist/index.js ${WORKSPACE}"
       --stateful --outputTransport streamableHttp --host 0.0.0.0 --port 8000
 
   mcp-memory:
