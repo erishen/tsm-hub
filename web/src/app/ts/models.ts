@@ -37,6 +37,8 @@ export interface Provider {
   timeout_ms: number;
   /** 上游 API 协议：openai（默认）/ anthropic */
   protocol?: string;
+  /** 探测确认不可用的模型（额度耗尽、403/404 等），仅作标记展示 */
+  disabled_models?: string[];
   healthy: boolean;
   latency_ms: number;
   health?: ProviderHealth; // 完整健康状态（failures/last_error/down_until 等）

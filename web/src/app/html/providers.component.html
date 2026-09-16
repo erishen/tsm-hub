@@ -37,6 +37,7 @@
             <td class="mono nowrap" style="max-width:300px" [title]="p.base_url">{{ shortUrl(p.base_url) }}</td>
             <td style="max-width:240px">
               <div class="model-cell" [title]="(p.models || []).join(', ')">{{ modelsPreview(p.models) }}</div>
+              <div *ngIf="p.disabled_models?.length" class="muted model-disabled" [title]="(p.disabled_models || []).join(', ')">不可用: {{ modelsPreview(p.disabled_models) }}</div>
             </td>
             <td class="num">{{ p.weight }}</td>
             <td class="num">{{ p.priority }}</td>

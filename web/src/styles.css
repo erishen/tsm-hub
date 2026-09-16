@@ -421,3 +421,10 @@ button.primary:hover {
 .batch-bar span { font-weight: 500; }
 table tr.selected { background: var(--primary-soft); }
 table input[type="checkbox"] { cursor: pointer; width: 16px; height: 16px; }
+
+/* 不可用模型标记（providers 列表） */
+.model-disabled {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--danger, #d64545);
+}
