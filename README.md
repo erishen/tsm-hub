@@ -4,7 +4,7 @@
 > Expose only your own `sk-tr-…` keys to clients; internally route OpenAI-compatible requests to multiple configured upstream providers,
 > with a built-in capability pool (generic tools + Agent Skills + MCP servers + Docker sandbox + session memory) that every downstream client gets for free.
 
-- **Backend**: Go 1.22, **zero third-party runtime deps** (stdlib + modernc.org/sqlite pure-Go), single binary
+- **Backend**: Go 1.25, single binary, stdlib-first — only two direct dependencies: `modernc.org/sqlite` (pure-Go driver) and `github.com/dop251/goja` (JS runtime for the Fastpath detector sandbox)
 - **Frontend**: Angular 19 (standalone + signals), build output `embed`ded into the Go binary
 - **Storage**: JSON config (atomic writes) + JSONL usage logs + SQLite (memory/audit logs), no external DB required
 - **Protocol**: OpenAI-compatible client API (`/v1/chat/completions`, `/v1/models`, …), with SSE streaming passthrough; **upstream protocol adapter layer** supports 13 protocols (OpenAI/Anthropic/Azure/Gemini/Bedrock/SageMaker/Cohere/Mistral/HuggingFace/Replicate/Together/Fireworks/Groq) + 12 China platforms (all OpenAI-compatible)

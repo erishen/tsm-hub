@@ -3,7 +3,7 @@
 > 自制 Token Key + 智能路由的 LLM 网关：对外只暴露自己签发的 `sk-tr-…` Key，
 > 内部把 OpenAI 兼容请求智能路由到配置好的多家上游模型。
 
-- **后端**：Go 1.22，**零第三方依赖**（只用标准库 + modernc.org/sqlite 纯 Go 实现），单二进制
+- **后端**：Go 1.25，单二进制、标准库优先——直接依赖只有两个：`modernc.org/sqlite`（纯 Go 驱动）与 `github.com/dop251/goja`（Fastpath 检测器的 JS 沙箱）
 - **前端**：Angular 19（standalone + signals），构建产物 `embed` 进 Go 二进制
 - **存储**：JSON 配置文件（原子写）+ JSONL 用量流水 + SQLite（记忆/审计日志），无需外部数据库
 - **协议**：客户端 OpenAI 兼容（`/v1/chat/completions`、`/v1/models`…），含 SSE 流式透传；**上游协议适配层**支持 13 种协议（OpenAI/Anthropic/Azure/Gemini/Bedrock/SageMaker/Cohere/Mistral/HuggingFace/Replicate/Together/Fireworks/Groq）+ 12 个国内平台（均 OpenAI 兼容）
