@@ -569,3 +569,6 @@ make cover   # Coverage
 | [docs/DPA.md](./docs/DPA.md) | Data Processing Agreement template (for B2B deployments) |
 | [docs/PRIVACY_AUDIT.md](./docs/PRIVACY_AUDIT.md) | Privacy compliance audit report with findings and remediation |
 | [docs/TODO.md](./docs/TODO.md) | Roadmap and planned features |
+
+## Related Articles
+- [tsm-hub: Bringing LLMs, Tools, MCPs, and Skills into One Unified Gateway](https://erishen.cn/tsm_hub-en/)

@@ -461,3 +461,6 @@ make cover   # 覆盖率
 - 每个响应都带 `X-Request-ID`，日志同 ID 可关联；panic 会自动兜底回 500 并带上该 ID。
 - 请求体超过 `settings.max_body_bytes` 直接返回 413（不截断后报误导性错误）。
 - `/healthz` 额外带 `degraded` 与 `providers[]` 字段，可区分「网关挂」与「某上游被摘除」。
+
+## 相关文章
+- [tsm-hub：把 LLM、Tools、MCP、Skills 收进一个统一网关](https://erishen.cn/tsm_hub/)
