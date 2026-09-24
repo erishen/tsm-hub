@@ -1604,3 +1604,72 @@ func TestAgentSkillsInjection(t *testing.T) {
 		t.Fatalf("status = %d %s", resp.StatusCode, b)
 	}
 }
+
+// TestClientToolsInvoke 覆盖客户端工具调用入口 POST /v1/tools/invoke：
+// 鉴权、目录列举、内置工具执行与记忆命名空间隔离。
+func TestClientToolsInvoke(t *testing.T) {
+	e := newEnv(t, "ok")
+	defer e.server.Close()
+
+	// 目录可列出内置工具（客户端据此声明本地代理工具）。
+	resp := e.do(t, http.MethodGet, "/v1/tools", "", e.authHeaders())
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("list status = %d", resp.StatusCode)
+	}
+	var cat struct {
+		Tools []struct {
+			Name   string `json:"name"`
+			Source string `json:"source"`
+		} `json:"tools"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&cat); err != nil {
+		t.Fatalf("decode catalog: %v", err)
+	}
+	found := false
+	for _, ti := range cat.Tools {
+		if ti.Name == "calc" && ti.Source == "builtin" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("calc(builtin) not in tool catalog: %+v", cat.Tools)
+	}
+
+	invoke := func(body string, headers map[string]string) (int, string) {
+		r := e.do(t, http.MethodPost, "/v1/tools/invoke", body, headers)
+		defer r.Body.Close()
+		b, _ := io.ReadAll(r.Body)
+		var out struct {
+			Result string `json:"result"`
+			Error  struct {
+				Code string `json:"code"`
+			} `json:"error"`
+		}
+		_ = json.Unmarshal(b, &out)
+		if out.Result != "" {
+			return r.StatusCode, out.Result
+		}
+		return r.StatusCode, out.Error.Code
+	}
+
+	if code, got := invoke(`{"name":"calc","args":{"expression":"1+1"}}`, e.authHeaders()); code != http.StatusOK || got != "2" {
+		t.Fatalf("calc invoke = %d %q, want 200 \"2\"", code, got)
+	}
+	if code, _ := invoke(`{"name":"calc","args":{"expression":"1+1"}}`, map[string]string{"Content-Type": "application/json"}); code != http.StatusUnauthorized {
+		t.Fatalf("unauth invoke code = %d, want 401", code)
+	}
+	if code, _ := invoke(`{"args":{}}`, e.authHeaders()); code != http.StatusBadRequest {
+		t.Fatalf("missing name code = %d, want 400", code)
+	}
+	if _, got := invoke(`{"name":"nope","args":{}}`, e.authHeaders()); !strings.Contains(got, "unknown tool") {
+		t.Fatalf("unknown tool result = %q", got)
+	}
+	// remember/recall 用 key.ID 命名空间：同一 key 内写入后立刻可读回。
+	if _, got := invoke(`{"name":"remember","args":{"key":"k","value":"v1"}}`, e.authHeaders()); got != "remembered" {
+		t.Fatalf("remember = %q", got)
+	}
+	if _, got := invoke(`{"name":"recall","args":{"key":"k"}}`, e.authHeaders()); got != "v1" {
+		t.Fatalf("recall = %q", got)
+	}
+}

@@ -17,8 +17,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erishen/tsm-hub/internal/auth"
 	"github.com/erishen/tsm-hub/internal/audit"
+	"github.com/erishen/tsm-hub/internal/auth"
 	"github.com/erishen/tsm-hub/internal/proxy"
 	"github.com/erishen/tsm-hub/internal/quota"
 	"github.com/erishen/tsm-hub/internal/router"
@@ -72,15 +72,15 @@ func New(o Options) *Server {
 		o.Logger = slog.Default()
 	}
 	s := &Server{
-		store:   o.Store,
-		rec:     o.Rec,
-		limiter: o.Limiter,
-		router:  o.Router,
-		health:  o.Health,
-		proxy:   o.Proxy,
-		sess:    auth.NewSession(12 * time.Hour),
-		logger:  o.Logger,
-		skills:  o.Skills,
+		store:        o.Store,
+		rec:          o.Rec,
+		limiter:      o.Limiter,
+		router:       o.Router,
+		health:       o.Health,
+		proxy:        o.Proxy,
+		sess:         auth.NewSession(12 * time.Hour),
+		logger:       o.Logger,
+		skills:       o.Skills,
 		startAt:      time.Now(),
 		statusCounts: map[string]int64{},
 		denyCounts:   map[string]int64{},
@@ -286,9 +286,9 @@ func (s *Server) handleClientSkills(w http.ResponseWriter, r *http.Request, key 
 	rest = strings.Trim(rest, "/")
 	if rest == "" {
 		writeJSON(w, http.StatusOK, map[string]any{
-			"object":  "list",
-			"dir":     s.skillsDir(),
-			"skills":  s.skillsList(),
+			"object": "list",
+			"dir":    s.skillsDir(),
+			"skills": s.skillsList(),
 		})
 		return
 	}
@@ -315,6 +315,28 @@ func (s *Server) handleClientSkills(w http.ResponseWriter, r *http.Request, key 
 		"raw":         d.Raw,
 		"updated":     d.Updated,
 	})
+}
+
+// handleClientInvokeTool 实现 POST /v1/tools/invoke：执行网关工具池中的一个工具并返回结果文本。
+// 与 /api/admin/tools/invoke 的区别是使用客户端 key 鉴权，且记忆命名空间用 key.ID 而非 admin。
+func (s *Server) handleClientInvokeTool(w http.ResponseWriter, r *http.Request, key store.APIKey) {
+	var req struct {
+		Name string         `json:"name"`
+		Args map[string]any `json:"args"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid json: "+err.Error())
+		return
+	}
+	if req.Name == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", "tool name required")
+		return
+	}
+	if req.Args == nil {
+		req.Args = map[string]any{}
+	}
+	result := s.proxy.InvokeToolFor(key.ID, req.Name, req.Args)
+	writeJSON(w, http.StatusOK, map[string]any{"result": result})
 }
 
 func (s *Server) skillsDir() string {
@@ -382,6 +404,15 @@ func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/v1/tools" && r.Method == http.MethodGet {
 		s.requireKey(w, r, func(w http.ResponseWriter, r *http.Request, key store.APIKey) {
 			writeJSON(w, http.StatusOK, map[string]any{"object": "list", "tools": s.proxy.ToolCatalog()})
+		})
+		return
+	}
+	// 客户端工具调用：任意自制 key 可 POST /v1/tools/invoke 直接执行网关工具池中的工具
+	// （内置 + 条件 + MCP），拿到结果文本。供自带 Agent 循环的客户端（如 agent-httpd）
+	// 把网关能力当作本地工具逐个调用；remember/recall 按 key.ID 隔离命名空间。
+	if r.URL.Path == "/v1/tools/invoke" && r.Method == http.MethodPost {
+		s.requireKey(w, r, func(w http.ResponseWriter, r *http.Request, key store.APIKey) {
+			s.handleClientInvokeTool(w, r, key)
 		})
 		return
 	}

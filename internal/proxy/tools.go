@@ -185,6 +185,12 @@ func (p *Proxy) InvokeTool(name string, args map[string]any) string {
 	return p.execTool("admin", name, toolArgs(args))
 }
 
+// InvokeToolFor 代表某个客户端 key 调用一个工具（client-facing /v1/tools/invoke 用）。
+// keyID 决定 remember/recall 的隔离命名空间，保证不同 key 的记忆互不可见。
+func (p *Proxy) InvokeToolFor(keyID, name string, args map[string]any) string {
+	return p.execTool(keyID, name, toolArgs(args))
+}
+
 // execTool 执行工具（keyID 用于 remember/recall 的隔离命名空间）。
 func (p *Proxy) execTool(keyID, name string, args toolArgs) string {
 	switch name {
