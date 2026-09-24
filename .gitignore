@@ -16,3 +16,6 @@ web/out-tsc/
 internal/web/dist/browser/*
 !internal/web/dist/browser/.gitkeep
 mcp/node_modules/
+
+# npm config (may contain registry auth tokens; keep local only)
+.npmrc
