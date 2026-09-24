@@ -60,9 +60,9 @@ export class McpsComponent implements OnInit, OnDestroy {
   }[] = [
     {
       id: 'fs', command: 'npx',
-      args: ['-y', '@modelcontextprotocol/server-filesystem', '<PROJECT_ROOT>'],
+      args: ['-y', '@modelcontextprotocol/server-filesystem', '.'],
       desc: '文件系统读写：让 agent 读取/写入本地工作区文件',
-      needs: 'allowed directory 默认填了项目根，可改成你想让 agent 访问的目录',
+      needs: 'allowed directory 默认填 "."（进程工作目录），可改成你想让 agent 访问的绝对路径',
     },
     {
       id: 'think', command: 'npx',
