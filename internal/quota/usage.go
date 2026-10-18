@@ -43,7 +43,9 @@ func (a *Agg) add(r store.UsageRecord) {
 	if r.Attempt > 1 {
 		a.Failovers++
 	}
-	if r.Error != "" || r.Status >= 400 {
+	// 499（client closed request，客户端断开/取消）是客户端行为，不是服务端
+	// 错误：不计入错误率，否则概览错误率被客户端超时/取消持续抬高。
+	if r.Status != 499 && (r.Error != "" || r.Status >= 400) {
 		a.Errors++
 	}
 }

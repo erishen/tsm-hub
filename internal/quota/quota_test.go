@@ -82,6 +82,33 @@ func TestRecorderErrorsCounted(t *testing.T) {
 	}
 }
 
+// 499（客户端断开/取消）是客户端行为，不得计入错误率。
+func TestAggClientAbortNotError(t *testing.T) {
+	cases := []struct {
+		name string
+		rec  store.UsageRecord
+		want int
+	}{
+		{"499 aborted", store.UsageRecord{Status: 499, Error: "client aborted: context canceled"}, 0},
+		{"499 no text", store.UsageRecord{Status: 499}, 0},
+		{"502 fault", store.UsageRecord{Status: 502, Error: "upstream request failed"}, 1},
+		{"404 model gone", store.UsageRecord{Status: 404, Error: "upstream 404: NOT_FOUND"}, 1},
+		{"400 bad request", store.UsageRecord{Status: 400, Error: "invalid json body"}, 1},
+		{"200 ok", store.UsageRecord{Status: 200}, 0},
+		{"200 with error text", store.UsageRecord{Status: 200, Error: "mid-stream note"}, 1},
+	}
+	for _, c := range cases {
+		var a Agg
+		a.add(c.rec)
+		if a.Errors != c.want {
+			t.Errorf("%s: errors = %d, want %d", c.name, a.Errors, c.want)
+		}
+		if a.Requests != 1 {
+			t.Errorf("%s: requests = %d, want 1", c.name, a.Requests)
+		}
+	}
+}
+
 func TestLimiterRPM(t *testing.T) {
 	r := rec(t)
 	l := NewLimiter(r)

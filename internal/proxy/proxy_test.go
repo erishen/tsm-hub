@@ -111,6 +111,41 @@ func TestRewriteBodyAdaptsKimiTemperature(t *testing.T) {
 	}
 }
 
+// alibailian 托管的 kimi-k3 完全不接受 temperature 参数（传任何值 400
+// "Parameter 'temperature'=0.7 is not supported for kimi-k3 model"），应整个删掉。
+func TestRewriteBodyStripsKimiK3Temperature(t *testing.T) {
+	in := []byte(`{"model":"smart","temperature":0.7,"max_tokens":100}`)
+	out, err := rewriteBody(in, "kimi-k3", false)
+	if err != nil {
+		t.Fatalf("rewriteBody: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("invalid json: %v", err)
+	}
+	if _, has := got["temperature"]; has {
+		t.Fatalf("kimi-k3 temperature must be stripped, got %v", got["temperature"])
+	}
+	// 其他字段不受影响
+	if got["max_tokens"] != float64(100) {
+		t.Fatalf("max_tokens = %v, want 100", got["max_tokens"])
+	}
+	// 未传时也不注入
+	out2, _ := rewriteBody([]byte(`{"model":"smart"}`), "kimi-k3", false)
+	var got2 map[string]any
+	_ = json.Unmarshal(out2, &got2)
+	if _, has := got2["temperature"]; has {
+		t.Fatalf("kimi-k3 without temperature must not get one injected")
+	}
+	// kimi-k2 老行为不变（钳到 1 而非删除）
+	out3, _ := rewriteBody([]byte(`{"model":"smart","temperature":0.7}`), "kimi-k2.6", false)
+	var got3 map[string]any
+	_ = json.Unmarshal(out3, &got3)
+	if got3["temperature"] != float64(1) {
+		t.Fatalf("kimi-k2.6 temperature = %v, want clamped to 1", got3["temperature"])
+	}
+}
+
 func TestParseSSEUsage(t *testing.T) {
 	cases := []struct {
 		line    string

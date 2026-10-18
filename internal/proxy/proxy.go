@@ -767,6 +767,9 @@ func rewriteBody(body []byte, upstreamModel string, stream bool) ([]byte, error)
 //   - Kimi K2 系列（kimi-k2.6 等）只接受 temperature=1，传其他值返回
 //     400 "invalid temperature: only 1 is allowed for this model"。
 //     客户端可能传默认 temperature（如 0.7/1.0 之外的值），这里统一钳到 1。
+//   - alibailian 托管的 kimi-k3 完全不接受 temperature 参数，传任何值返回
+//     400 "Parameter 'temperature'=0.7 is not supported for kimi-k3 model"，
+//     直接删除该字段，让上游用模型默认值。
 func adaptModelParams(m map[string]json.RawMessage, upstreamModel string) {
 	if strings.HasPrefix(upstreamModel, "kimi-k2") {
 		if raw, has := m["temperature"]; has {
@@ -775,6 +778,9 @@ func adaptModelParams(m map[string]json.RawMessage, upstreamModel string) {
 				m["temperature"] = json.RawMessage("1")
 			}
 		}
+	}
+	if strings.HasPrefix(upstreamModel, "kimi-k3") {
+		delete(m, "temperature")
 	}
 }
 
