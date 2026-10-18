@@ -9,11 +9,28 @@ import (
 	"embed"
 	"io/fs"
 	"net/http"
+	"regexp"
 	"strings"
 )
 
 //go:embed all:dist
 var distFS embed.FS
+
+// hashedAssetRe 匹配带内容哈希的静态资源文件名（Angular 产物形如 main.<hash>.js）。
+var hashedAssetRe = regexp.MustCompile(`\.[0-9a-f]{16,}\.(?:js|css|mjs|woff2?|ttf|eot|png|svg|jpe?g|gif|webp|ico|map)$`)
+
+// setCacheHeaders 按文件类型设置 Cache-Control：
+//   - index.html：no-cache（强制每次重新验证）。否则部署新版本后，浏览器可能命中本地
+//     缓存的旧入口文件，继续引用旧的(带 hash 的)JS/CSS，导致看不到前端更新。
+//   - 带内容哈希的资源：长期强缓存（文件名随内容变化，安全 immutable）。
+func setCacheHeaders(w http.ResponseWriter, name string) {
+	switch {
+	case name == "index.html":
+		w.Header().Set("Cache-Control", "no-cache")
+	case hashedAssetRe.MatchString(name):
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	}
+}
 
 // FS 返回前端文件系统（已定位到 dist/browser）。
 func FS() (fs.FS, error) {
@@ -48,6 +65,10 @@ func Handler() (http.Handler, error) {
 		}), nil
 	}
 	fileServer := http.FileServer(http.FS(root))
+	serveWithCache := func(w http.ResponseWriter, r *http.Request, name string) {
+		setCacheHeaders(w, name)
+		fileServer.ServeHTTP(w, r)
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// 只处理 GET/HEAD，其余交给上层。
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -62,10 +83,10 @@ func Handler() (http.Handler, error) {
 			// SPA 回退
 			r2 := r.Clone(r.Context())
 			r2.URL.Path = "/index.html"
-			fileServer.ServeHTTP(w, r2)
+			serveWithCache(w, r2, "index.html")
 			return
 		}
-		fileServer.ServeHTTP(w, r)
+		serveWithCache(w, r, path)
 	}), nil
 }
 
