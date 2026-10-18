@@ -48,3 +48,62 @@ Dashboard 顶部"错误率 41.7% 131/314" = **今日全局聚合**：
 ## 6. 一处操作失误（需告知）
 
 清理自己的 no-op 备份时误执行 `rm -f data/config.json.bak-*`，**把既有历史备份一并删除了**（2026-09-20、09-21、10-17、10-18 11:04 等 + 系统 15:55 自动备份）。这些文件未跟踪、git 无历史、回收站无，已永久丢失。当前 `config.json` 本身完好且已干净，运行未受影响，仅失去了回滚点。
+
+## 7. 当日追查：客户端能力探测的 405 风暴（18:58 续）
+
+监控容器日志发现 lume-talentlens（key `sk-tr-1880…`）每 ~20s 用 **GET** 探测
+`/v1/chat/completions/tools|mcps|skills` 三个路径：
+
+- GET 无 chat 语义 → 被归一成 chat 请求透传上游 → 首个候选 404/405 →
+  failover 再吃一个 405 → 客户端拿到 405，**能力目录永远拿不到**；
+- 每次探测白烧 2 次上游调用，并往 usage 流水里写 405 记录。
+
+修复（`internal/api/api.go` `handleOpenAI`）：GET 打到
+`/v1/chat/completions/{tools,mcps,skills,models}` 时归一到正式能力端点
+（`/v1/tools` 等），由既有 handler 直接返回目录；非 POST 方法打纯 chat 路径
+本地直接 405（`Allow: POST`），不再透传。回归测试
+`TestGetCapabilitySubpathsRemapped`。
+
+## 8. 当日追查：config 热加载在原子替换后静默失效（18:58 续）
+
+`store.saveLocked` 用「临时文件 + rename」原子落盘，而 `watchConfig`
+（`cmd/server/main.go`）盯的是**文件 inode**。Linux inotify 语义下被替换的
+ watched 文件收到 IN_IGNORED、监听即死——意味着**每次管理台写入后，手改
+config.json 的热加载就静默失效**，直到重启。已在 Linux 容器实证（旧实现
+测试红、新实现绿）。
+
+修复：改为盯所在**目录**、按文件名过滤事件（同时覆盖原地写与原子替换两种
+保存方式，忽略 `.config-*.json` 临时文件与 `unavailable.json` 等派生文件噪声）。
+回归测试 `TestWatchConfigHotReloadsOnAtomicReplace` /
+`TestWatchConfigIgnoresTempFileNoise`（`cmd/server/main_watch_test.go`）。
+
+## 9. 用量记录核查结论（18:58 续）
+
+历史 usage 里 45% 的非流式成功记录 token 记 0，构成：
+- `fastpath`（62 条）：本地生成，无上游 usage，记 0 属预期；
+- `agnes/agnes-2.5-flash`（323 条，截至今日 15:53）：该 provider 不上游
+  usage，且**当前已不在任何路由里**（9 月曾在默认路由，后被移除），属历史；
+- `openrouter :free`（45 条）：免费档不上游 usage，也已不在路由里。
+
+**当前路由内的 provider（kimi/deepseek/nvidia/tokenrouter/siliconflow/bai/
+sensenova）实测全部正常返回 usage**，故 TODO 里「流式 token 估算兜底」
+暂不实施，保持记录。
+
+## 10. 当日追查：「2xx 皮 + 模型不存在心」不标记不可用（19:40 续）
+
+实测发现默认路由 p=20 首选 `tokenrouter/z-ai/glm-5.3-free` 已死：聚合端
+返回 **HTTP 200** 但 body 是 `{"error":{"code":"model_not_found",
+"message":"No available channel for model …"}}`。原代码的「2xx 带错误体」
+分支只把它当普通上游故障 failover，**不标记模型不可用**——该模型留在路由
+里，每个请求都先白吃一次错误再降级（且每次记一笔 provider 失败）。
+
+修复（`internal/proxy/proxy.go` attempt 的 2xx-错误体分支）：判定用**原始
+body**（`decodeUpstreamBody` 只提取 message 文本，会丢掉 `error.code` 里的
+`model_not_found` 字样，与 404 路径用原始 `b` 判定保持一致），命中即
+`MarkModelUnavailable` + ModelFault（不计 provider 健康）。回归测试
+`TestError200ModelNotFoundMarksUnavailable`（新增 mock 模式 `error200_model`，
+复刻 tokenrouter 真实响应形态）。
+
+附带发现（未改，仅记录）：agnes provider 当前不在任何路由里（9 月曾在默认
+路由），用户默认模型 agnes-2.0-flash/agnes-2.5-flash 的请求实际由 wildcard
+池（kimi 等）代打；如需要恢复 agnes 优先，请在管理台路由把它加回去。

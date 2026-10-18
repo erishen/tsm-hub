@@ -109,11 +109,11 @@ func TestMCPToolNames(t *testing.T) {
 
 func TestCleanSchema(t *testing.T) {
 	in := map[string]any{
-		"$schema":            "http://json-schema.org/draft-07/schema#",
-		"type":               "object",
-		"title":              "Add",
-		"properties":         map[string]any{"a": map[string]any{"type": "number"}},
-		"required":           []string{"a"},
+		"$schema":              "http://json-schema.org/draft-07/schema#",
+		"type":                 "object",
+		"title":                "Add",
+		"properties":           map[string]any{"a": map[string]any{"type": "number"}},
+		"required":             []string{"a"},
 		"additionalProperties": false,
 	}
 	out := cleanSchema(in)

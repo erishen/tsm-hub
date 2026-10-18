@@ -11,12 +11,12 @@ import (
 // GeminiAdapter 是 Google Gemini API 协议的适配器。
 //
 // Gemini 与 OpenAI 的主要差异：
-// - URL：https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent
-// - 认证：优先使用 x-goog-api-key 请求头（避免密钥出现在 URL/日志中），
-//   兼容 URL 参数 ?key={api_key}（当 base_url 已包含 key 参数时保留）
-// - 请求体：contents/parts 格式（而非 messages）
-// - 响应体：candidates[].content.parts[].text（而非 choices[].message.content）
-// - 流式：:streamGenerateContent，SSE 事件格式不同
+//   - URL：https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent
+//   - 认证：优先使用 x-goog-api-key 请求头（避免密钥出现在 URL/日志中），
+//     兼容 URL 参数 ?key={api_key}（当 base_url 已包含 key 参数时保留）
+//   - 请求体：contents/parts 格式（而非 messages）
+//   - 响应体：candidates[].content.parts[].text（而非 choices[].message.content）
+//   - 流式：:streamGenerateContent，SSE 事件格式不同
 type GeminiAdapter struct{}
 
 func (a *GeminiAdapter) Name() string { return "gemini" }
@@ -38,10 +38,10 @@ func (a *GeminiAdapter) AuthHeader(provider store.Provider) (key, value string) 
 
 // geminiRequest 是 Gemini API 的请求体格式。
 type geminiRequest struct {
-	Contents          []geminiContent    `json:"contents"`
-	SystemInstruction *geminiContent     `json:"systemInstruction,omitempty"`
-	GenerationConfig  *geminiGenConfig   `json:"generationConfig,omitempty"`
-	Tools             []geminiTool        `json:"tools,omitempty"`
+	Contents          []geminiContent  `json:"contents"`
+	SystemInstruction *geminiContent   `json:"systemInstruction,omitempty"`
+	GenerationConfig  *geminiGenConfig `json:"generationConfig,omitempty"`
+	Tools             []geminiTool     `json:"tools,omitempty"`
 }
 
 type geminiContent struct {
@@ -145,9 +145,9 @@ type geminiResponse struct {
 }
 
 type geminiCandidate struct {
-	Content       geminiContent `json:"content"`
-	FinishReason  string        `json:"finishReason"`
-	Index         int           `json:"index"`
+	Content      geminiContent `json:"content"`
+	FinishReason string        `json:"finishReason"`
+	Index        int           `json:"index"`
 }
 
 type geminiUsage struct {

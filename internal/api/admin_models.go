@@ -16,7 +16,6 @@ import (
 	"time"
 )
 
-
 func isProbeRetryable(err error) bool {
 	if err == nil {
 		return false
@@ -62,46 +61,46 @@ type modelMeta struct {
 // 来源：各平台官方文档 + OpenRouter 模型目录（2026-09-09 核验）。
 var modelCatalog = map[string]modelMeta{
 	// agnes（官方定价页 + FAQ）
-	"agnes-2.0-flash":     {"text", "通用问答/客服/知识库/轻量编码，官方无限期免费", "256K"},
-	"agnes-2.5-flash":     {"text", "免费通用增强版，编码/Agent 能力强（SWE 出色）", "512K"},
-	"agnes-2.5-pro":       {"text", "复杂推理/深度编码/长任务，付费旗舰（$0.45/$0.90）", ""},
-	"agnes-2.5-pro-alpha": {"text", "复杂推理（预览线，同 pro 定价）", ""},
-	"agnes-2.5-pro-beta":  {"text", "复杂推理（beta 低价线 $0.10/$0.30）", ""},
-	"agnes-3.0-flash":     {"text", "新一代 flash 模型（官方定价页暂未收录，用途待确认）", ""},
-	"agnes-image-2.0-flash":  {"image", "图像生成（官方免费）", ""},
-	"agnes-image-2.1-flash":  {"image", "图像生成增强版（官方免费）", ""},
-	"agnes-image-2.5-flash":  {"image", "图像生成（新版本）", ""},
-	"agnes-video-v2.0":       {"video", "视频生成（官方免费）", ""},
-	"agnes-video-2.5":        {"video", "高清视频生成（按秒计费 $0.025/s 起）", ""},
-	"agnes-video-2.5-flash":  {"video", "视频生成（同 2.5 公式，限时免费）", ""},
+	"agnes-2.0-flash":       {"text", "通用问答/客服/知识库/轻量编码，官方无限期免费", "256K"},
+	"agnes-2.5-flash":       {"text", "免费通用增强版，编码/Agent 能力强（SWE 出色）", "512K"},
+	"agnes-2.5-pro":         {"text", "复杂推理/深度编码/长任务，付费旗舰（$0.45/$0.90）", ""},
+	"agnes-2.5-pro-alpha":   {"text", "复杂推理（预览线，同 pro 定价）", ""},
+	"agnes-2.5-pro-beta":    {"text", "复杂推理（beta 低价线 $0.10/$0.30）", ""},
+	"agnes-3.0-flash":       {"text", "新一代 flash 模型（官方定价页暂未收录，用途待确认）", ""},
+	"agnes-image-2.0-flash": {"image", "图像生成（官方免费）", ""},
+	"agnes-image-2.1-flash": {"image", "图像生成增强版（官方免费）", ""},
+	"agnes-image-2.5-flash": {"image", "图像生成（新版本）", ""},
+	"agnes-video-v2.0":      {"video", "视频生成（官方免费）", ""},
+	"agnes-video-2.5":       {"video", "高清视频生成（按秒计费 $0.025/s 起）", ""},
+	"agnes-video-2.5-flash": {"video", "视频生成（同 2.5 公式，限时免费）", ""},
 	// kimi / Moonshot
-	"kimi-k2.7-code":  {"text", "编程/代码库理解/Agent 编程，支持图文视频输入（官方主打 Coding）", "256K"},
-	"kimi-k2.6":       {"text", "通用对话/编码/推理（K2 系列）", "256K"},
+	"kimi-k2.7-code": {"text", "编程/代码库理解/Agent 编程，支持图文视频输入（官方主打 Coding）", "256K"},
+	"kimi-k2.6":      {"text", "通用对话/编码/推理（K2 系列）", "256K"},
 	// DeepSeek
 	"deepseek-v4-flash":            {"text", "通用文本/编码（V4 快速高性价比线）", "1M"},
 	"deepseek-v4-flash-vision-exp": {"vision", "图像理解/OCR/图表分析，多模态 Agent（实验版，按文本价计费）", "1M"},
 	// OpenRouter 免费层（用户配置）
-	"inclusionai/ling-3.0-flash-fin:free":    {"text", "日常对话/起草（Ling 3.0 flash 免费线）", ""},
-	"inclusionai/ling-3.0-flash-sante:free":  {"text", "日常对话/起草（Ling 3.0 flash 免费线）", ""},
-	"liquid/lfm-2.5-2.6b:free":               {"text", "小型推理：Agent 工作流/数据抽取/RAG/长文本（官方不建议用于编码）", ""},
-	"nex-agi/nex-n2.5-mini:free":             {"text", "通用对话/推理（免费 mini 线）", ""},
-	"nex-agi/nex-n2.5-pro:free":              {"text", "通用对话/推理（免费 pro 线）", ""},
+	"inclusionai/ling-3.0-flash-fin:free":                {"text", "日常对话/起草（Ling 3.0 flash 免费线）", ""},
+	"inclusionai/ling-3.0-flash-sante:free":              {"text", "日常对话/起草（Ling 3.0 flash 免费线）", ""},
+	"liquid/lfm-2.5-2.6b:free":                           {"text", "小型推理：Agent 工作流/数据抽取/RAG/长文本（官方不建议用于编码）", ""},
+	"nex-agi/nex-n2.5-mini:free":                         {"text", "通用对话/推理（免费 mini 线）", ""},
+	"nex-agi/nex-n2.5-pro:free":                          {"text", "通用对话/推理（免费 pro 线）", ""},
 	"nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free": {"text", "轻量多模态推理（omni 系列 nano）", ""},
-	"nvidia/nemotron-3-super-120b-a12b:free": {"text", "综合最强的免费模型之一：数学/推理强、速度快、长上下文", "1M"},
-	"nvidia/nemotron-3-ultra-550b-a55b:free": {"text", "编码 Agent/深度研究/复杂推理/规划（免费旗舰）", "1M"},
-	"nvidia/nemotron-3.5-content-safety:free": {"other", "内容安全分类/审核专用", ""},
-	"nvidia/nemotron-3.5-lightning:free":      {"text", "快速响应/轻量任务（3.5 lightning）", ""},
-	"openrouter/free":                         {"text", "OpenRouter 自动路由：把请求分发到可用免费模型", ""},
-	"poolside/laguna-xs-2.1:free":             {"text", "软件工程 Agent 编码（小号）", ""},
-	"poolside/laguna-s-2.1:free":              {"text", "软件工程 Agent 编码（标准）", ""},
-	"cohere/north-mini-code:free":             {"text", "轻量编码/代码补全（North Mini Code）", ""},
-	"dots-studio/dots-3-note-preview:free":    {"specialized", "笔记/长文档整理（Dots 3）", ""},
-	"google/gemma-4-26b-a4b-it:free":          {"text", "通用对话/指令（Google Gemma 4）", ""},
-	"google/gemma-4-31b-it:free":              {"text", "通用对话/指令（Google Gemma 4）", ""},
-	"google/lyria-3-clip-preview":             {"audio", "音频/音乐生成（Lyria 3）", ""},
-	"google/lyria-3-pro-preview":              {"audio", "音频/音乐生成高级版（Lyria 3）", ""},
-	"thinkingmachines/inkling-small:free":     {"text", "通用推理/编码/Agent（975B MoE 小号）", "1M"},
-	"thinkingmachines/inkling:free":           {"text", "通用推理/编码/Agent/多模态（975B MoE，41B 激活）", "1M"},
+	"nvidia/nemotron-3-super-120b-a12b:free":             {"text", "综合最强的免费模型之一：数学/推理强、速度快、长上下文", "1M"},
+	"nvidia/nemotron-3-ultra-550b-a55b:free":             {"text", "编码 Agent/深度研究/复杂推理/规划（免费旗舰）", "1M"},
+	"nvidia/nemotron-3.5-content-safety:free":            {"other", "内容安全分类/审核专用", ""},
+	"nvidia/nemotron-3.5-lightning:free":                 {"text", "快速响应/轻量任务（3.5 lightning）", ""},
+	"openrouter/free":                                    {"text", "OpenRouter 自动路由：把请求分发到可用免费模型", ""},
+	"poolside/laguna-xs-2.1:free":                        {"text", "软件工程 Agent 编码（小号）", ""},
+	"poolside/laguna-s-2.1:free":                         {"text", "软件工程 Agent 编码（标准）", ""},
+	"cohere/north-mini-code:free":                        {"text", "轻量编码/代码补全（North Mini Code）", ""},
+	"dots-studio/dots-3-note-preview:free":               {"specialized", "笔记/长文档整理（Dots 3）", ""},
+	"google/gemma-4-26b-a4b-it:free":                     {"text", "通用对话/指令（Google Gemma 4）", ""},
+	"google/gemma-4-31b-it:free":                         {"text", "通用对话/指令（Google Gemma 4）", ""},
+	"google/lyria-3-clip-preview":                        {"audio", "音频/音乐生成（Lyria 3）", ""},
+	"google/lyria-3-pro-preview":                         {"audio", "音频/音乐生成高级版（Lyria 3）", ""},
+	"thinkingmachines/inkling-small:free":                {"text", "通用推理/编码/Agent（975B MoE 小号）", "1M"},
+	"thinkingmachines/inkling:free":                      {"text", "通用推理/编码/Agent/多模态（975B MoE，41B 激活）", "1M"},
 }
 
 // inferModelMeta 对知识表未收录的模型按 id 关键词推断类别与用途。
@@ -158,36 +157,36 @@ var baiFreeModels = map[string]bool{
 // pricing/free 字段，探测无法自动识别；以下为官方「免费模型」清单代表项，以模型广场为准。
 var siliconflowFreeModels = map[string]bool{
 	// 通用 / 推理 LLM（免费）
-	"Qwen/Qwen3-8B":                      true,
-	"Qwen/Qwen2.5-7B-Instruct":           true,
-	"Qwen/Qwen2.5-Coder-7B-Instruct":     true,
-	"THUDM/GLM-4-9B-0414":                true,
-	"THUDM/GLM-Z1-9B-0414":               true,
-	"THUDM/glm-4-9b-chat":                true,
-	"THUDM/GLM-4.1V-9B-Thinking":         true,
-	"deepseek-ai/DeepSeek-R1-Distill-Qwen-7B":   true,
-	"deepseek-ai/DeepSeek-R1-0528-Qwen3-8B":      true,
-	"deepseek-ai/DeepSeek-OCR":           true,
-	"tencent/Hunyuan-MT-7B":              true,
-	"internlm/internlm2_5-7b-chat":       true,
-	"PaddlePaddle/PaddleOCR-VL":          true,
-	"PaddlePaddle/PaddleOCR-VL-1.5":      true,
-	"nex-agi/Nex-N2-Pro":                 true,
+	"Qwen/Qwen3-8B":                           true,
+	"Qwen/Qwen2.5-7B-Instruct":                true,
+	"Qwen/Qwen2.5-Coder-7B-Instruct":          true,
+	"THUDM/GLM-4-9B-0414":                     true,
+	"THUDM/GLM-Z1-9B-0414":                    true,
+	"THUDM/glm-4-9b-chat":                     true,
+	"THUDM/GLM-4.1V-9B-Thinking":              true,
+	"deepseek-ai/DeepSeek-R1-Distill-Qwen-7B": true,
+	"deepseek-ai/DeepSeek-R1-0528-Qwen3-8B":   true,
+	"deepseek-ai/DeepSeek-OCR":                true,
+	"tencent/Hunyuan-MT-7B":                   true,
+	"internlm/internlm2_5-7b-chat":            true,
+	"PaddlePaddle/PaddleOCR-VL":               true,
+	"PaddlePaddle/PaddleOCR-VL-1.5":           true,
+	"nex-agi/Nex-N2-Pro":                      true,
 	// 嵌入 / 重排（免费）
-	"BAAI/bge-m3":                    true,
-	"BAAI/bge-reranker-v2-m3":        true,
-	"BAAI/bge-large-en-v1.5":         true,
-	"BAAI/bge-large-zh-v1.5":         true,
-	"Qwen/Qwen3-Embedding-0.6B":      true,
-	"Qwen/Qwen3-Embedding-4B":        true,
-	"Qwen/Qwen3-Embedding-8B":        true,
-	"Qwen/Qwen3-Reranker-0.6B":       true,
-	"Qwen/Qwen3-Reranker-4B":         true,
-	"Qwen/Qwen3-Reranker-8B":         true,
+	"BAAI/bge-m3":               true,
+	"BAAI/bge-reranker-v2-m3":   true,
+	"BAAI/bge-large-en-v1.5":    true,
+	"BAAI/bge-large-zh-v1.5":    true,
+	"Qwen/Qwen3-Embedding-0.6B": true,
+	"Qwen/Qwen3-Embedding-4B":   true,
+	"Qwen/Qwen3-Embedding-8B":   true,
+	"Qwen/Qwen3-Reranker-0.6B":  true,
+	"Qwen/Qwen3-Reranker-4B":    true,
+	"Qwen/Qwen3-Reranker-8B":    true,
 	// 语音（免费）
 	"FunAudioLLM/CosyVoice2-0.5B": true,
-	"FunAudioLLM/SenseVoiceSmall":  true,
-	"fnlp/MOSS-TTSD-v0.5":          true,
+	"FunAudioLLM/SenseVoiceSmall": true,
+	"fnlp/MOSS-TTSD-v0.5":         true,
 }
 
 // markFreeByProvider 按 Provider 免费名单修正探测结果：
@@ -236,7 +235,6 @@ func markFreeByBaseURL(baseURL string, models []map[string]any) {
 	}
 }
 
-
 // appScenario 是一个应用开发场景，根据当前模型池能力动态匹配推荐模型。
 type appScenario struct {
 	ID          string   `json:"id"`
@@ -256,73 +254,73 @@ var appScenarios = []appScenario{
 		ID: "chatbot", Name: "智能客服 / 问答机器人", Icon: "💬",
 		Description: "7×24 小时自动客服、FAQ 问答、知识库对话，免费模型即可支撑高并发。",
 		Categories:  []string{"text"}, Keywords: []string{"flash", "lite", "mini"},
-		Example: "你是电商客服助手。用户问：「我的订单什么时候发货？」 请根据订单号查询并礼貌回复。",
+		Example:  "你是电商客服助手。用户问：「我的订单什么时候发货？」 请根据订单号查询并礼貌回复。",
 		Features: []string{"免费可用", "高并发", "多语言"},
 	},
 	{
 		ID: "coding", Name: "代码助手 / 代码审查", Icon: "⌨️",
 		Description: "代码补全、Bug 修复、Code Review、技术方案生成，主打编码能力强的模型。",
 		Categories:  []string{"text"}, Keywords: []string{"code", "coder", "agent", "deepseek"},
-		Example: "审查以下 Python 函数的性能问题并给出优化方案：\n```python\ndef process(items):\n    result = []\n    for i in items:\n        result.append(i * 2)\n    return result\n```",
+		Example:  "审查以下 Python 函数的性能问题并给出优化方案：\n```python\ndef process(items):\n    result = []\n    for i in items:\n        result.append(i * 2)\n    return result\n```",
 		Features: []string{"编码专用", "免费模型", "多语言"},
 	},
 	{
 		ID: "agent", Name: "Agent / 工具调用", Icon: "🤖",
 		Description: "Function Calling、多步推理、工具编排，适合构建自主 Agent 工作流。",
 		Categories:  []string{"text"}, Keywords: []string{"agent", "flash", "ultra", "kimi"},
-		MinContext:  100000,
-		Example: "你是研究 Agent。可用工具：search(query)、fetch(url)、summarize(text)。任务：调研「2026 年大模型推理优化」并输出 500 字摘要。",
-		Features: []string{"Function Calling", "大上下文", "多步推理"},
+		MinContext: 100000,
+		Example:    "你是研究 Agent。可用工具：search(query)、fetch(url)、summarize(text)。任务：调研「2026 年大模型推理优化」并输出 500 字摘要。",
+		Features:   []string{"Function Calling", "大上下文", "多步推理"},
 	},
 	{
 		ID: "rag", Name: "长文档分析 / RAG", Icon: "📚",
 		Description: "1M 上下文直接喂文档，或配合向量嵌入+重排序构建 RAG 系统，支持百万字分析。",
 		Categories:  []string{"text", "embedding", "specialized"}, Keywords: []string{"flash", "deepseek", "glm", "kimi"},
-		MinContext:  100000,
-		Example: "请阅读以下合同文本，提取关键条款：甲方、乙方、合同金额、付款方式、违约责任、终止条件。[文档内容]",
-		Features: []string{"1M 上下文", "向量嵌入", "重排序", "免费"},
+		MinContext: 100000,
+		Example:    "请阅读以下合同文本，提取关键条款：甲方、乙方、合同金额、付款方式、违约责任、终止条件。[文档内容]",
+		Features:   []string{"1M 上下文", "向量嵌入", "重排序", "免费"},
 	},
 	{
 		ID: "multimodal", Name: "多模态理解 / OCR", Icon: "🖼️",
 		Description: "图像理解、图表分析、OCR 文字识别、文档结构化，支持图片+文本混合输入。",
 		Categories:  []string{"vision", "specialized"}, Keywords: []string{"vision", "ocr", "vl"},
-		Example: "请识别这张发票图片中的：开票日期、金额、税额、销售方名称、购买方名称，并输出 JSON。",
+		Example:  "请识别这张发票图片中的：开票日期、金额、税额、销售方名称、购买方名称，并输出 JSON。",
 		Features: []string{"图像理解", "OCR", "图表分析"},
 	},
 	{
 		ID: "notes", Name: "笔记 / 长文档整理", Icon: "📝",
 		Description: "会议纪要整理、长文摘要、知识卡片生成，专用笔记模型 500K 上下文。",
 		Categories:  []string{"specialized"}, Keywords: []string{"note", "dots"},
-		Example: "请将以下 2 小时会议录音转写文本整理为：会议主题、关键决议、行动项（含负责人和截止日期）、待讨论问题。",
+		Example:  "请将以下 2 小时会议录音转写文本整理为：会议主题、关键决议、行动项（含负责人和截止日期）、待讨论问题。",
 		Features: []string{"500K 上下文", "专用模型", "免费"},
 	},
 	{
 		ID: "music", Name: "音乐 / 音频生成", Icon: "🎵",
 		Description: "文本生成音乐、音效、BGM，支持风格描述和时长控制，1M 上下文。",
 		Categories:  []string{"audio"}, Keywords: []string{"lyria", "music"},
-		Example: "生成一段 30 秒的轻快电子音乐，适合产品介绍视频背景，节奏 120 BPM，无歌词。",
+		Example:  "生成一段 30 秒的轻快电子音乐，适合产品介绍视频背景，节奏 120 BPM，无歌词。",
 		Features: []string{"文本生音乐", "1M 上下文", "免费"},
 	},
 	{
 		ID: "safety", Name: "内容安全 / 审核", Icon: "🛡️",
 		Description: "文本/图片内容审核、违规检测、分类标签，可集成到 UGC 平台做前置过滤。",
 		Categories:  []string{"other"}, Keywords: []string{"safety", "moderation", "guard"},
-		Example: "请审核以下用户评论是否违规，输出分类：正常/广告/辱骂/色情/政治敏感/其他，并给出置信度。",
+		Example:  "请审核以下用户评论是否违规，输出分类：正常/广告/辱骂/色情/政治敏感/其他，并给出置信度。",
 		Features: []string{"内容审核", "分类标签", "免费"},
 	},
 	{
 		ID: "research", Name: "深度研究 / 推理", Icon: "🔬",
 		Description: "复杂问题拆解、多步推理、深度研究报告，主打推理能力强的大参数模型。",
 		Categories:  []string{"text"}, Keywords: []string{"reason", "think", "ultra", "pro", "nemotron"},
-		MinContext:  100000,
-		Example: "请分析「AI 编程助手对软件工程师生产力的影响」，从正面、负面、长期趋势三个维度展开，引用数据支撑。",
-		Features: []string{"深度推理", "大上下文", "免费旗舰"},
+		MinContext: 100000,
+		Example:    "请分析「AI 编程助手对软件工程师生产力的影响」，从正面、负面、长期趋势三个维度展开，引用数据支撑。",
+		Features:   []string{"深度推理", "大上下文", "免费旗舰"},
 	},
 	{
 		ID: "edge", Name: "轻量 / 高并发场景", Icon: "⚡",
 		Description: "低延迟、高吞吐、低成本场景，轻量模型适合边缘部署和大规模并发。",
 		Categories:  []string{"text"}, Keywords: []string{"lite", "flash", "mini", "small", "xs"},
-		Example: "你是快速分类助手。用户输入：「今天天气真好」 请在 100ms 内输出情感分类：正面/负面/中性。",
+		Example:  "你是快速分类助手。用户输入：「今天天气真好」 请在 100ms 内输出情感分类：正面/负面/中性。",
 		Features: []string{"低延迟", "高并发", "免费", "轻量"},
 	},
 }
@@ -436,7 +434,6 @@ func getBool(m map[string]any, k string) bool {
 	return false
 }
 
-
 // handleRefreshModels 并行探测所有已配置 Key 的 Provider（非 mock-local），刷新模型快照后返回目录。
 // 单个 Provider 失败不阻塞；providers 字段返回每个 Provider 的探测结果（ok / 错误摘要）。
 
@@ -483,13 +480,13 @@ func (s *Server) handleRefreshModels(w http.ResponseWriter, r *http.Request) {
 func (s *Server) buildCatalog() map[string]any {
 	providers := s.store.ListProviders()
 	type item struct {
-		ID            string   `json:"id"`
-		Provider      string   `json:"provider"`
-		Category      string   `json:"category"`
-		Purpose       string   `json:"purpose"`
-		Ctx           string   `json:"context,omitempty"`
-		ContextLength int      `json:"context_length,omitempty"`
-		Free          bool     `json:"free"`
+		ID            string `json:"id"`
+		Provider      string `json:"provider"`
+		Category      string `json:"category"`
+		Purpose       string `json:"purpose"`
+		Ctx           string `json:"context,omitempty"`
+		ContextLength int    `json:"context_length,omitempty"`
+		Free          bool   `json:"free"`
 		Pricing       *struct {
 			Prompt     string `json:"prompt"`
 			Completion string `json:"completion"`

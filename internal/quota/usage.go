@@ -111,15 +111,15 @@ func NewRecorder(dir string) (*Recorder, error) {
 		return nil, fmt.Errorf("create usage dir: %w", err)
 	}
 	r := &Recorder{
-		dir:        dir,
-		totals:     map[string]*Agg{},
-		daily:      map[string]map[string]*Agg{},
-		models:     map[string]*Agg{},
-		providers:  map[string]*Agg{},
-		scenes:     map[string]*Agg{},
-		failoverBy: map[string]int{},
-		toolCalls:      map[string]int{},
-		keyTools:       map[string]map[string]int{},
+		dir:             dir,
+		totals:          map[string]*Agg{},
+		daily:           map[string]map[string]*Agg{},
+		models:          map[string]*Agg{},
+		providers:       map[string]*Agg{},
+		scenes:          map[string]*Agg{},
+		failoverBy:      map[string]int{},
+		toolCalls:       map[string]int{},
+		keyTools:        map[string]map[string]int{},
 		clientToolCalls: map[string]int{},
 		keyClientTools:  map[string]map[string]int{},
 	}

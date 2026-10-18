@@ -33,13 +33,13 @@ import (
 
 // Proxy 持有转发所需的全部依赖。
 type Proxy struct {
-	store  *store.Store
-	router *router.Router
-	health *router.Tracker
-	rec    *quota.Recorder
-	client *http.Client
-	skills *skills.Library
-	mcps   *mcpManager
+	store   *store.Store
+	router  *router.Router
+	health  *router.Tracker
+	rec     *quota.Recorder
+	client  *http.Client
+	skills  *skills.Library
+	mcps    *mcpManager
 	fastMgr fastPathMgr
 	// proxiedClients 缓存按 Provider 的 ProxyURL 构建的独立 http.Client；
 	// 无代理的 provider 统一走 client（直连）。
@@ -527,9 +527,30 @@ func (p *Proxy) attempt(w http.ResponseWriter, r *http.Request, c router.Candida
 			Error map[string]any `json:"error"`
 		}
 		if json.Unmarshal(peek, &eb) == nil && eb.Error != nil {
+			bodyText := decodeUpstreamBody(resp, peek)
+			// 2xx 皮 + 模型不存在心（如 tokenrouter 聚合端返回 HTTP 200 +
+			// {"error":{"code":"model_not_found","message":"No available channel…"}}）：
+			// 与 404 路径同等标记模型不可用，否则该模型会留在路由里，每个请求
+			// 都先白吃一次错误再 failover（实测 z-ai/glm-5.3-free 即此形态）。
+			// 判定用原始 body：decodeUpstreamBody 只提取 message 文本，会丢掉
+			// error.code 里的 model_not_found 字样（404 路径同样用原始 b 判定）。
+			if isModelNotFound(string(peek)) {
+				unavailSec := p.store.Settings().Smart.UnavailableSec
+				if unavailSec <= 0 {
+					unavailSec = 1800
+				}
+				p.store.MarkModelUnavailable(c.ProviderID, c.UpstreamModel, bodyText, time.Duration(unavailSec)*time.Second)
+				slog.Warn("upstream 2xx with model_not_found body, failover",
+					"provider", c.ProviderID, "model", req.Model, "upstream_model", c.UpstreamModel,
+					"body", bodyText)
+				return Result{ProviderID: c.ProviderID, UpstreamModel: c.UpstreamModel, Status: http.StatusBadGateway,
+					Stream: req.Stream, Latency: time.Since(started),
+					Err:           fmt.Sprintf("upstream error (model unavailable): %s", bodyText),
+					ProviderFault: true, ModelFault: true}, true
+			}
 			return Result{ProviderID: c.ProviderID, UpstreamModel: c.UpstreamModel, Status: http.StatusBadGateway,
 				Stream: req.Stream, Latency: time.Since(started),
-				Err: fmt.Sprintf("upstream error: %s", decodeUpstreamBody(resp, peek)), ProviderFault: true}, true
+				Err: fmt.Sprintf("upstream error: %s", bodyText), ProviderFault: true}, true
 		}
 		rest, _ := io.ReadAll(resp.Body)
 		resp.Body = io.NopCloser(bytes.NewReader(append(peek, rest...)))
@@ -553,7 +574,7 @@ func (p *Proxy) attempt(w http.ResponseWriter, r *http.Request, c router.Candida
 			p.store.MarkModelUnavailable(c.ProviderID, c.UpstreamModel, decodeUpstreamBody(resp, b), time.Duration(unavailSec)*time.Second)
 			return Result{ProviderID: c.ProviderID, UpstreamModel: c.UpstreamModel, Status: resp.StatusCode,
 				Stream: req.Stream, Latency: time.Since(started),
-				Err: fmt.Sprintf("upstream %d (model unavailable): %s", resp.StatusCode, decodeUpstreamBody(resp, b)),
+				Err:           fmt.Sprintf("upstream %d (model unavailable): %s", resp.StatusCode, decodeUpstreamBody(resp, b)),
 				ProviderFault: true, ModelFault: true}, true
 		}
 		// 400 且请求带 tools：很可能是该模型不支持 tool calls（如部分免费模型），
@@ -573,7 +594,7 @@ func (p *Proxy) attempt(w http.ResponseWriter, r *http.Request, c router.Candida
 				"tools_count", len(req.Tools), "body", decodeUpstreamBody(resp, b))
 			return Result{ProviderID: c.ProviderID, UpstreamModel: c.UpstreamModel, Status: resp.StatusCode,
 				Stream: req.Stream, Latency: time.Since(started),
-				Err: fmt.Sprintf("upstream %d (tools unsupported, failover): %s", resp.StatusCode, decodeUpstreamBody(resp, b)),
+				Err:           fmt.Sprintf("upstream %d (tools unsupported, failover): %s", resp.StatusCode, decodeUpstreamBody(resp, b)),
 				ProviderFault: false, ModelFault: true}, true
 		}
 	}
@@ -931,7 +952,8 @@ func httpStatusSlug(status int) string {
 }
 
 // writeError 输出 OpenAI 风格的错误体。
-func writeError(w http.ResponseWriter, status int, code, msg string) {	w.Header().Set("Content-Type", "application/json")
+func writeError(w http.ResponseWriter, status int, code, msg string) {
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"error": map[string]any{

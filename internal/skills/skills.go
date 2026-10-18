@@ -25,8 +25,8 @@ type Summary struct {
 // Detail 是单个技能详情：frontmatter + 正文全文。
 type Detail struct {
 	Summary
-	Body    string `json:"body"`              // SKILL.md frontmatter 之后的正文
-	Raw     string `json:"raw"`               // SKILL.md 全文（含 frontmatter）
+	Body    string `json:"body"` // SKILL.md frontmatter 之后的正文
+	Raw     string `json:"raw"`  // SKILL.md 全文（含 frontmatter）
 	Size    int64  `json:"size"`
 	Updated string `json:"updated"`
 }
@@ -147,9 +147,11 @@ func (l *Library) loadSummary(name string) (Summary, bool) {
 }
 
 // Render 构造注入 system prompt 的技能文本。mode 取值：
-//   "list" —— 技能清单（名称 + 描述），轻量，适合"你有什么技能"类问答；
-//   "all"  —— 全部技能的 SKILL.md 全文；
-//   其他   —— 单个技能名，注入该技能的 SKILL.md 全文。
+//
+//	"list" —— 技能清单（名称 + 描述），轻量，适合"你有什么技能"类问答；
+//	"all"  —— 全部技能的 SKILL.md 全文；
+//	其他   —— 单个技能名，注入该技能的 SKILL.md 全文。
+//
 // 技能库为空、技能不存在或 mode 为空时返回 ""（调用方不注入）。
 func (l *Library) Render(mode string) string {
 	if l.dir == "" || mode == "" {

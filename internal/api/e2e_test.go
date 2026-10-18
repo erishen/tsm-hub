@@ -103,6 +103,15 @@ func (m *mockUpstream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}})
 		return
 	}
+	// error200_model：HTTP 200 + model_not_found 错误体——tokenrouter 聚合端
+	// 对「无可用通道」模型的真实形态。应 failover 且标记模型不可用。
+	if m.mode == "error200_model" {
+		writeMockJSON(w, map[string]any{"error": map[string]any{
+			"code": "model_not_found", "type": "api_error",
+			"message": "No available channel for model z-ai/glm-5.3-free under group default (distributor)",
+		}})
+		return
+	}
 	if r.URL.Path == "/v1/models" {
 		writeMockJSON(w, map[string]any{"object": "list", "data": []any{
 			map[string]any{"id": "mock-model", "object": "model", "owned_by": "mock", "context_length": 131072,
@@ -1619,6 +1628,70 @@ func TestAgent4xxPassthrough(t *testing.T) {
 	}
 }
 
+// TestError200ModelNotFoundMarksUnavailable 覆盖「2xx 皮 + 模型不存在心」：
+// 上游返回 HTTP 200 但 body 是 model_not_found 错误体（tokenrouter 聚合端
+// 对无可用通道模型的真实形态）时，必须 failover 到下一候选、把该模型标记
+// 不可用（后续请求直接跳过，不再每笔都白吃一次），且不计 provider 健康
+// 失败（模型级问题，不是服务端故障）。
+func TestError200ModelNotFoundMarksUnavailable(t *testing.T) {
+	e := newEnv(t, "ok")
+	defer e.server.Close()
+
+	upAgg := &mockUpstream{mode: "error200_model"}
+	aggSrv := httptest.NewServer(upAgg)
+	defer aggSrv.Close()
+	if err := e.store.UpsertProvider(store.Provider{
+		ID: "agg", Name: "Agg", BaseURL: aggSrv.URL + "/v1",
+		APIKey: "sk-up-agg", Models: []string{"gpt-agg"}, Enabled: true,
+		Weight: 100, Priority: 1, TimeoutMS: 5000,
+	}); err != nil {
+		t.Fatalf("upsert agg provider: %v", err)
+	}
+	if err := e.store.UpsertRoute(store.Route{
+		Model: "smartagg", Strategy: "failover",
+		Targets: []store.RouteTarget{
+			{ProviderID: "agg", Model: "gpt-agg", Priority: 1, Weight: 100},
+			{ProviderID: "backup", Model: "gpt-mock", Priority: 2, Weight: 100},
+		},
+	}); err != nil {
+		t.Fatalf("upsert route: %v", err)
+	}
+	// 关掉网关 agent，走纯代理路径（被测逻辑在 attempt 里）。
+	h := e.authHeaders()
+	h["X-Llm-Router-Agent"] = "off"
+
+	// 第一笔：agg 200+model_not_found → failover 到 backup。
+	resp := e.do(t, http.MethodPost, "/v1/chat/completions",
+		`{"model":"smartagg","messages":[{"role":"user","content":"hi"}]}`, h)
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("status = %d %s", resp.StatusCode, b)
+	}
+	resp.Body.Close()
+	if got := resp.Header.Get("X-Llm-Router-Provider"); got != "backup" {
+		t.Fatalf("X-Llm-Router-Provider = %q, want backup (200+model_not_found should failover)", got)
+	}
+	// 模型级失败不计 provider 健康。
+	if f := e.srv.health.Failures("agg"); f != 0 {
+		t.Fatalf("agg failures = %d, want 0 (model-level fault must not trip provider health)", f)
+	}
+	// agg 的模型应已被标记不可用。
+	if _, ok := e.store.ModelUnavailable("agg", "gpt-agg"); !ok {
+		t.Fatal("gpt-agg not marked unavailable after 200+model_not_found")
+	}
+	// 第二笔：agg 被跳过，直接 backup；agg 不再接到新请求。
+	resp2 := e.do(t, http.MethodPost, "/v1/chat/completions",
+		`{"model":"smartagg","messages":[{"role":"user","content":"hi again"}]}`, h)
+	resp2.Body.Close()
+	if got := resp2.Header.Get("X-Llm-Router-Provider"); got != "backup" {
+		t.Fatalf("second request provider = %q, want backup (agg should be skipped)", got)
+	}
+	if hits := upAgg.hitCount(); hits != 1 {
+		t.Fatalf("agg hit count = %d, want 1 (unavailable model must not be retried)", hits)
+	}
+}
+
 // TestAgentSkillsInjection 验证 agent 路径也执行 key 的技能注入。
 func TestAgentSkillsInjection(t *testing.T) {
 	e := newEnv(t, "agent")
@@ -1725,5 +1798,101 @@ func TestNormalizeInferencePath(t *testing.T) {
 		if got := normalizeInferencePath(c.in); got != c.want {
 			t.Errorf("normalizeInferencePath(%q) = %q, want %q", c.in, got, c.want)
 		}
+	}
+}
+
+// TestGetCapabilitySubpathsRemapped 覆盖客户端容错：个别客户端把能力段拼到
+// chat 路径之后（GET /v1/chat/completions/tools|mcps|skills|models）。GET 在
+// 这些路径上没有 chat 语义，必须由能力端点 handler 直接返回目录（200），
+// 而不是透传上游吃 404/405。
+func TestGetCapabilitySubpathsRemapped(t *testing.T) {
+	e := newEnv(t, "ok")
+	defer e.server.Close()
+
+	// GET /v1/chat/completions/tools → 工具目录（与 GET /v1/tools 同构）。
+	resp := e.do(t, http.MethodGet, "/v1/chat/completions/tools", "", e.authHeaders())
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /v1/chat/completions/tools status = %d, want 200", resp.StatusCode)
+	}
+	var tools struct {
+		Object string `json:"object"`
+		Tools  []struct {
+			Name string `json:"name"`
+		} `json:"tools"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&tools); err != nil {
+		t.Fatalf("decode tools: %v", err)
+	}
+	if tools.Object != "list" || len(tools.Tools) == 0 {
+		t.Fatalf("unexpected tools payload: %+v", tools)
+	}
+
+	// GET /v1/chat/completions/mcps → MCP 清单（无挂载时为空列表）。
+	resp2 := e.do(t, http.MethodGet, "/v1/chat/completions/mcps", "", e.authHeaders())
+	defer resp2.Body.Close()
+	if resp2.StatusCode != http.StatusOK {
+		t.Fatalf("GET /v1/chat/completions/mcps status = %d, want 200", resp2.StatusCode)
+	}
+	var mcps struct {
+		Object string           `json:"object"`
+		Mcps   []map[string]any `json:"mcps"`
+	}
+	if err := json.NewDecoder(resp2.Body).Decode(&mcps); err != nil {
+		t.Fatalf("decode mcps: %v", err)
+	}
+	if mcps.Object != "list" {
+		t.Fatalf("unexpected mcps payload: %+v", mcps)
+	}
+
+	// GET /v1/chat/completions/skills → 技能清单（未配置时为空列表）。
+	resp3 := e.do(t, http.MethodGet, "/v1/chat/completions/skills", "", e.authHeaders())
+	defer resp3.Body.Close()
+	if resp3.StatusCode != http.StatusOK {
+		t.Fatalf("GET /v1/chat/completions/skills status = %d, want 200", resp3.StatusCode)
+	}
+	var sk struct {
+		Object string           `json:"object"`
+		Skills []map[string]any `json:"skills"`
+	}
+	if err := json.NewDecoder(resp3.Body).Decode(&sk); err != nil {
+		t.Fatalf("decode skills: %v", err)
+	}
+	if sk.Object != "list" {
+		t.Fatalf("unexpected skills payload: %+v", sk)
+	}
+
+	// GET /v1/chat/completions/models → 模型列表（OpenAI list 结构）。
+	resp4 := e.do(t, http.MethodGet, "/v1/chat/completions/models", "", e.authHeaders())
+	defer resp4.Body.Close()
+	if resp4.StatusCode != http.StatusOK {
+		t.Fatalf("GET /v1/chat/completions/models status = %d, want 200", resp4.StatusCode)
+	}
+	var models struct {
+		Object string           `json:"object"`
+		Data   []map[string]any `json:"data"`
+	}
+	if err := json.NewDecoder(resp4.Body).Decode(&models); err != nil {
+		t.Fatalf("decode models: %v", err)
+	}
+	if models.Object != "list" {
+		t.Fatalf("unexpected models payload: %+v", models)
+	}
+
+	// 未带 key 的能力探测同样被拦在鉴权层（401），不会透传上游。
+	resp5 := e.do(t, http.MethodGet, "/v1/chat/completions/tools", "", nil)
+	defer resp5.Body.Close()
+	if resp5.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("unauth GET /v1/chat/completions/tools status = %d, want 401", resp5.StatusCode)
+	}
+
+	// GET 打纯 chat 路径：本地 405（带 Allow: POST），不透传上游白烧调用。
+	resp6 := e.do(t, http.MethodGet, "/v1/chat/completions", "", e.authHeaders())
+	defer resp6.Body.Close()
+	if resp6.StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("GET /v1/chat/completions status = %d, want 405", resp6.StatusCode)
+	}
+	if allow := resp6.Header.Get("Allow"); allow != http.MethodPost {
+		t.Fatalf("Allow header = %q, want POST", allow)
 	}
 }

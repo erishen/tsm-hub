@@ -16,7 +16,6 @@ import (
 	"time"
 )
 
-
 func (s *Server) adminMux() http.Handler {
 	m := http.NewServeMux()
 	m.HandleFunc("GET /api/admin/overview", s.admin(s.handleOverview))
@@ -198,8 +197,6 @@ func (s *Server) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-
-
 func clientIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
@@ -207,8 +204,6 @@ func clientIP(r *http.Request) string {
 	}
 	return host
 }
-
-
 
 func (s *Server) loginAllowed(ip string) bool {
 	s.loginMu.Lock()
@@ -227,8 +222,6 @@ func (s *Server) loginAllowed(ip string) bool {
 	return true
 }
 
-
-
 func (s *Server) loginFailed(ip string) {
 	s.loginMu.Lock()
 	defer s.loginMu.Unlock()
@@ -239,8 +232,6 @@ func (s *Server) loginFailed(ip string) {
 	}
 	s.loginFails[ip] = f
 }
-
-
 
 func (s *Server) loginOK(ip string) {
 	s.loginMu.Lock()
@@ -257,8 +248,6 @@ func newID() string {
 }
 
 // ---------- overview ----------
-
-
 
 func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 	providers := s.store.ListProviders()
@@ -294,7 +283,6 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 
 // ---------- providers ----------
 
-
 func displaySecret(k string) string {
 	if strings.HasPrefix(k, store.EnvKeyPrefix) {
 		return k
@@ -316,7 +304,6 @@ func compact(s string) string {
 // 供独立额度页面使用；无 Key 或查询失败不阻塞其余项。
 // mock-local（一键 Mock 联调）无真实额度概念，直接排除。
 
-
 func (s *Server) handleAdminHealth(w http.ResponseWriter, r *http.Request) {
 	// 遍历全部 provider：无请求记录的也展示（默认健康），不依赖 Tracker 快照。
 	providers := s.store.ListProviders()
@@ -331,11 +318,9 @@ func (s *Server) handleAdminHealth(w http.ResponseWriter, r *http.Request) {
 
 // ---------- skills ----------
 
-
-
 func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	st := s.store.Settings()
-	writeJSON(w, http.StatusOK, map[string]any{		"listen":             st.Listen,
+	writeJSON(w, http.StatusOK, map[string]any{"listen": st.Listen,
 		"default_timeout_ms": st.DefaultTimeoutMS,
 		"max_body_bytes":     st.MaxBodyBytes,
 		"fail_threshold":     st.FailThreshold,
@@ -346,8 +331,6 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		"admin_token_set":    st.AdminToken != "",
 	})
 }
-
-
 
 func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	var patch struct {
@@ -405,16 +388,14 @@ func (s *Server) handleUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		s.audit.SetRetentionDays(patch.AuditRetentionDays)
 	}
 	s.recordAudit(r, "update", "settings", "", map[string]any{
-		"default_timeout_ms":  patch.DefaultTimeoutMS,
-		"max_body_bytes":      patch.MaxBodyBytes,
+		"default_timeout_ms":   patch.DefaultTimeoutMS,
+		"max_body_bytes":       patch.MaxBodyBytes,
 		"audit_retention_days": patch.AuditRetentionDays,
 	})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 // ---------- 小工具 ----------
-
-
 
 func maskSecret(s string) string {
 	if s == "" {
@@ -425,8 +406,6 @@ func maskSecret(s string) string {
 	}
 	return s[:4] + store.MaskedSecretMarker + s[len(s)-4:]
 }
-
-
 
 func slugify(s string) string {
 	s = strings.ToLower(strings.TrimSpace(s))
@@ -454,4 +433,3 @@ func (s *Server) handleUpstreamPlatforms(w http.ResponseWriter, r *http.Request)
 		"total":     len(platforms),
 	})
 }
-

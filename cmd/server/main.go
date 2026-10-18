@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -26,6 +27,10 @@ import (
 
 // version 由 Makefile 通过 -ldflags 注入。
 var version = "dev"
+
+// weakAdminTokenLen 是管理口令的推荐最小长度：低于此值只告警不拒绝启动，
+// 避免破坏既有部署，但每次启动都提醒轮换。
+const weakAdminTokenLen = 16
 
 func main() {
 	// 先加载 .env 文件（不会覆盖已存在的环境变量）
@@ -82,6 +87,11 @@ func run(cfg config.Config) error {
 				"set settings.admin_token in config.json, pass -admin-token, or set $TSM_HUB_ADMIN_TOKEN " +
 				"(or set TSM_HUB_ALLOW_INSECURE_ADMIN_TOKEN=1 to override for local use)")
 		}
+	} else if n := len(settings.AdminToken); n < weakAdminTokenLen {
+		// 非默认但过短的口令（如 "1"）：虽不是公开已知值，暴力枚举成本依然
+		// 极低。不强制拒绝（兼容既有部署），但每次启动都提醒轮换。
+		logger.Warn("admin token is too short to resist brute force; rotate it to a long random string",
+			"length", n, "recommended_min_length", weakAdminTokenLen)
 	}
 	if len(st.ListProviders()) == 0 {
 		logger.Warn("no upstream provider configured yet; " +
@@ -256,7 +266,12 @@ func newLogger(level string) *slog.Logger {
 	return slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: lv}))
 }
 
-// watchConfig 监听 config.json 变更并热重载。
+// watchConfig 监听 config.json 所在目录并热重载。
+// 盯目录而不是盯文件：store 自身落盘用「临时文件 + rename」原子替换
+// （saveLocked），编辑器（vim/VS Code 原子保存、sed -i）也可能替换 inode
+// ——盯文件 inode 会在第一次替换后静默失效（inotify IN_IGNORED），之后的
+// 手改都不会生效。目录本身不会被替换，按文件名过滤事件即可同时覆盖
+// 「原地写」与「原子替换」两种保存方式。
 // 覆盖 provider/route/key/settings 中参与路由的配置；MCP、skills 等
 // 启动期装配的能力仍需要重启生效。
 func watchConfig(st *store.Store, logger *slog.Logger) {
@@ -267,7 +282,9 @@ func watchConfig(st *store.Store, logger *slog.Logger) {
 	}
 	defer watcher.Close()
 	path := st.Path()
-	if err := watcher.Add(path); err != nil {
+	dir := filepath.Dir(path)
+	base := filepath.Base(path)
+	if err := watcher.Add(dir); err != nil {
 		logger.Warn("config hot-reload disabled", "err", err)
 		return
 	}
@@ -294,6 +311,11 @@ func watchConfig(st *store.Store, logger *slog.Logger) {
 		case ev, ok := <-watcher.Events:
 			if !ok {
 				return
+			}
+			// 只关心 config.json 本身；同目录的临时文件（.config-*.json）
+			// 与 unavailable.json 等派生文件的写入噪声一并忽略。
+			if filepath.Base(ev.Name) != base {
+				continue
 			}
 			if ev.Op&(fsnotify.Write|fsnotify.Create|fsnotify.Rename) == 0 {
 				continue

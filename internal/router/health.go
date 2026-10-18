@@ -11,8 +11,8 @@ import (
 
 // ProviderHealth 是单个 provider 的运行时健康状态。
 type ProviderHealth struct {
-	ProviderID    string    `json:"provider_id"`
-	Healthy       bool      `json:"healthy"`
+	ProviderID string `json:"provider_id"`
+	Healthy    bool   `json:"healthy"`
 	// HalfOpen 是真半开态：曾被熔断摘除（down_until 被设置过）、冷却已过、
 	// 尚未有一次成功恢复（down_until 未清零）。区别于 failures>0（可能只是
 	// 轻微失败或客户端取消残留），前端只对 HalfOpen 显示 "half-open"。
@@ -35,17 +35,17 @@ type state struct {
 	lastFail      time.Time
 	downUntil     time.Time
 	throttleUntil time.Time // 429 限流冷却到期时间
-	latencyMS     int64      // EWMA
+	latencyMS     int64     // EWMA
 	requests      int64
 	errors        int64
 }
 
 // Tracker 记录所有 provider 的健康状态。
 type Tracker struct {
-	mu       sync.RWMutex
-	states   map[string]*state
-	failMax  int
-	cool     time.Duration
+	mu        sync.RWMutex
+	states    map[string]*state
+	failMax   int
+	cool      time.Duration
 	persistFn func() // 状态变更后的持久化回调（由调用方注入）
 }
 
@@ -169,13 +169,13 @@ func (t *Tracker) Snapshot() []ProviderHealth {
 	for id, s := range t.states {
 		avail := s.availableLocked(now)
 		out = append(out, ProviderHealth{
-			ProviderID: id,
-			Healthy:    avail,
-			HalfOpen:   !s.downUntil.IsZero() && avail,
-			Failures:   s.failures,
-			LastError:  s.lastErr,
-			LastOKAt:   s.lastOK,
-			LastFailAt: s.lastFail,
+			ProviderID:    id,
+			Healthy:       avail,
+			HalfOpen:      !s.downUntil.IsZero() && avail,
+			Failures:      s.failures,
+			LastError:     s.lastErr,
+			LastOKAt:      s.lastOK,
+			LastFailAt:    s.lastFail,
 			DownUntil:     s.downUntil,
 			ThrottleUntil: s.throttleUntil,
 			LatencyMS:     s.latencyMS,

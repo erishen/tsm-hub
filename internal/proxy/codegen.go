@@ -35,11 +35,11 @@ type fastPlugin struct {
 	Source   string
 	Promoted bool
 	// Mode 是晋升模式：fastpath（拦截）/ tool（注册为工具）/ both（两者）。
-	Mode string
-	mtime    int64
-	size     int64
-	vm       *goja.Runtime
-	detect   goja.Callable
+	Mode   string
+	mtime  int64
+	size   int64
+	vm     *goja.Runtime
+	detect goja.Callable
 }
 
 // fastPathMgr 管理插件目录的加载缓存（按文件 mtime/size 失效热重载）。
@@ -558,7 +558,7 @@ func (p *Proxy) FastPathTry(r *http.Request, key store.APIKey, path, text string
 
 // FastPathProbe 记录快路径尝试链中的一步（管理台测试/生成用）。
 type FastPathProbe struct {
-	Stage  string `json:"stage"`            // builtin / plugin:name / codegen
+	Stage  string `json:"stage"` // builtin / plugin:name / codegen
 	Hit    bool   `json:"hit"`
 	Detail string `json:"detail,omitempty"` // 命中时答案；未命中时失败原因
 }

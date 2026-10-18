@@ -357,6 +357,13 @@ curl http://localhost:9070/v1/mcps  -H "Authorization: Bearer <your-key>"
 curl http://localhost:9070/v1/skills -H "Authorization: Bearer <your-key>"
 ```
 
+> Tolerance: some clients append the capability segment to the chat path
+> (`GET /v1/chat/completions/tools`, etc.). GET has no chat semantics on those
+> paths, so the gateway normalizes them to the canonical endpoints above and
+> serves the catalog directly instead of proxying upstream (which would only
+> answer 404/405 to a GET). Likewise, non-POST methods on the plain chat path
+> get a local 405 (`Allow: POST`) without burning an upstream call.
+
 ---
 
 ## Admin API

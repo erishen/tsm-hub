@@ -9,12 +9,9 @@ import (
 	"time"
 )
 
-
 func (s *Server) handleListRoutes(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"routes": s.store.ListRoutes()})
 }
-
-
 
 func (s *Server) handleUpsertRoute(w http.ResponseWriter, r *http.Request) {
 	var rt store.Route
@@ -29,8 +26,6 @@ func (s *Server) handleUpsertRoute(w http.ResponseWriter, r *http.Request) {
 	s.recordAudit(r, "upsert", "route", rt.Model, map[string]any{"targets": rt.Targets, "strategy": rt.Strategy})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "model": rt.Model})
 }
-
-
 
 func (s *Server) handleDeleteRoute(w http.ResponseWriter, r *http.Request) {
 	model := r.PathValue("model")
@@ -50,7 +45,10 @@ func (s *Server) handleDeleteRoute(w http.ResponseWriter, r *http.Request) {
 // topTools 把工具计数 map 转成按次数降序的名字列表（前 n 个）。
 
 func topTools(m map[string]int, n int) []string {
-	type kv struct{ k string; v int }
+	type kv struct {
+		k string
+		v int
+	}
 	all := make([]kv, 0, len(m))
 	for k, v := range m {
 		all = append(all, kv{k, v})
@@ -66,8 +64,6 @@ func topTools(m map[string]int, n int) []string {
 	return out
 }
 
-
-
 func (s *Server) handleListKeys(w http.ResponseWriter, r *http.Request) {
 	rpm := s.limiter.Snapshot()
 	per := s.rec.PerKey()
@@ -77,26 +73,24 @@ func (s *Server) handleListKeys(w http.ResponseWriter, r *http.Request) {
 		out = append(out, map[string]any{
 			"id": k.ID, "name": k.Name, "prefix": k.Prefix, "enabled": k.Enabled,
 			"models": k.Models, "quota": k.Quota,
-			"created_at":    k.CreatedAt,
-			"expires_at":    k.ExpiresAt,
-			"inject_skills": k.InjectSkills,
+			"created_at":     k.CreatedAt,
+			"expires_at":     k.ExpiresAt,
+			"inject_skills":  k.InjectSkills,
 			"agent_disabled": k.AgentDisabled,
-			"usage":         agg,
-			"rpm_current":   rpm[k.ID],
+			"usage":          agg,
+			"rpm_current":    rpm[k.ID],
 			// 新建 key 的 2 分钟窗口内为 true，前端展示「补看」入口。
-			"revealable":    s.revealable(k.ID),
+			"revealable": s.revealable(k.ID),
 			// 工具归因：该调用方实际执行过 + 声明过的工具（按次数降序）。
 			"tools_used":     topTools(s.rec.KeyTools(k.ID), 5),
 			"tools_declared": topTools(s.rec.KeyClientTools(k.ID), 5),
 			// 白名单配置：与上面的统计列并列展示，便于区分"配置 vs 统计"。
 			"tools_allow": k.ToolsAllow,
-			"mcps_allow": k.McpsAllow,
+			"mcps_allow":  k.McpsAllow,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"keys": out})
 }
-
-
 
 func (s *Server) handleCreateKey(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -193,8 +187,6 @@ func (s *Server) handleRevealKey(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "id": id, "key": rv.plain})
 }
 
-
-
 func (s *Server) handleToggleKey(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Enabled bool `json:"enabled"`
@@ -208,8 +200,6 @@ func (s *Server) handleToggleKey(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "enabled": req.Enabled})
 }
 
-
-
 func (s *Server) handleDeleteKey(w http.ResponseWriter, r *http.Request) {
 	if err := s.store.DeleteKey(r.PathValue("id")); err != nil {
 		writeError(w, http.StatusNotFound, "not_found", err.Error())
@@ -218,8 +208,6 @@ func (s *Server) handleDeleteKey(w http.ResponseWriter, r *http.Request) {
 	s.recordAudit(r, "delete", "key", r.PathValue("id"), nil)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
-
-
 
 func (s *Server) handleUpdateKey(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -244,4 +232,3 @@ func (s *Server) handleUpdateKey(w http.ResponseWriter, r *http.Request) {
 }
 
 // ---------- usage ----------
-

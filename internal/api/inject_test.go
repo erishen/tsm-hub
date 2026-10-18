@@ -13,8 +13,8 @@ func TestInjectSystemMessage(t *testing.T) {
 		t.Fatal(err)
 	}
 	var m struct {
-		Model    string          `json:"model"`
-		MaxToken int             `json:"max_tokens"`
+		Model    string           `json:"model"`
+		MaxToken int              `json:"max_tokens"`
 		Messages []map[string]any `json:"messages"`
 	}
 	if err := json.Unmarshal(out, &m); err != nil {

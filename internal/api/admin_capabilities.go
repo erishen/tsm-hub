@@ -12,7 +12,6 @@ import (
 	"time"
 )
 
-
 func (s *Server) handleListSkills(w http.ResponseWriter, r *http.Request) {
 	if s.skills == nil || s.skills.Dir() == "" {
 		writeJSON(w, http.StatusOK, map[string]any{"dir": "", "skills": []any{}})
@@ -23,8 +22,6 @@ func (s *Server) handleListSkills(w http.ResponseWriter, r *http.Request) {
 		"skills": s.skills.List(),
 	})
 }
-
-
 
 func (s *Server) handleGetSkill(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
@@ -56,15 +53,15 @@ func (s *Server) handleListMcps(w http.ResponseWriter, r *http.Request) {
 		c := cfg[name]
 		st := s.proxy.MCPStatuses()[name]
 		out = append(out, map[string]any{
-			"name":      name,
-			"command":   c.Command,
-			"args":      c.Args,
-			"env":       c.Env,
-			"transport": c.Transport,
-			"url":       c.URL,
-			"connected":     st.Connected,
-			"tools":         st.Tools,
-			"tool_details":  st.ToolDetails,
+			"name":         name,
+			"command":      c.Command,
+			"args":         c.Args,
+			"env":          c.Env,
+			"transport":    c.Transport,
+			"url":          c.URL,
+			"connected":    st.Connected,
+			"tools":        st.Tools,
+			"tool_details": st.ToolDetails,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"mcps": out})
@@ -398,21 +395,21 @@ func (s *Server) handleDeleteExternalTool(w http.ResponseWriter, r *http.Request
 // 常见 MCP server 的 npx 启动命令（与前端常用模板一致）：外部候选接入时自动预填。
 // 调用方声明只包含工具名（server__tool），不含连接配置，命中此表即可一键预填。
 var knownMcpCommands = map[string]string{
-	"fs":         "npx -y @modelcontextprotocol/server-filesystem",
-	"memory":     "npx -y @modelcontextprotocol/server-memory",
-	"serena":     "npx -y serena-mcp",
-	"think":      "npx -y @modelcontextprotocol/server-think",
-	"fetch":      "npx -y mcp-server-fetch",
-	"github":     "npx -y @modelcontextprotocol/server-github",
-	"git":        "npx -y @modelcontextprotocol/server-git",
-	"sqlite":     "npx -y @modelcontextprotocol/server-sqlite",
-	"time":       "npx -y @modelcontextprotocol/server-time",
-	"context7":   "npx -y @upstash/context7-mcp",
-	"puppeteer":  "npx -y @modelcontextprotocol/server-puppeteer",
-	"playwright": "npx -y @executeautomation/playwright-mcp-server",
-	"google-maps": "npx -y @modelcontextprotocol/server-google-maps",
+	"fs":           "npx -y @modelcontextprotocol/server-filesystem",
+	"memory":       "npx -y @modelcontextprotocol/server-memory",
+	"serena":       "npx -y serena-mcp",
+	"think":        "npx -y @modelcontextprotocol/server-think",
+	"fetch":        "npx -y mcp-server-fetch",
+	"github":       "npx -y @modelcontextprotocol/server-github",
+	"git":          "npx -y @modelcontextprotocol/server-git",
+	"sqlite":       "npx -y @modelcontextprotocol/server-sqlite",
+	"time":         "npx -y @modelcontextprotocol/server-time",
+	"context7":     "npx -y @upstash/context7-mcp",
+	"puppeteer":    "npx -y @modelcontextprotocol/server-puppeteer",
+	"playwright":   "npx -y @executeautomation/playwright-mcp-server",
+	"google-maps":  "npx -y @modelcontextprotocol/server-google-maps",
 	"brave-search": "npx -y @modelcontextprotocol/server-brave-search",
-	"firecrawl":  "npx -y firecrawl-mcp",
+	"firecrawl":    "npx -y firecrawl-mcp",
 }
 
 // handleSuggestExternalMcp 用网关自身 LLM 为外部 MCP 候选推断接入方式：
@@ -734,4 +731,3 @@ func (s *Server) handleInvokeTool(w http.ResponseWriter, r *http.Request) {
 	result := s.proxy.InvokeTool(req.Name, req.Args)
 	writeJSON(w, http.StatusOK, map[string]any{"result": result})
 }
-

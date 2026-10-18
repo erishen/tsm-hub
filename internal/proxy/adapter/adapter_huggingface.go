@@ -92,7 +92,7 @@ func (a *HuggingFaceAdapter) ConvertRequest(body []byte, upstreamModel string) (
 	hfReq := huggingFaceRequest{
 		Inputs: inputs.String(),
 		Parameters: map[string]interface{}{
-			"max_new_tokens": 4096,
+			"max_new_tokens":   4096,
 			"return_full_text": false,
 		},
 		Options: map[string]interface{}{

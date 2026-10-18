@@ -8,7 +8,6 @@ import (
 	"strings"
 )
 
-
 func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
 	days := 7
 	if v := r.URL.Query().Get("days"); v != "" {
@@ -83,8 +82,6 @@ func validProviderID(id string) bool {
 	}
 	return true
 }
-
-
 
 func toAggView(a quota.Agg) aggView {
 	return aggView{Agg: a, AvgLatencyMS: a.AvgLatency(), ErrorRate: a.ErrorRate()}
@@ -236,18 +233,17 @@ func (s *Server) handleObservability(w http.ResponseWriter, r *http.Request) {
 	})
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"today":     toAggView(today),
-		"week":      toAggView(week),
-		"month":     toAggView(month),
-		"providers": provs,
-		"scenes":    scenes,
-		"trend":     s.rec.Daily(days),
-		"tools":        toolStats,
-		"skills":       skillStats,
-		"mcps":         mcpStats,
+		"today":          toAggView(today),
+		"week":           toAggView(week),
+		"month":          toAggView(month),
+		"providers":      provs,
+		"scenes":         scenes,
+		"trend":          s.rec.Daily(days),
+		"tools":          toolStats,
+		"skills":         skillStats,
+		"mcps":           mcpStats,
 		"external_tools": extStats,
 	})
 }
 
 // ---------- health ----------
-

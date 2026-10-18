@@ -1,6 +1,6 @@
 # tsm-hub TODO
 
-> 最后更新：2026-09-11
+> 最后更新：2026-10-18
 > 项目状态：v1.0 稳定版，核心功能全部完成
 
 ## v1.0 已完成 ✅
@@ -85,6 +85,10 @@
 - [x] **DeepSeek 余额字符串解析**：`flexFloat` 类型未实现 `UnmarshalJSON`，无法解析 `"51.75"` 字符串格式，已补全
 - [x] **Provider 健康状态全 degraded**：Healthy 计算逻辑从 `不在冷却 && failures<failMax` 改为 `不在冷却`
 - [x] **前端 NG8107 警告**：批量修复可选链操作符冗余
+- [x] **客户端能力探测 405 风暴**（2026-10-18）：GET `/v1/chat/completions/tools|mcps|skills` 归一到正式能力端点直接返回目录；非 POST 打纯 chat 路径本地 405（详见 error-rate-investigation-2026-10-18.md §7）
+- [x] **config 热加载原子替换失效**（2026-10-18）：watchConfig 改盯目录 + 文件名过滤，saveLocked/编辑器原子保存后仍生效（§8）
+- [x] **数据竞争修复**（2026-10-18）：`go test -race` 全绿；客户端断开（499）不计 provider 失败、不计错误率
+- [x] **错误率 41.7% → 33.9%**（2026-10-18）：放宽 isModelNotFound、清理路由死模型、gemini 移出默认路由、alibailian 禁用
 
 ---
 
@@ -93,11 +97,14 @@
 ### P1 — 推荐做
 
 - [ ] **多实例一致性**：当前配置与限流都在单进程内存里；多副本需要 SQLite/Postgres
-      或引入文件锁 + reload 机制（`store` 已有原子写，可加 fsnotify 热加载）
+      或引入文件锁 + reload 机制（`store` 已有原子写，fsnotify 热加载已就位：盯目录 + 文件名过滤）
 - [ ] **流式 token 估算兜底**：上游不返回 usage 时按字符数粗估，标记 `estimated=true`
+      （2026-10-18 核查：当前路由内 provider 全部正常返回 usage，暂不实施）
 - [ ] **成本告警管理台红点**：后端 warn 日志已上线，管理台红点提示待前端接入
 - [ ] **Provider API Key AES 加密存储**：当前默认明文存 config.json（权限 600 + env: 引用可规避），
       可加 master key 配置，存储时 AES 加密/读取时解密
+- [ ] **admin token 轮换提醒已加**（2026-10-18）：启动时长度 <16 只告警不拒绝；当前部署用的
+      口令过短，建议用户在管理台/配置里换成 16+ 位随机串
 
 ### P2 — 有空再做
 
@@ -116,3 +123,5 @@
 - `Router.Pick` 每次都 `ListRoutes()` / `ListProviders()`（会拷贝切片），高频场景应加读缓存
 - `quota.Recorder.Recent()` 从当天往前扫文件，流水量大时应改为倒序索引文件
 - `api.Settings()` 每次请求读配置要加 RLock，`quota.Limiter` 的 hits 无清理
+- **无 gofmt/lint 门禁**（2026-10-18）：19 个文件曾不符合 gofmt（历史编辑的空行/对齐），已统一
+  `gofmt -w` 清理；建议 CI 或 pre-commit 加 `gofmt -l` 非空即失败，防止再次漂移

@@ -311,6 +311,11 @@ curl http://localhost:9070/v1/mcps  -H "Authorization: Bearer <你的Key>"
 curl http://localhost:9070/v1/skills -H "Authorization: Bearer <你的Key>"
 ```
 
+> 容错：个别客户端把能力段拼到 chat 路径之后（`GET /v1/chat/completions/tools`
+> 等）。GET 在这些路径上没有 chat 语义，网关会归一到上面的正式端点直接返回目录，
+> 不再透传上游（上游对 GET 只会回 404/405）。同理，非 POST 方法打到纯 chat
+> 路径会本地直接返回 405（`Allow: POST`）。
+
 ---
 
 ## 管理 API

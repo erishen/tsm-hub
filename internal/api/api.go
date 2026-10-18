@@ -384,6 +384,37 @@ func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 		keyPfx = keyPfx[:12]
 	}
 	s.logger.Info("openai req", "path", r.URL.Path, "key", keyPfx)
+	// 客户端容错：个别客户端（如 lume-talentlens 的周期性能力探测）把能力段
+	// 拼到 chat 路径之后——GET /v1/chat/completions/tools|mcps|skills|models。
+	// GET 在这些路径上没有 chat 语义：原样透传会被上游回 404/405，既拿不到
+	// 能力目录又白烧 failover 链路。这里把 GET 归一到正式能力端点，由下面
+	// 的既有 handler 直接返回目录（POST 仍按 chat 请求处理，见
+	// normalizeInferencePath）。
+	if r.Method == http.MethodGet {
+		const capPfx = "/v1/chat/completions/"
+		if strings.HasPrefix(r.URL.Path, capPfx) {
+			switch {
+			case r.URL.Path == capPfx+"tools" || strings.HasPrefix(r.URL.Path, capPfx+"tools/"):
+				r.URL.Path = "/v1/tools" + r.URL.Path[len(capPfx+"tools"):]
+			case r.URL.Path == capPfx+"mcps" || strings.HasPrefix(r.URL.Path, capPfx+"mcps/"):
+				r.URL.Path = "/v1/mcps" + r.URL.Path[len(capPfx+"mcps"):]
+			case strings.HasPrefix(r.URL.Path, capPfx+"skills"):
+				r.URL.Path = "/v1/skills" + r.URL.Path[len(capPfx+"skills"):]
+			case r.URL.Path == capPfx+"models" || strings.HasPrefix(r.URL.Path, capPfx+"models/"):
+				r.URL.Path = "/v1/models" + r.URL.Path[len(capPfx+"models"):]
+			}
+		}
+	}
+	// chat 入口只接受 POST。归一化后仍落在纯 chat 路径的非 POST 请求
+	//（GET/HEAD/PUT…）本地直接 405：chat 语义上这些方法无意义，透传
+	// 上游也只会换来一个 405，平白消耗一次路由 + 上游调用 + failover。
+	// OPTIONS 预检由 CORS 中间件先行处理，到不了这里。
+	if r.Method != http.MethodPost && normalizeInferencePath(r.URL.Path) == "/v1/chat/completions" {
+		w.Header().Set("Allow", http.MethodPost)
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed",
+			"chat completions accepts POST only; capability catalogs live at /v1/tools, /v1/mcps, /v1/skills, /v1/models")
+		return
+	}
 	if r.URL.Path == "/v1/models" && r.Method == http.MethodGet {
 		s.requireKey(w, r, func(w http.ResponseWriter, r *http.Request, key store.APIKey) {
 			s.handleModels(w, r, key)

@@ -147,12 +147,12 @@ type openAITool struct {
 }
 
 type openAIResponse struct {
-	ID      string                  `json:"id"`
-	Object  string                  `json:"object"`
-	Created int64                   `json:"created"`
-	Model   string                  `json:"model"`
-	Choices []openAIResponseChoice  `json:"choices"`
-	Usage   openAIUsage             `json:"usage"`
+	ID      string                 `json:"id"`
+	Object  string                 `json:"object"`
+	Created int64                  `json:"created"`
+	Model   string                 `json:"model"`
+	Choices []openAIResponseChoice `json:"choices"`
+	Usage   openAIUsage            `json:"usage"`
 }
 
 type openAIResponseChoice struct {
@@ -168,11 +168,11 @@ type openAIUsage struct {
 }
 
 type openAIStreamChunk struct {
-	ID      string                `json:"id"`
-	Object  string                `json:"object"`
-	Created int64                 `json:"created"`
-	Model   string                `json:"model"`
-	Choices []openAIStreamChoice  `json:"choices"`
+	ID      string               `json:"id"`
+	Object  string               `json:"object"`
+	Created int64                `json:"created"`
+	Model   string               `json:"model"`
+	Choices []openAIStreamChoice `json:"choices"`
 }
 
 type openAIStreamChoice struct {

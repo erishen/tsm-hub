@@ -13,7 +13,6 @@ import (
 	"time"
 )
 
-
 func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 	out := make([]map[string]any, 0)
 	for _, p := range s.store.ListProviders() {
@@ -22,12 +21,12 @@ func (s *Server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 			"id": p.ID, "name": p.Name, "base_url": p.BaseURL,
 			"api_key": displaySecret(p.APIKey), "models": p.Models, "headers": p.Headers,
 			"enabled": p.Enabled, "weight": p.Weight, "priority": p.Priority,
-			"timeout_ms": p.TimeoutMS,
-			"proxy_url": p.ProxyURL,
+			"timeout_ms":      p.TimeoutMS,
+			"proxy_url":       p.ProxyURL,
 			"disabled_models": p.DisabledModels,
-			"healthy":    h.Healthy,
-			"latency_ms": h.LatencyMS,
-			"health":     h,
+			"healthy":         h.Healthy,
+			"latency_ms":      h.LatencyMS,
+			"health":          h,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"providers": out})
@@ -110,11 +109,11 @@ func (s *Server) handleProviderBalances(w http.ResponseWriter, r *http.Request) 
 func parseOpenRouterKey(body []byte) map[string]any {
 	var raw struct {
 		Data struct {
-			Usage         float64  `json:"usage"`
-			Limit         *float64 `json:"limit"`
+			Usage          float64  `json:"usage"`
+			Limit          *float64 `json:"limit"`
 			LimitRemaining *float64 `json:"limit_remaining"`
-			IsFreeTier    bool     `json:"is_free_tier"`
-			ExpiresAt     string   `json:"expires_at"`
+			IsFreeTier     bool     `json:"is_free_tier"`
+			ExpiresAt      string   `json:"expires_at"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(body, &raw); err != nil {
@@ -251,12 +250,12 @@ func (s *Server) probeBalance(ctx context.Context, baseURL, key string) map[stri
 	for _, pn := range platforms {
 		if strings.Contains(baseURL, pn.host) {
 			return map[string]any{
-				"kind":   "platform_note",
-				"plan":   pn.plan,
-				"quota":  pn.quota,
-				"reset":  pn.reset,
-				"note":   pn.note,
-				"url":    pn.url,
+				"kind":  "platform_note",
+				"plan":  pn.plan,
+				"quota": pn.quota,
+				"reset": pn.reset,
+				"note":  pn.note,
+				"url":   pn.url,
 			}
 		}
 	}
@@ -318,7 +317,7 @@ func parseMoonshotBalance(body []byte) map[string]any {
 		return nil
 	}
 	return map[string]any{
-		"kind":     "moonshot",
+		"kind":      "moonshot",
 		"available": raw.Data.Available,
 		"voucher":   raw.Data.Voucher,
 		"cash":      raw.Data.Cash,
@@ -340,7 +339,6 @@ func (f *flexFloat) UnmarshalJSON(data []byte) error {
 	*f = flexFloat(v)
 	return nil
 }
-
 
 func parseDeepSeekBalance(body []byte) map[string]any {
 	var raw struct {
@@ -393,8 +391,6 @@ func parseOpenAIUsage(body []byte) map[string]any {
 	return map[string]any{"kind": "openai", "total_usage_usd": raw.TotalUsage / 100, "url": "https://platform.openai.com"}
 }
 
-
-
 func (s *Server) handleUpsertProvider(w http.ResponseWriter, r *http.Request) {
 	var p store.Provider
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
@@ -420,8 +416,6 @@ func (s *Server) handleUpsertProvider(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "id": p.ID})
 }
 
-
-
 func (s *Server) handleDeleteProvider(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if err := s.store.DeleteProvider(id); err != nil {
@@ -433,4 +427,3 @@ func (s *Server) handleDeleteProvider(w http.ResponseWriter, r *http.Request) {
 }
 
 // ---------- routes ----------
-

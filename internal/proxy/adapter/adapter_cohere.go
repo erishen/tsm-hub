@@ -113,10 +113,10 @@ func (a *CohereAdapter) ConvertRequest(body []byte, upstreamModel string) ([]byt
 
 // cohereResponse 是 Cohere 的非流式响应格式。
 type cohereResponse struct {
-	Text          string `json:"text"`
-	GenerationID  string `json:"generation_id"`
-	FinishReason  string `json:"finish_reason"`
-	Meta          struct {
+	Text         string `json:"text"`
+	GenerationID string `json:"generation_id"`
+	FinishReason string `json:"finish_reason"`
+	Meta         struct {
 		Tokens struct {
 			InputTokens  int `json:"input_tokens"`
 			OutputTokens int `json:"output_tokens"`
