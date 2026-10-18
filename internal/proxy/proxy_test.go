@@ -155,14 +155,24 @@ func TestIsModelNotFound(t *testing.T) {
 		body string
 		want bool
 	}{
+		// 真实上游响应体：裸 NOT_FOUND / Not Found（无 "model" 字样）。
+		// 这是修复核心——sensenova 返回裸 NOT_FOUND、openrouter 返回裸 Not Found，
+		// 旧实现因要求 "model" 关键词而漏判，导致模型从未被标记不可用、反复 404。
+		{"NOT_FOUND", true},
+		{"Not Found", true},
 		{`{"error":{"message":"model route not found","type":"not_found_error","code":"5"}}`, true},
 		{`{"error":{"message":"model is not found"}}`, true},
 		{`{"error":{"message":"Model 'x' does not exist"}}`, true},
 		{`{"error":{"message":"未找到模型"}}`, true},
-		{`{"error":{"message":"not found"}}`, false},        // 无 model 上下文
+		{`{"error":{"message":"not found"}}`, true}, // 放宽：404 下裸 not found 即视为模型不存在
 		{`{"error":{"message":"insufficient permissions"}}`, false},
 		{`{"error":{"message":"the model does not exist"}}`, true},
-		{`{"error":{"message":"route not found"}}`, true},    // 含 route + not found
+		{`{"error":{"message":"route not found"}}`, true},
+		// 路径错误类 404：不应误判为模型不存在（不含 not found 关键词）。
+		{"Invalid URL (GET /v1/chat/completions/tools)", false},
+		{"Invalid URL (GET /v1/chat/completions/mcps)", false},
+		{`{"error":"invalid api key"}`, false},
+		{"", false},
 	}
 	for _, c := range cases {
 		if got := isModelNotFound(c.body); got != c.want {

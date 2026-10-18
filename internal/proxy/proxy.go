@@ -284,16 +284,21 @@ func orDefault(s, def string) string {
 }
 
 // isModelNotFound 判断上游 404 响应体是否属于「模型不存在」语义。
-// 保守匹配：必须同时出现 model 与 not found/不存在 类关键词，避免误判
-// 其他 404（如路径错误、key 权限不足等），那些仍按普通 4xx 直接透传。
+//
+// 仅对 404 状态码调用（见 proxy.go 调用点），不会误伤其他状态码。
+// 判定放宽：只要响应体命中 not found / 404 等关键词家族即视为模型不存在，
+// 不再强制要求同时出现 "model" 字样。原因：部分上游（如 sensenova）对不存在的模型
+// 仅返回裸的 NOT_FOUND / Not Found（不含 "model"），原实现因此漏判，导致该模型从未被
+// MarkModelUnavailable，每次请求都重蹈 404（retry storm）。放宽后首个 404 即把模型
+// 标记为不可用、30 分钟内不再选它，避免无意义的重试。
+// 路径错误类 404（如 "Invalid URL (GET /v1/chat/completions/tools)"）不含上述关键词，
+// 不会被误判，仍按普通 4xx 透传。
 func isModelNotFound(body string) bool {
 	lower := strings.ToLower(body)
-	hasModel := strings.Contains(lower, "model") || strings.Contains(lower, "型号") ||
-		strings.Contains(lower, "route") || strings.Contains(lower, "模型")
-	if !hasModel {
-		return false
-	}
-	for _, k := range []string{"not found", "not_found", "does not exist", "not exist", "no such", "不存在", "未找到"} {
+	for _, k := range []string{
+		"not found", "not_found", "does not exist", "not exist",
+		"no such", "不存在", "未找到", "404", "resource not",
+	} {
 		if strings.Contains(lower, k) {
 			return true
 		}
