@@ -20,7 +20,7 @@ tsm-hub 设计为**自托管**软件，您（数据控制者）完全控制所�
 | 上游 Provider 配置 | API Key、Base URL、模型列表、优先级、权重等 | `data/config.json` | 必要 |
 | 路由规则 | 模型路由策略、目标 Provider、故障转移配置 | `data/config.json` | 必要 |
 | Token Keys | 对外签发的访问密钥（仅存储 SHA-256 哈希）、名称、权限、配额 | `data/config.json` | 必要 |
-| 全局设置 | 监听地址、超时、限流、定价、TLS、CORS 等 | `data/config.json` | 必要 |
+| 全局设置 | 监听地址、超时、限流、定价、CORS 等 | `data/config.json` | 必要 |
 | MCP Server 配置 | MCP server 启动命令、参数、环境变量、远程 URL | `data/config.json` | 可选 |
 
 **安全说明**：
@@ -96,8 +96,8 @@ tsm-hub 设计为**自托管**软件，您（数据控制者）完全控制所�
 
 ### 3.2 传输安全
 
-- **推荐使用 HTTPS**：可在配置中启用 TLS（`settings.tls`），或使用反向代理（Nginx、Caddy）提供 HTTPS 终端
-- **未启用 TLS 时**：API Key 和用户数据在网络上以明文传输，**仅限受信任的内网环境使用**
+- **推荐使用 HTTPS**：网关自身暂不提供 TLS 终端，请使用反向代理（Nginx、Caddy、Traefik）对外提供 HTTPS，代理到网关的 HTTP 端口；示例见 `docker-compose.yml`（默认仅绑定 `127.0.0.1`）
+- **未通过 HTTPS 暴露时**：API Key 和用户数据在网络上以明文传输，**仅限受信任的内网环境使用**
 - **上游通信**：与上游 LLM 提供商的通信默认使用 HTTPS
 
 ### 3.3 访问控制
