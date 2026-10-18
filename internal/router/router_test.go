@@ -333,6 +333,45 @@ func TestTrackerSnapshot(t *testing.T) {
 	}
 }
 
+// HalfOpen 只表示「曾熔断打开、冷却已过、等待探测恢复」，不能把
+// 「有任何连续失败」都算半开——否则前端满屏 half-open。
+func TestTrackerHalfOpenOnlyAfterCooldown(t *testing.T) {
+	tr := NewTracker(3, 60)
+	// 失败 1 次（未达阈值 3）：从未熔断，不得标记半开。
+	tr.ReportFailure("mild", "e1")
+	snap := tr.Snapshot()
+	if len(snap) != 1 {
+		t.Fatalf("snapshot = %+v", snap)
+	}
+	if snap[0].HalfOpen {
+		t.Fatal("single sub-threshold failure must not be half-open")
+	}
+	if !snap[0].Healthy {
+		t.Fatal("sub-threshold failure should stay healthy")
+	}
+	// 达到阈值：熔断打开（冷却中）→ unhealthy、非半开。
+	tr.ReportFailure("mild", "e2")
+	tr.ReportFailure("mild", "e3")
+	snap = tr.Snapshot()
+	if snap[0].Healthy || snap[0].HalfOpen {
+		t.Fatalf("cooling provider must be degraded, not half-open: %+v", snap[0])
+	}
+	// 冷却已过（downUntil 在过去）：半开探测态。
+	tr.mu.Lock()
+	tr.states["mild"].downUntil = time.Now().Add(-time.Second)
+	tr.mu.Unlock()
+	snap = tr.Snapshot()
+	if !snap[0].Healthy || !snap[0].HalfOpen {
+		t.Fatalf("expired cooldown must be half-open: %+v", snap[0])
+	}
+	// 探测成功：回到 healthy，半开标记消失。
+	tr.ReportSuccess("mild", 5*time.Millisecond)
+	snap = tr.Snapshot()
+	if !snap[0].Healthy || snap[0].HalfOpen {
+		t.Fatalf("success must clear half-open: %+v", snap[0])
+	}
+}
+
 func TestPickSmartPrefersFreeAndCheap(t *testing.T) {
 	// 隐式路由（无路由表）默认 smart：免费优先，其次低价。
 	paid := p("paid", 1, 100, "m")

@@ -260,10 +260,19 @@ func (p *Proxy) agentRun(w http.ResponseWriter, r *http.Request, key store.APIKe
 	if res.err != "" {
 		result.Status = http.StatusBadGateway
 		result.Err = res.err
-		result.ProviderFault = true
-		p.health.ReportFailure(res.provider, res.err)
+		// 客户端断开/取消（context canceled）不是上游故障：不计入健康熔断。
+		if strings.Contains(res.err, "context canceled") {
+			result.ClientAbort = true
+			result.Status = 499
+		} else {
+			result.ProviderFault = true
+			p.health.ReportFailure(res.provider, res.err)
+		}
 		result.Scene = scene
 		p.account(key, req.Model, result)
+		if result.ClientAbort {
+			return true, result
+		}
 		writeError(w, http.StatusBadGateway, "upstream_unavailable", res.err)
 		return true, result
 	}
@@ -390,7 +399,10 @@ func (p *Proxy) agentUpstream(r *http.Request, c router.Candidate, path string, 
 
 	resp, err := p.client.Do(upReq)
 	if err != nil {
-		p.health.ReportFailure(c.ProviderID, err.Error())
+		// 客户端断开/取消（context canceled）不是上游故障，不计入健康熔断。
+		if !isClientAbort(err) {
+			p.health.ReportFailure(c.ProviderID, err.Error())
+		}
 		return nil, fmt.Sprintf("upstream request failed: %v", err), 0
 	}
 	defer resp.Body.Close()

@@ -1,7 +1,11 @@
 package proxy
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"net/url"
 	"testing"
 	"time"
 
@@ -196,5 +200,26 @@ func TestReportThrottleCoolsProvider(t *testing.T) {
 	}
 	if !h.Available("p") {
 		t.Fatalf("expected available after success")
+	}
+}
+
+// 客户端断开/取消（context canceled）不是上游故障，不得计入健康熔断。
+func TestIsClientAbort(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"canceled", context.Canceled, true},
+		{"wrapped canceled", fmt.Errorf("dial: %w", context.Canceled), true},
+		{"url.Error canceled", &url.Error{Op: "Post", URL: "https://x", Err: context.Canceled}, true},
+		{"deadline exceeded", context.DeadlineExceeded, false},
+		{"network", errors.New("connection refused"), false},
+	}
+	for _, c := range cases {
+		if got := isClientAbort(c.err); got != c.want {
+			t.Errorf("%s: isClientAbort = %v, want %v", c.name, got, c.want)
+		}
 	}
 }

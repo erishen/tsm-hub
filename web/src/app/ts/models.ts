@@ -164,6 +164,8 @@ export interface ObservabilityResponse {
 export interface ProviderHealth {
   provider_id: string;
   healthy: boolean;
+  /** 真半开态：曾被熔断摘除、冷却已过、等待探测成功恢复 */
+  half_open?: boolean;
   failures: number;
   last_error?: string;
   last_ok_at?: string;

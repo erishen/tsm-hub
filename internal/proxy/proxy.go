@@ -11,6 +11,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -95,6 +96,9 @@ type Result struct {
 	// ModelFault 表示失败源于「该上游上模型不存在」（404 model not found）：
 	// 计入模型级不可用（路由跳过该 provider×模型），但不计入 provider 健康熔断。
 	ModelFault bool
+	// ClientAbort 表示失败源于客户端断开/取消（context canceled）：
+	// 不是上游故障，不计入 provider 健康熔断，也不再 failover（客户端已走）。
+	ClientAbort bool
 	// Scene 是智能分流命中的场景（chat/reason/code/fast；非 auto 为空）。
 	Scene string
 	// FastPath 是确定性快路径命中标记（方法名/plugin:xx/codegen；未命中为空）。
@@ -209,7 +213,8 @@ func (p *Proxy) Handle(w http.ResponseWriter, r *http.Request, key store.APIKey,
 				Error:      res.Err,
 			})
 			// 模型不存在是模型级问题（failover 换其他家即可），不计入 provider 健康熔断。
-			if !res.ModelFault {
+			// 客户端断开同理：不是上游的错。
+			if !res.ModelFault && !res.ClientAbort {
 				p.health.ReportFailure(c.ProviderID, res.Err)
 			}
 			continue
@@ -241,6 +246,23 @@ func (p *Proxy) Handle(w http.ResponseWriter, r *http.Request, key store.APIKey,
 	p.account(key, req.Model, res)
 	writeError(w, res.Status, httpStatusSlug(res.Status), orDefault(lastErr, "all upstream providers failed"))
 	return res
+}
+
+// lastUpstreamStatus 从失败链的 error 文本里解析最后一步的上游状态码
+// （attempt 生成 "upstream 429: …" / "upstream 403: …" 格式）。解析不出
+// 按网络故障处理（502）。
+// isClientAbort 判断错误是否源于客户端断开/取消（context canceled）。
+// 客户端取消不是上游故障：不计入 provider 健康熔断，也不值得 failover。
+func isClientAbort(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) {
+		return true
+	}
+	// http.Client.Do 返回的是 *url.Error，包装后 context.Canceled 仍可被
+	// errors.Is 识别；字符串兜底覆盖流式拷贝等路径透出的裸错误。
+	return strings.Contains(err.Error(), "context canceled")
 }
 
 // lastUpstreamStatus 从失败链的 error 文本里解析最后一步的上游状态码
@@ -404,6 +426,13 @@ func (p *Proxy) attempt(w http.ResponseWriter, r *http.Request, c router.Candida
 	resp, err := p.clientFor(c.Provider).Do(upReq)
 	if err != nil {
 		slog.Warn("upstream request failed", "provider", c.ProviderID, "model", req.Model, "upstream_model", c.UpstreamModel, "err", err.Error())
+		// 客户端断开/取消（context canceled）不是上游故障：不计入健康熔断，
+		// 也不再 failover（客户端已经离开，换候选只是浪费一次上游调用）。
+		if isClientAbort(err) {
+			return Result{ProviderID: c.ProviderID, UpstreamModel: c.UpstreamModel, Status: 499,
+				Stream: req.Stream, Latency: time.Since(started),
+				Err: fmt.Sprintf("client aborted: %v", err), ClientAbort: true}, false
+		}
 		return Result{ProviderID: c.ProviderID, UpstreamModel: c.UpstreamModel, Status: http.StatusBadGateway,
 			Stream: req.Stream, Latency: time.Since(started),
 			Err: fmt.Sprintf("upstream request failed: %v", err), ProviderFault: true}, true
@@ -669,8 +698,14 @@ func (p *Proxy) streamResponse(w http.ResponseWriter, resp *http.Response, c rou
 			}
 			if !wrote {
 				// 首帧之前断流：上游问题，标记为故障。
-				res.Err = fmt.Sprintf("read upstream stream: %v", err)
-				res.ProviderFault = true
+				// 客户端断开（context canceled）除外：不是上游的错。
+				if isClientAbort(err) {
+					res.Err = fmt.Sprintf("client aborted: %v", err)
+					res.ClientAbort = true
+				} else {
+					res.Err = fmt.Sprintf("read upstream stream: %v", err)
+					res.ProviderFault = true
+				}
 			}
 			res.PromptTokens, res.CompletionToken, res.TotalTokens = prompt, completion, total
 			return res

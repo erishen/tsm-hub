@@ -310,9 +310,14 @@ func (r *Router) smartScore(c Candidate) int {
 		// 新 provider 没有历史数据，给中等偏上的分数鼓励探索
 		stabilityScore = 70
 	}
-	// 连续失败次数惩罚
+	// 连续失败次数惩罚（设上限：失败 20 次和 5 次的降权应相同，
+	// 否则累计失败越多越永远选不中 → 永远等不到成功清零 → 永久滞留半开）。
 	if health.Failures > 0 {
-		stabilityScore -= health.Failures * 10
+		pen := health.Failures
+		if pen > 5 {
+			pen = 5
+		}
+		stabilityScore -= pen * 10
 	}
 	if stabilityScore < 0 {
 		stabilityScore = 0
