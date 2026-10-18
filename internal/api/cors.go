@@ -1,6 +1,7 @@
 package api
 
 import (
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -26,6 +27,20 @@ func newCORSMiddleware(cfg store.CORSCfg) *corsMiddleware {
 	}
 	if cfg.MaxAge <= 0 {
 		cfg.MaxAge = 86400 // 24 小时
+	}
+	// 安全：AllowCredentials + 通配源意味着任意站点都能发“带凭证”的跨域请求。
+	// 浏览器会拒绝 `Access-Control-Allow-Origin: *` + credentials，但本中间件是
+	// 回显真实 Origin，等于绕过该限制；故此处直接移除通配项（fail closed）。
+	if cfg.AllowCredentials {
+		kept := make([]string, 0, len(cfg.AllowedOrigins))
+		for _, o := range cfg.AllowedOrigins {
+			if o == "*" {
+				slog.Default().Warn("cors: dropping wildcard '*' from allowed_origins because allow_credentials is enabled; list explicit origins instead")
+				continue
+			}
+			kept = append(kept, o)
+		}
+		cfg.AllowedOrigins = kept
 	}
 	return &corsMiddleware{cfg: cfg}
 }
@@ -71,7 +86,8 @@ func (m *corsMiddleware) Wrap(next http.Handler) http.Handler {
 // originAllowed 检查请求源是否在允许列表中。
 func (m *corsMiddleware) originAllowed(origin string) bool {
 	for _, allowed := range m.cfg.AllowedOrigins {
-		if allowed == "*" {
+		// 通配仅在未启用凭证时生效（见 newCORSMiddleware 的说明），双保险。
+		if allowed == "*" && !m.cfg.AllowCredentials {
 			return true
 		}
 		if strings.EqualFold(allowed, origin) {

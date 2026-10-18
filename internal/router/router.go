@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/erishen/tsm-hub/internal/store"
@@ -27,7 +28,17 @@ type Candidate struct {
 type Router struct {
 	store  *store.Store
 	health *Tracker
-	rnd    *rand.Rand
+	// rnd 的 *rand.Rand 不并发安全，Pick 会被多个 HTTP handler 并发调用，
+	// 故用 mu 串行化对它的访问（-race 下会报 data race）。
+	rnd *rand.Rand
+	mu  sync.Mutex
+}
+
+// float64 返回 [0,1) 随机数，串行化底层 RNG 以支持并发 Pick。
+func (r *Router) float64() float64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.rnd.Float64()
 }
 
 // New 创建路由器。
@@ -101,24 +112,27 @@ func (r *Router) Pick(model string, hasTools bool) ([]Candidate, error) {
 		}
 	}
 
-	usable := healthy
-	if len(usable) == 0 {
-		usable = halfOpen
-	}
-	if len(usable) == 0 && len(cooling) > 0 {
-		// 全部仍在冷却：挑最快恢复的那个做一次探测，
-		// 否则单 provider 场景会一直 502，永远等不到它恢复。
+	// 全部在冷却、且没有健康/半开候选：挑最快恢复的那个做一次探测，
+	// 否则单 provider 场景会一直 502，永远等不到它恢复。
+	if len(healthy) == 0 && len(halfOpen) == 0 && len(cooling) > 0 {
 		sort.Slice(cooling, func(i, j int) bool {
 			return r.health.DownUntil(cooling[i].ProviderID).
 				Before(r.health.DownUntil(cooling[j].ProviderID))
 		})
-		usable = cooling[:1]
+		return r.order(cooling[:1], strategy), nil
 	}
+
+	// 健康候选优先，半开候选（曾失败、但仍可用）追加其后而不是被整体丢弃：
+	// 若只保留健康池，失败过的 provider 只要还有健康节点就永远选不中，其
+	// 失败计数也永远等不到 ReportSuccess 清零 → 永久降权、池子越用越小。
+	// order() 已对 HalfOpen 降权（smart -penalty / weighted ×0.1），故正常
+	// 节点仍排在前，半开仅作为 failover 兜底并借成功样本自我恢复。
+	usable := append(r.order(healthy, strategy), r.order(halfOpen, strategy)...)
 	if len(usable) == 0 {
 		return nil, fmt.Errorf("no healthy provider for model %q (all in cooldown)", model)
 	}
 
-	return r.order(usable, strategy), nil
+	return usable, nil
 }
 
 // resolveTargets 先查显式路由表（精确 model），再查通配兜底路由，
@@ -134,7 +148,8 @@ func (r *Router) HasRoute(model string) bool {
 	return false
 }
 
-func (r *Router) resolveTargets(model string) ([]store.RouteTarget, string) {	for _, rt := range r.store.ListRoutes() {
+func (r *Router) resolveTargets(model string) ([]store.RouteTarget, string) {
+	for _, rt := range r.store.ListRoutes() {
 		if rt.Model == model && len(rt.Targets) > 0 {
 			return rt.Targets, rt.Strategy
 		}
@@ -380,7 +395,7 @@ func (r *Router) weightedShuffle(in []Candidate) []Candidate {
 		for _, it := range items {
 			total += it.w
 		}
-		pick := r.rnd.Float64() * total
+		pick := r.float64() * total
 		idx := 0
 		acc := 0.0
 		for i, it := range items {

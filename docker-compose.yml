@@ -41,6 +41,13 @@ services:
     command: >
       --stdio "node /mcp/node_modules/@modelcontextprotocol/server-filesystem/dist/index.js ${WORKSPACE}"
       --stateful --outputTransport streamableHttp --host 0.0.0.0 --port 8000
+    healthcheck:
+      # node 镜像无 wget/curl; 用 node 起 TCP 连接探 8000(supergateway 监听)判存活。
+      # 端口可达=healthy, 连不上(服务挂)→ error → exit 1 → unhealthy。
+      test: ["CMD", "node", "-e", "require('net').connect(8000,'127.0.0.1').on('connect',function(){process.exit(0)}).on('error',function(){process.exit(1)})"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   mcp-memory:
     image: mcp-bridge:latest
@@ -54,6 +61,12 @@ services:
     command: >
       --stdio "node /mcp/node_modules/@modelcontextprotocol/server-memory/dist/index.js"
       --stateful --outputTransport streamableHttp --host 0.0.0.0 --port 8000
+    healthcheck:
+      # node 镜像无 wget/curl; 用 node 起 TCP 连接探 8000(supergateway 监听)判存活。
+      test: ["CMD", "node", "-e", "require('net').connect(8000,'127.0.0.1').on('connect',function(){process.exit(0)}).on('error',function(){process.exit(1)})"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   mcp-think:
     image: mcp-bridge:latest
@@ -64,6 +77,12 @@ services:
     command: >
       --stdio "node /mcp/node_modules/@modelcontextprotocol/server-sequential-thinking/dist/index.js"
       --stateful --outputTransport streamableHttp --host 0.0.0.0 --port 8000
+    healthcheck:
+      # node 镜像无 wget/curl; 用 node 起 TCP 连接探 8000(supergateway 监听)判存活。
+      test: ["CMD", "node", "-e", "require('net').connect(8000,'127.0.0.1').on('connect',function(){process.exit(0)}).on('error',function(){process.exit(1)})"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
 volumes:
   mcp-memory-data:

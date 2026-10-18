@@ -1,8 +1,10 @@
 package proxy
 
 import (
+	"math"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestFastArithmetic(t *testing.T) {
@@ -73,5 +75,44 @@ func TestFastStatsConvertBase(t *testing.T) {
 	}
 	if r := tryFastAnswer("你好世界 几个字"); r == nil || !strings.Contains(r.answer, "4 个字") {
 		t.Errorf("text stats = %+v", r)
+	}
+}
+
+// 除零 / 取模零 / 超大指数都必须优雅失败（不命中），绝不能 panic 或长时间占住 goroutine。
+func TestFastArithmeticHostileInputs(t *testing.T) {
+	inputs := []string{
+		"5 % 0 等于多少",
+		"100 / 0 是多少",
+		"9^999999999 等于几",
+		"2^(999999999) 等于",
+	}
+	for _, in := range inputs {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("%q panicked: %v", in, r)
+				}
+			}()
+			if r := tryFastAnswer(in); r != nil {
+				t.Errorf("%q should miss, got %+v", in, r)
+			}
+		}()
+	}
+}
+
+// 小整数指数仍保留精确结果，大指数走 math.Pow 秒回。
+func TestPowFloat(t *testing.T) {
+	if got := powFloat(2, 10); got != 1024 {
+		t.Errorf("powFloat(2,10) = %v, want 1024", got)
+	}
+	done := make(chan float64, 1)
+	go func() { done <- powFloat(9, 999999999) }()
+	select {
+	case v := <-done:
+		if v != math.Inf(1) {
+			t.Errorf("powFloat(9,999999999) = %v, want +Inf", v)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("powFloat(9,999999999) did not return promptly")
 	}
 }

@@ -2,6 +2,7 @@ package router
 
 import (
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -122,6 +123,44 @@ func TestPickSkipsUnhealthyAndKeepsHalfOpen(t *testing.T) {
 	}
 }
 
+// 曾经失败（但未达摘除阈值）的 provider 仍应留在候选尾部，而不是只要还有健康
+// 节点就被整体丢弃——否则它永远拿不到成功样本、失败计数永不归零。
+func TestPickKeepsHalfOpenBehindHealthyForRecovery(t *testing.T) {
+	st := newStore(t,
+		[]store.Provider{p("a", 1, 100, "m"), p("b", 2, 100, "m")},
+		[]store.Route{{Model: "m", Strategy: "failover", Targets: []store.RouteTarget{
+			{ProviderID: "a", Priority: 1}, {ProviderID: "b", Priority: 2},
+		}}},
+	)
+	tracker := NewTracker(5, 60) // 阈值 5：失败一次不会摘除，只进入半开
+	rt := New(st, tracker)
+
+	tracker.ReportFailure("a", "boom")
+	cands, err := rt.Pick("m", false)
+	if err != nil {
+		t.Fatalf("pick: %v", err)
+	}
+	if len(cands) != 2 {
+		t.Fatalf("half-open candidate must stay selectable, got %+v", cands)
+	}
+	if cands[0].ProviderID != "b" || cands[0].HalfOpen {
+		t.Fatalf("healthy b should lead: %+v", cands)
+	}
+	if cands[1].ProviderID != "a" || !cands[1].HalfOpen {
+		t.Fatalf("failed a should trail as half-open: %+v", cands)
+	}
+
+	// a 借一次成功样本恢复 → 失败计数清零，重新按优先级排到最前。
+	tracker.ReportSuccess("a", 5*time.Millisecond)
+	cands, err = rt.Pick("m", false)
+	if err != nil {
+		t.Fatalf("pick after recovery: %v", err)
+	}
+	if cands[0].ProviderID != "a" || cands[0].HalfOpen {
+		t.Fatalf("recovered a should lead healthy: %+v", cands)
+	}
+}
+
 func TestPickFailoverUsesTargetPriorityOverProviderPriority(t *testing.T) {
 	// 路由表 target 的优先级应与 provider 自身的优先级相互独立：
 	// provider a 的优先级更高（1），但路由表里 b 排在前面，failover 应把 b 放第一位。
@@ -170,6 +209,33 @@ func TestPickNoCandidate(t *testing.T) {
 	if _, err := rt.Pick("unknown-model", false); err == nil {
 		t.Fatal("unknown model should error")
 	}
+}
+
+// 并发调用 Pick 时不应有 data race（-race 下运行本测试）。
+func TestPickConcurrentNoRace(t *testing.T) {
+	st := newStore(t,
+		[]store.Provider{p("a", 1, 100, "m"), p("b", 2, 50, "m"), p("c", 3, 10, "m")},
+		[]store.Route{{Model: "m", Strategy: "weighted", Targets: []store.RouteTarget{
+			{ProviderID: "a", Weight: 100}, {ProviderID: "b", Weight: 50}, {ProviderID: "c", Weight: 10},
+		}}},
+	)
+	tracker := NewTracker(3, 60)
+	rt := New(st, tracker)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 32; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 100; j++ {
+				tracker.ReportSuccess("a", 3*time.Millisecond)
+				if _, err := rt.Pick("m", false); err != nil {
+					t.Errorf("pick: %v", err)
+				}
+			}
+		}()
+	}
+	wg.Wait()
 }
 
 func TestWeightedPrefersHigherWeight(t *testing.T) {

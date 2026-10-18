@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -24,23 +25,54 @@ import (
 )
 
 // mockUpstream 是一个假的上游 LLM 服务。
+// 注意：ServeHTTP 会被 httptest.Server 的多个 goroutine 并发调用，故共享字段
+// （hits/bodies/apiKey）必须受 mu 保护，否则 -race 会报数据竞争。
 type mockUpstream struct {
+	mu     sync.Mutex
 	mode   string // "ok" | "500" | "400" | "401" | "flaky" | "stream"
-	model  string
+	model  string // 构造时设定，服务期内只读
 	apiKey string
 	hits   int
 	bodies []string
 }
 
+// 以下访问器在锁内读取共享字段，供测试断言使用（与 ServeHTTP 的写入互斥）。
+func (m *mockUpstream) hitCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.hits
+}
+func (m *mockUpstream) authHeader() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.apiKey
+}
+func (m *mockUpstream) lastBody() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.bodies) == 0 {
+		return ""
+	}
+	return m.bodies[len(m.bodies)-1]
+}
+func (m *mockUpstream) bodyCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.bodies)
+}
+
 func (m *mockUpstream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	m.hits++
 	body, _ := io.ReadAll(r.Body)
+	m.mu.Lock()
+	m.hits++
 	m.bodies = append(m.bodies, string(body))
 	m.apiKey = r.Header.Get("Authorization")
+	flakyFirst := m.mode == "flaky" && r.URL.Path == "/v1/models" && m.hits == 1
+	m.mu.Unlock()
 
 	// flaky：/v1/models 第一次调用直接断开连接（模拟 unexpected EOF），
 	// 第二次起正常返回——用于验证探测的瞬断自动重试。
-	if m.mode == "flaky" && r.URL.Path == "/v1/models" && m.hits == 1 {
+	if flakyFirst {
 		if hj, ok := w.(http.Hijacker); ok {
 			if conn, _, err := hj.Hijack(); err == nil {
 				_ = conn.Close()
@@ -135,7 +167,7 @@ func (m *mockUpstream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	var req map[string]any
 	_ = json.Unmarshal(body, &req)
-	m.model, _ = req["model"].(string)
+	reqModel, _ := req["model"].(string)
 
 	if stream, _ := req["stream"].(bool); stream {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -160,7 +192,7 @@ func (m *mockUpstream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	writeMockJSON(w, map[string]any{
 		"id":      "chatcmpl-mock",
 		"object":  "chat.completion",
-		"model":   m.model,
+		"model":   reqModel,
 		"choices": []any{map[string]any{"message": map[string]any{"role": "assistant", "content": "hello"}}},
 		"usage":   map[string]any{"prompt_tokens": 10, "completion_tokens": 4, "total_tokens": 14},
 	})
@@ -721,7 +753,7 @@ func TestProviderEnvAPIKeyUsedUpstream(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d", resp.StatusCode)
 	}
-	if got := e.upOK.apiKey; got != "Bearer sk-from-env" {
+	if got := e.upOK.authHeader(); got != "Bearer sk-from-env" {
 		t.Fatalf("upstream authorization = %q, want env-resolved key", got)
 	}
 
@@ -865,8 +897,8 @@ func TestProxyNonStream(t *testing.T) {
 		t.Fatalf("usage = %v", usage)
 	}
 	// 上游收到的是 provider 自己的 Key，而不是用户的自制 Key。
-	if e.upOK.apiKey != "Bearer sk-up-backup" {
-		t.Fatalf("upstream auth = %q", e.upOK.apiKey)
+	if e.upOK.authHeader() != "Bearer sk-up-backup" {
+		t.Fatalf("upstream auth = %q", e.upOK.authHeader())
 	}
 	// 用量已记账。
 	agg := e.rec.Total(e.keyID)
@@ -887,8 +919,8 @@ func TestProxyFailoverToBackup(t *testing.T) {
 		b, _ := io.ReadAll(resp.Body)
 		t.Fatalf("failover failed: %d %s", resp.StatusCode, b)
 	}
-	if e.upBad.hits == 0 || e.upOK.hits == 0 {
-		t.Fatalf("expected both providers to be tried: bad=%d ok=%d", e.upBad.hits, e.upOK.hits)
+	if e.upBad.hitCount() == 0 || e.upOK.hitCount() == 0 {
+		t.Fatalf("expected both providers to be tried: bad=%d ok=%d", e.upBad.hitCount(), e.upOK.hitCount())
 	}
 }
 
@@ -1050,8 +1082,8 @@ func TestProxyStream(t *testing.T) {
 		t.Fatalf("stream usage tokens = %d, want 8", got)
 	}
 	// 流式请求应被注入 stream_options 以索取 usage。
-	if !strings.Contains(e.upOK.bodies[len(e.upOK.bodies)-1], `"include_usage":true`) {
-		t.Fatalf("stream_options not injected: %s", e.upOK.bodies[len(e.upOK.bodies)-1])
+	if !strings.Contains(e.upOK.lastBody(), `"include_usage":true`) {
+		t.Fatalf("stream_options not injected: %s", e.upOK.lastBody())
 	}
 }
 
@@ -1347,8 +1379,8 @@ func TestProbeProviderModels(t *testing.T) {
 	if payload.Models[1].Pricing == nil || payload.Models[1].Pricing.Prompt != "0.45" || payload.Models[1].Pricing.Completion != "0.90" {
 		t.Fatalf("mock-model pricing = %+v, want 0.45/0.90", payload.Models[1].Pricing)
 	}
-	if !strings.HasPrefix(e.upOK.apiKey, "Bearer sk-probe") {
-		t.Fatalf("upstream auth = %q, want Bearer sk-probe", e.upOK.apiKey)
+	if !strings.HasPrefix(e.upOK.authHeader(), "Bearer sk-probe") {
+		t.Fatalf("upstream auth = %q, want Bearer sk-probe", e.upOK.authHeader())
 	}
 	// 余额/额度：探测带 key 时返回 Moonshot 风格余额（全赠送额度）
 	if payload.Balance == nil || payload.Balance.Kind != "moonshot" {
@@ -1382,8 +1414,8 @@ func TestProbeProviderModels(t *testing.T) {
 	if resp4.StatusCode != http.StatusOK {
 		t.Fatalf("env key: status = %d", resp4.StatusCode)
 	}
-	if !strings.HasPrefix(e.upOK.apiKey, "Bearer sk-env-val") {
-		t.Fatalf("env upstream auth = %q", e.upOK.apiKey)
+	if !strings.HasPrefix(e.upOK.authHeader(), "Bearer sk-env-val") {
+		t.Fatalf("env upstream auth = %q", e.upOK.authHeader())
 	}
 
 	// 上游 401 + 未携带 Key → 提示需重新输入 Key（而非让用户误以为 Key 无效）
@@ -1470,8 +1502,8 @@ func TestAgentToolLoop(t *testing.T) {
 		t.Fatalf("usage total = %d, want 30 (final round)", out.Usage.TotalTokens)
 	}
 	// 工具循环确实发生了：mock 收到过第二轮带 tool 结果的请求。
-	if up := e.upOK; up != nil && len(up.bodies) < 2 {
-		t.Fatalf("expected >=2 upstream calls (tool loop), got %d", len(up.bodies))
+	if up := e.upOK; up != nil && up.bodyCount() < 2 {
+		t.Fatalf("expected >=2 upstream calls (tool loop), got %d", up.bodyCount())
 	}
 }
 

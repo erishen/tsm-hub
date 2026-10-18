@@ -18,7 +18,7 @@
         <div style="flex:1">
           <label>Base URL（OpenAI 兼容端点，网关实际地址）</label>
           <input [(ngModel)]="baseUrl" (blur)="saveBaseUrl()" placeholder="http://localhost:9070/v1" style="max-width:520px" />
-          <div class="muted small" style="margin-top:4px">网关监听 <span class="mono">:9070</span>；本机联调默认已填好，部署到服务器时改成对外可达地址（如 <span class="mono">https://llm.example.com/v1</span>）。</div>
+          <div class="muted small" style="margin-top:4px">默认按你当前访问这个管理台的地址（origin + <span class="mono">/v1</span>）自动推断，已包含实际端口（本机映射 <span class="mono">:19070</span>、容器内 <span class="mono">:9070</span>）。部署到服务器/反代后改成对外可达地址（如 <span class="mono">https://llm.example.com/v1</span>）。</div>
         </div>
       </div>
 

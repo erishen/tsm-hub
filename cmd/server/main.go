@@ -14,7 +14,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/fsnotify/fsnotify"
 	"github.com/erishen/tsm-hub/internal/api"
 	"github.com/erishen/tsm-hub/internal/config"
 	"github.com/erishen/tsm-hub/internal/proxy"
@@ -22,6 +21,7 @@ import (
 	"github.com/erishen/tsm-hub/internal/router"
 	"github.com/erishen/tsm-hub/internal/skills"
 	"github.com/erishen/tsm-hub/internal/store"
+	"github.com/fsnotify/fsnotify"
 )
 
 // version 由 Makefile 通过 -ldflags 注入。
@@ -72,10 +72,16 @@ func run(cfg config.Config) error {
 		listen = cfg.Listen
 	}
 
-	// 启动自检：把最容易踩的两个配置问题直接喊出来。
+	// 启动自检：默认/空管理口令是一处公开已知的凭据，直接拒绝启动（fail closed），
+	// 除非显式用 TSM_HUB_ALLOW_INSECURE_ADMIN_TOKEN=1 覆盖（仅供本地临时联调）。
 	if settings.AdminToken == "" || settings.AdminToken == store.DefaultAdminToken {
-		logger.Warn("admin token is still the default placeholder; " +
-			"change settings.admin_token in config.json or pass -admin-token")
+		if os.Getenv("TSM_HUB_ALLOW_INSECURE_ADMIN_TOKEN") == "1" {
+			logger.Warn("admin token is the default placeholder; starting anyway because TSM_HUB_ALLOW_INSECURE_ADMIN_TOKEN=1")
+		} else {
+			return fmt.Errorf("refusing to start with the default admin token: " +
+				"set settings.admin_token in config.json, pass -admin-token, or set $TSM_HUB_ADMIN_TOKEN " +
+				"(or set TSM_HUB_ALLOW_INSECURE_ADMIN_TOKEN=1 to override for local use)")
+		}
 	}
 	if len(st.ListProviders()) == 0 {
 		logger.Warn("no upstream provider configured yet; " +

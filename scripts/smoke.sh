@@ -69,14 +69,16 @@ KEY="$(curl -sf -X POST "http://$GW/api/admin/keys" "${H[@]}" -d '{"name":"smoke
 pass "Key = ${KEY:0:12}…"
 
 echo "→ 非流式请求（应自动从 500 上游降级到 backup）"
-OUT="$(curl -sf -X POST "http://$GW/v1/chat/completions" -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+# X-Llm-Router-Agent: off 关闭 agent 路径：本节验证的是路由 failover 与上游透传，
+# 而 agent 路径会重建响应体（重写 id 为 chatcmpl-<nano>），掩盖原始上游响应。
+OUT="$(curl -sf -X POST "http://$GW/v1/chat/completions" -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" -H "X-Llm-Router-Agent: off" \
   -d '{"model":"smart","messages":[{"role":"user","content":"hi"}]}')"
 echo "$OUT" | grep -q "chatcmpl-mock" || fail "未拿到上游响应: $OUT"
 echo "$OUT" | grep -q '"model":"mock-model"' || fail "模型名未按路由表改写: $OUT"
 pass "failover 生效，model 已改写为 mock-model"
 
 echo "→ 流式请求"
-SSE="$(curl -s -N -X POST "http://$GW/v1/chat/completions" -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+SSE="$(curl -s -N -X POST "http://$GW/v1/chat/completions" -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" -H "X-Llm-Router-Agent: off" \
   -d '{"model":"smart","stream":true,"messages":[{"role":"user","content":"hi"}]}')"
 echo "$SSE" | grep -q "data: " || fail "没有 SSE data 帧"
 echo "$SSE" | grep -q "\[DONE\]" || fail "没有 [DONE] 结束帧"

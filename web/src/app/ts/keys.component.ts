@@ -96,7 +96,11 @@ export class KeysComponent implements OnInit, OnDestroy {
   injectSkillName = '';
   readonly skillOptions = signal<SkillSummary[]>([]);
 
-  /** 对外 Base URL（OpenAI 兼容端点），默认按当前 host 推断 :9070，可改并记忆。 */
+  /**
+   * 对外 Base URL（OpenAI 兼容端点）。管理台与 /v1 同源（同一进程同一端口），
+   * 因此默认按当前访问 origin 推断，保留实际端口（本机映射到 19070、容器内 9070、
+   * 反代后为对外域名），可改并记忆。
+   */
   baseUrl = '';
 
   private static readonly BASE_URL_KEY = 'tsm-hub.public-base-url';
@@ -115,7 +119,7 @@ constructor(private api: ApiService) {}
 
   ngOnInit(): void {
     const saved = localStorage.getItem(KeysComponent.BASE_URL_KEY);
-    this.baseUrl = saved || `http://${window.location.hostname}:9070/v1`;
+    this.baseUrl = saved || `${window.location.origin}/v1`;
     this.load();
     this.api.listSkills().subscribe({
       next: (r) => this.skillOptions.set(r.skills ?? []),

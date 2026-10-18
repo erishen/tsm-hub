@@ -491,9 +491,17 @@ func (s *mcpServer) notify(method string, params map[string]any) {
 }
 
 // readLoop 持续读取 stdout，把响应投递到 pending channel。
+// r 在锁内取一次本地副本：s.read 由 connectStdio 持锁写入、readLoop 并发读取，
+// 用本地副本消除 -race 报出的数据竞争（两者未受同一把锁保护）。
 func (s *mcpServer) readLoop() {
+	s.mu.Lock()
+	r := s.read
+	s.mu.Unlock()
+	if r == nil {
+		return
+	}
 	for {
-		line, err := s.read.ReadString('\n')
+		line, err := r.ReadString('\n')
 		if line != "" {
 			var msg struct {
 				ID     int             `json:"id"`

@@ -506,7 +506,9 @@ func (p *Proxy) toolFetchURL(args toolArgs) (string, error) {
 		return "", err
 	}
 	req.Header.Set("User-Agent", "tsm-hub-agent/1.0")
-	resp, err := p.client.Do(req)
+	client := guardedFetchClient(p.store.Settings().Agent.AllowPrivateURL)
+	defer client.CloseIdleConnections()
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("fetch failed: %w", err)
 	}
@@ -571,15 +573,26 @@ func (p *Proxy) toolReadFile(args toolArgs) string {
 		path = filepath.Join(root, path)
 	}
 	clean := filepath.Clean(path)
-	if clean != root && !strings.HasPrefix(clean, root+string(filepath.Separator)) {
+	// root 自身可能是符号链接；解析它以便与解析后的目标比较。
+	rootReal := root
+	if rr, err := filepath.EvalSymlinks(root); err == nil {
+		rootReal = rr
+	}
+	// 解析目标路径上的符号链接后再做包含检查，否则 root 内的一个指向外部的
+	// 符号链接会绕过下面基于字符串前缀的 . 检查、读到 root 之外的文件。
+	real, err := filepath.EvalSymlinks(clean)
+	if err != nil {
+		return "error: " + err.Error()
+	}
+	if real != rootReal && !strings.HasPrefix(real, rootReal+string(filepath.Separator)) {
 		return "error: path outside read_root"
 	}
-	fi, err := os.Stat(clean)
+	fi, err := os.Stat(real)
 	if err != nil {
 		return "error: " + err.Error()
 	}
 	if fi.IsDir() {
-		entries, err := os.ReadDir(clean)
+		entries, err := os.ReadDir(real)
 		if err != nil {
 			return "error: " + err.Error()
 		}
@@ -589,7 +602,7 @@ func (p *Proxy) toolReadFile(args toolArgs) string {
 		}
 		return "目录内容: " + strings.Join(names, ", ")
 	}
-	b, err := os.ReadFile(clean)
+	b, err := os.ReadFile(real)
 	if err != nil {
 		return "error: " + err.Error()
 	}
@@ -604,6 +617,61 @@ func formatNumber(v float64) string {
 		return fmt.Sprintf("%.0f", v)
 	}
 	return strings.TrimRight(strings.TrimRight(fmt.Sprintf("%.10f", v), "0"), ".")
+}
+
+// guardedFetchClient 返回一个 SSRF 加固的 HTTP 客户端：自定义 DialContext 在建立
+// 连接时解析域名并校验目标 IP（拒绝私网/环回/链路本地），随后按该 IP 直连——即在
+// 拨号层“钉住”已校验的地址，阻断 DNS rebinding（校验后重解析到内网）的 TOCTOU
+// 窗口；同时限制并逐跳校验重定向。allowPrivate=true 时关闭校验（本地联调）。
+func guardedFetchClient(allowPrivate bool) *http.Client {
+	dialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
+	transport := &http.Transport{
+		// 明确不走环境代理，避免 HTTP(S)_PROXY 把请求引到额外一跳。
+		Proxy: nil,
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			host, port, err := net.SplitHostPort(addr)
+			if err != nil {
+				return nil, err
+			}
+			ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+			if err != nil {
+				return nil, err
+			}
+			var lastErr error
+			for _, ipa := range ips {
+				if !allowPrivate && isPrivateIP(ipa.IP) {
+					return nil, fmt.Errorf("blocked: %s resolves to private address %s", host, ipa.IP)
+				}
+				conn, derr := dialer.DialContext(ctx, network, net.JoinHostPort(ipa.IP.String(), port))
+				if derr == nil {
+					return conn, nil
+				}
+				lastErr = derr
+			}
+			if lastErr == nil {
+				lastErr = fmt.Errorf("no addresses for %s", host)
+			}
+			return nil, lastErr
+		},
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 15 * time.Second,
+		DisableKeepAlives:     true,
+	}
+	return &http.Client{
+		Transport: transport,
+		Timeout:   20 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 5 {
+				return fmt.Errorf("stopped after 5 redirects")
+			}
+			if !allowPrivate {
+				if blocked, why := isPrivateURL(req.URL.String()); blocked {
+					return fmt.Errorf("blocked redirect to private address %s", why)
+				}
+			}
+			return nil
+		},
+	}
 }
 
 // isPrivateURL 判断目标地址是否为私网/环回/链路本地（SSRF 防护）。

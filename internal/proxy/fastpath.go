@@ -105,6 +105,9 @@ func (mp *mathParser) parseTerm() (float64, error) {
 			if err != nil {
 				return 0, err
 			}
+			if int64(r) == 0 {
+				return 0, fmt.Errorf("modulo by zero")
+			}
 			v = float64(int64(v) % int64(r))
 		default:
 			return v, nil
@@ -172,13 +175,23 @@ func (mp *mathParser) parseFactor() (float64, error) {
 	return v, nil
 }
 
+// powConst 是连乘保留精确整数结果的上界：指数超过它就走 math.Pow，
+// 避免 `9^999999999` 这类用户可触发的 O(exp) 死循环。
+const powExactMax = 1024
+
 func powFloat(base, exp float64) float64 {
 	if exp == float64(int64(exp)) {
-		r := 1.0
-		for i := int64(0); i < int64(exp); i++ {
-			r *= base
+		e := int64(exp)
+		// 小指数用连乘保留精确整数结果（如 2^10=1024 无浮点误差）；
+		// 超出上界或为负指数交给 math.Pow（O(1)，溢出即返回 ±Inf）。
+		if e >= 0 && e <= powExactMax {
+			r := 1.0
+			for i := int64(0); i < e; i++ {
+				r *= base
+			}
+			return r
 		}
-		return r
+		return math.Pow(base, exp)
 	}
 	// 非整数指数：用指数对数近似（fastpath 仅兜底，整数幂已覆盖常见场景）
 	if base > 0 {
@@ -246,8 +259,8 @@ func tryArithmetic(text string) *fastAnswer {
 		if matched, _ := regexp.MatchString(`^-?\d+(?:\.\d+)?$`, e); matched {
 			continue // 单个数字不是表达式
 		}
-		if _, err := evalMath(e); err != nil {
-			continue
+		if v, err := evalMath(e); err != nil || math.IsInf(v, 0) || math.IsNaN(v) {
+			continue // 非法表达式或溢出（如 9^999999999）→ 不命中
 		}
 		if !containsStr(exprs, e) {
 			exprs = append(exprs, e)
@@ -260,7 +273,7 @@ func tryArithmetic(text string) *fastAnswer {
 	vals := make([]float64, 0, len(exprs))
 	for _, e := range exprs {
 		v, err := evalMath(e)
-		if err != nil {
+		if err != nil || math.IsInf(v, 0) || math.IsNaN(v) {
 			continue
 		}
 		vals = append(vals, v)
@@ -400,11 +413,11 @@ func tryStatistics(text string) *fastAnswer {
 // -- 单位换算 --------------------------------------------------------------------
 
 type conversion struct {
-	pat     *regexp.Regexp
-	label   string
-	target  string
-	factor  float64 // 0 表示用 kind 特殊处理
-	kind    string  // c2f / f2c / ""
+	pat    *regexp.Regexp
+	label  string
+	target string
+	factor float64 // 0 表示用 kind 特殊处理
+	kind   string  // c2f / f2c / ""
 }
 
 var conversions = []conversion{
