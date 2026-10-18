@@ -57,7 +57,7 @@
       <h2>近 7 日 Tokens</h2>
       <div class="bar-chart" *ngIf="days().length; else noData">
         <div class="bar-col" *ngFor="let d of days()">
-          <div class="bar" [style.height.%]="barHeight(d)"></div>
+          <div class="bar-track"><div class="bar" [style.height.%]="barHeight(d)"></div></div>
           <div class="bar-label">{{ d.date.slice(5) }}</div>
         </div>
       </div>
