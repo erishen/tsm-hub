@@ -414,7 +414,7 @@ func TestModelsCatalog(t *testing.T) {
 
 	upsert := func(id, base string, models ...string) {
 		if err := e.store.UpsertProvider(store.Provider{
-			ID: id, Name: id, BaseURL: base, APIKey: "sk-x", Models: models,
+			ID: id, Name: id, BaseURL: base, APIKey: "sk-x", Models: models, Enabled: true,
 		}); err != nil {
 			t.Fatalf("upsert %s: %v", id, err)
 		}
@@ -422,11 +422,19 @@ func TestModelsCatalog(t *testing.T) {
 	upsert("cat-agnes", "http://a/v1", "agnes-2.0-flash", "agnes-video-v2.0")
 	upsert("cat-kimi", "http://k/v1", "kimi-k2.7-code", "agnes-2.0-flash") // 重复模型 → 合并 providers
 	upsert("cat-or", "http://o/v1", "nex-agi/nex-n2.5-mini:free", "brand-new-video-gen")
+	// 禁用的 Provider：与 cat-kimi 同模型，用于对照 provider_enabled 与 score 罚分。
+	if err := e.store.UpsertProvider(store.Provider{
+		ID: "cat-off", Name: "cat-off", BaseURL: "http://off/v1", APIKey: "sk-x",
+		Models: []string{"kimi-k2.7-code"}, Enabled: false,
+	}); err != nil {
+		t.Fatalf("upsert cat-off: %v", err)
+	}
 
 	// 探测快照覆盖：模拟 cat-agnes 最近一次探测，上游把 agnes-2.0-flash 改成收费（$0.01/$0.02）且上下文 200K。
 	if err := e.store.UpsertProvider(store.Provider{
 		ID: "cat-agnes", Name: "cat-agnes", BaseURL: "http://a/v1", APIKey: "sk-x",
 		Models:  []string{"agnes-2.0-flash", "agnes-video-v2.0"},
+		Enabled: true,
 		ProbeAt: time.Now(),
 		ProbeModels: []store.ProbeModel{
 			{ID: "agnes-2.0-flash", ContextLength: 200000, Free: false,
@@ -455,6 +463,8 @@ func TestModelsCatalog(t *testing.T) {
 				Prompt     string `json:"prompt"`
 				Completion string `json:"completion"`
 			} `json:"pricing"`
+			ProviderEnabled bool `json:"provider_enabled"`
+			RouteScore      int  `json:"route_score"`
 		} `json:"models"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
@@ -470,6 +480,8 @@ func TestModelsCatalog(t *testing.T) {
 			Prompt     string `json:"prompt"`
 			Completion string `json:"completion"`
 		}
+		ProviderEnabled bool
+		RouteScore      int
 	}{}
 	for _, m := range payload.Models {
 		byKey[m.ID+"@"+m.Provider] = struct {
@@ -482,7 +494,9 @@ func TestModelsCatalog(t *testing.T) {
 				Prompt     string `json:"prompt"`
 				Completion string `json:"completion"`
 			}
-		}{m.Provider, m.Category, m.Ctx, m.ContextLength, m.Free, m.Pricing}
+			ProviderEnabled bool
+			RouteScore      int
+		}{m.Provider, m.Category, m.Ctx, m.ContextLength, m.Free, m.Pricing, m.ProviderEnabled, m.RouteScore}
 	}
 	// 同一模型在不同 Provider 分行展示，各自独立免费/价格状态。
 	aAgnes := byKey["agnes-2.0-flash@cat-agnes"]
@@ -505,6 +519,19 @@ func TestModelsCatalog(t *testing.T) {
 	k := byKey["kimi-k2.7-code@cat-kimi"]
 	if k.Category != "text" || k.Ctx != "256K" {
 		t.Fatalf("kimi-k2.7-code = %+v, want text/256K", k)
+	}
+	if !k.ProviderEnabled {
+		t.Fatalf("kimi-k2.7-code@cat-kimi provider_enabled = false, want true")
+	}
+	// 禁用的 Provider：目录置灰（provider_enabled=false），且 score 比同模型启用项低 230
+	// （健康+30 不计 + 禁用 -200）——防止「in_route 顶格高分却不可用」的误导（alibailian 实况）。
+	kOff := byKey["kimi-k2.7-code@cat-off"]
+	if kOff.Provider != "cat-off" || kOff.ProviderEnabled {
+		t.Fatalf("kimi-k2.7-code@cat-off = %+v, want provider_enabled=false", kOff)
+	}
+	if want := k.RouteScore - 230; kOff.RouteScore != want {
+		t.Fatalf("kimi-k2.7-code@cat-off score = %d, want %d (enabled %d - health30 - disabled200)",
+			kOff.RouteScore, want, k.RouteScore)
 	}
 	o := byKey["nex-agi/nex-n2.5-mini:free@cat-or"]
 	if o.Category != "text" || !o.Free {

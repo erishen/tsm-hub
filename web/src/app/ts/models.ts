@@ -193,6 +193,8 @@ export interface CatalogModel {
   route_score?: number;
   /** 是否在某条路由的 targets 里（未接入路由的模型不会被外部调用命中）。 */
   in_route?: boolean;
+  /** 该 Provider 是否启用。false = 已禁用（如额度耗尽），模型即使在路由里也不会被命中。 */
+  provider_enabled?: boolean;
   /** 是否支持 tool calling（function calling）。默认 true；曾因带 tools 返回 400 则为 false。 */
   supports_tools?: boolean;
 }

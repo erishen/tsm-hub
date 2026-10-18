@@ -7,12 +7,12 @@ import { CatalogModel } from './models';
 const CATEGORY_LABEL: Record<string, string> = {
   text: '文本对话 / 编码',
   vision: '视觉理解',
-  image: '图像生成',
-  video: '视频生成',
-  audio: '音频生成',
-  embedding: '向量嵌入',
-  specialized: '专用能力（OCR/重排/笔记）',
-  other: '内容安全 / 其他',
+  image: '图像生成 · 非对话',
+  video: '视频生成 · 非对话',
+  audio: '音频生成 · 非对话',
+  embedding: '向量嵌入 · 非对话',
+  specialized: '专用能力（OCR/重排/笔记）· 非对话',
+  other: '内容安全 / 其他 · 非对话',
 };
 
 @Component({

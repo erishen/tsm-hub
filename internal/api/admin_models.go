@@ -449,7 +449,7 @@ func (s *Server) handleRefreshModels(w http.ResponseWriter, r *http.Request) {
 		wg.Add(1)
 		go func(p store.Provider) {
 			defer wg.Done()
-			ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+			ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 			defer cancel()
 			out, status, body, err := s.probeModelsOnce(ctx, p.BaseURL, p.ResolvedAPIKey())
 			mu.Lock()
@@ -497,6 +497,9 @@ func (s *Server) buildCatalog() map[string]any {
 		RouteScore int `json:"route_score"`
 		// InRoute 表示该 (provider, model) 是否在某条路由的 targets 里（未接入路由的模型不会被外部调用命中）。
 		InRoute bool `json:"in_route"`
+		// ProviderEnabled 表示该 Provider 是否处于启用状态。禁用的 Provider 即使
+		// 模型在路由 targets 里也不会被命中（如免费额度耗尽临时禁用），目录需置灰提示。
+		ProviderEnabled bool `json:"provider_enabled"`
 		// SupportsTools 表示该模型是否支持 tool calling（function calling）。
 		// 默认 true（假设支持）；如果曾因带 tools 返回 400 被标记不可用，则为 false。
 		SupportsTools bool `json:"supports_tools"`
@@ -523,7 +526,7 @@ func (s *Server) buildCatalog() map[string]any {
 			if !has {
 				meta = inferModelMeta(id)
 			}
-			it := &item{ID: id, Provider: p.ID, Category: meta.Category, Purpose: meta.Purpose, Ctx: meta.Ctx, SupportsTools: true}
+			it := &item{ID: id, Provider: p.ID, Category: meta.Category, Purpose: meta.Purpose, Ctx: meta.Ctx, SupportsTools: true, ProviderEnabled: p.Enabled}
 			// 曾 404 的模型：冷却期内标灰，路由自动跳过。
 			if reason, unavail := s.store.ModelUnavailable(p.ID, id); unavail {
 				it.Unavailable = reason
@@ -571,14 +574,15 @@ func (s *Server) buildCatalog() map[string]any {
 				// OpenRouter :free 后缀约定（id 层面即表示免费）。
 				it.Free = true
 			}
-			// 路由综合评分：免费+100、健康+30、延迟分、在路由里+50、不可用-100。
+			// 路由综合评分：免费+100、健康+30、延迟分、在路由里+50、不可用-100、Provider 禁用-200。
 			score := 0
 			if it.Free {
 				score += 100
 			}
 			if it.Unavailable != "" {
 				score -= 100
-			} else if s.health.Available(p.ID) {
+			} else if p.Enabled && s.health.Available(p.ID) {
+				// 禁用的 Provider 不参与路由，健康分不计（否则禁用项也显示顶格高分，误导）。
 				score += 30
 				if lat := s.health.Latency(p.ID); lat > 0 {
 					if lat < 3000 {
@@ -600,6 +604,10 @@ func (s *Server) buildCatalog() map[string]any {
 				if it.InRoute {
 					break
 				}
+			}
+			if !p.Enabled {
+				// 禁用的 Provider：模型可能仍在路由 targets 里，但不会被命中，重罚示警。
+				score -= 200
 			}
 			it.RouteScore = score
 			out = append(out, it)
