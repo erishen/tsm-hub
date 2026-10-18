@@ -597,6 +597,28 @@ func (p *Proxy) attempt(w http.ResponseWriter, r *http.Request, c router.Candida
 				Err:           fmt.Sprintf("upstream %d (tools unsupported, failover): %s", resp.StatusCode, decodeUpstreamBody(resp, b)),
 				ProviderFault: false, ModelFault: true}, true
 		}
+		// 405 Method Not Allowed：该 endpoint 不接受 POST——provider 侧部署形态/
+		// 配置问题（OpenAI 兼容协议的 /chat/completions 都应接受 POST）。与
+		// 400-tools 同等对待：failover 换候选 + 标记该 provider×模型不可用
+		//（默认 30 分钟，避免每个请求先白吃一次 405），不计 provider 健康熔断。
+		// 实证：nvidia/z-ai/glm-5.3-flash、bai/qwen3.8-flash 长期 405，
+		// 没有这条时每请求先白吃一次再把 405 透传给客户端（2026-10-18 晚）。
+		if resp.StatusCode == http.StatusMethodNotAllowed {
+			unavailSec := p.store.Settings().Smart.UnavailableSec
+			if unavailSec <= 0 {
+				unavailSec = 1800
+			}
+			p.store.MarkModelUnavailable(c.ProviderID, c.UpstreamModel,
+				"405 method not allowed: "+decodeUpstreamBody(resp, b),
+				time.Duration(unavailSec)*time.Second)
+			slog.Warn("upstream 405 method not allowed, failover",
+				"provider", c.ProviderID, "model", req.Model, "upstream_model", c.UpstreamModel,
+				"body", decodeUpstreamBody(resp, b))
+			return Result{ProviderID: c.ProviderID, UpstreamModel: c.UpstreamModel, Status: resp.StatusCode,
+				Stream: req.Stream, Latency: time.Since(started),
+				Err:           fmt.Sprintf("upstream %d (method not allowed, failover): %s", resp.StatusCode, decodeUpstreamBody(resp, b)),
+				ProviderFault: false, ModelFault: true}, true
+		}
 	}
 
 	if req.Stream {

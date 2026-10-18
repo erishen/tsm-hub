@@ -96,6 +96,13 @@ func (m *mockUpstream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"error":{"message":"Incorrect API key provided","type":"incorrect_api_key_error"}}`))
 		return
 	}
+	// 405：该 endpoint 不接受 POST（provider 侧形态问题，如 nvidia/bai 实测），
+	// 应 failover 到下一候选并标记该 provider×模型不可用。
+	if m.mode == "405" {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		_, _ = w.Write([]byte(`{"error":{"message":"Method not allowed for this endpoint","type":"invalid_request_error"}}`))
+		return
+	}
 	// error200：HTTP 200 但 body 是 OpenAI 错误体（部分上游过载时如此），应触发 failover。
 	if m.mode == "error200" {
 		writeMockJSON(w, map[string]any{"error": map[string]any{
@@ -1689,6 +1696,66 @@ func TestError200ModelNotFoundMarksUnavailable(t *testing.T) {
 	}
 	if hits := upAgg.hitCount(); hits != 1 {
 		t.Fatalf("agg hit count = %d, want 1 (unavailable model must not be retried)", hits)
+	}
+}
+
+// TestUpstream405FailsOverAndMarksUnavailable 验证上游 405（endpoint 不接受
+// POST，nvidia/bai 实测形态）触发 failover 并标记模型不可用，而不是把 405
+// 透传给客户端、下个请求再白吃一次。
+func TestUpstream405FailsOverAndMarksUnavailable(t *testing.T) {
+	e := newEnv(t, "ok")
+	defer e.server.Close()
+
+	upBad := &mockUpstream{mode: "405"}
+	badSrv := httptest.NewServer(upBad)
+	defer badSrv.Close()
+	if err := e.store.UpsertProvider(store.Provider{
+		ID: "m405", Name: "M405", BaseURL: badSrv.URL + "/v1",
+		APIKey: "sk-up-405", Models: []string{"gpt-405"}, Enabled: true,
+		Weight: 100, Priority: 1, TimeoutMS: 5000,
+	}); err != nil {
+		t.Fatalf("upsert m405 provider: %v", err)
+	}
+	if err := e.store.UpsertRoute(store.Route{
+		Model: "r405", Strategy: "failover",
+		Targets: []store.RouteTarget{
+			{ProviderID: "m405", Model: "gpt-405", Priority: 1, Weight: 100},
+			{ProviderID: "backup", Model: "gpt-mock", Priority: 2, Weight: 100},
+		},
+	}); err != nil {
+		t.Fatalf("upsert route: %v", err)
+	}
+	h := e.authHeaders()
+	h["X-Llm-Router-Agent"] = "off"
+
+	// 第一笔：m405 返回 405 → failover 到 backup。
+	resp := e.do(t, http.MethodPost, "/v1/chat/completions",
+		`{"model":"r405","messages":[{"role":"user","content":"hi"}]}`, h)
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("status = %d %s", resp.StatusCode, b)
+	}
+	resp.Body.Close()
+	if got := resp.Header.Get("X-Llm-Router-Provider"); got != "backup" {
+		t.Fatalf("X-Llm-Router-Provider = %q, want backup (405 should failover, not pass through)", got)
+	}
+	// 405 是部署形态问题，不计 provider 健康熔断。
+	if f := e.srv.health.Failures("m405"); f != 0 {
+		t.Fatalf("m405 failures = %d, want 0 (405 is not a provider fault)", f)
+	}
+	// 模型应被标记不可用，第二笔直接 backup，m405 不再接到请求。
+	if _, ok := e.store.ModelUnavailable("m405", "gpt-405"); !ok {
+		t.Fatal("gpt-405 not marked unavailable after upstream 405")
+	}
+	resp2 := e.do(t, http.MethodPost, "/v1/chat/completions",
+		`{"model":"r405","messages":[{"role":"user","content":"hi again"}]}`, h)
+	resp2.Body.Close()
+	if got := resp2.Header.Get("X-Llm-Router-Provider"); got != "backup" {
+		t.Fatalf("second request provider = %q, want backup (m405 should be skipped)", got)
+	}
+	if hits := upBad.hitCount(); hits != 1 {
+		t.Fatalf("m405 hit count = %d, want 1 (unavailable model must not be retried)", hits)
 	}
 }
 
