@@ -303,9 +303,9 @@ button:disabled { opacity: .55; cursor: not-allowed; }
   z-index: 20;
   min-width: 150px;
   padding: 8px 10px;
-  background: var(--bg-elev, #1f2430);
-  color: var(--text, #e8eaf0);
-  border: 1px solid var(--border, #3a4150);
+  background: #1f2430;
+  color: #e8eaf0;
+  border: 1px solid #3a4150;
   border-radius: 8px;
   box-shadow: 0 6px 20px rgba(0, 0, 0, .35);
   font-size: 12px;
@@ -316,10 +316,10 @@ button:disabled { opacity: .55; cursor: not-allowed; }
   transition: opacity .12s ease;
 }
 .bar-col:hover .bar-tip { opacity: 1; visibility: visible; }
-.bar-tip .tip-date { font-weight: 600; margin-bottom: 4px; }
+.bar-tip .tip-date { font-weight: 600; margin-bottom: 4px; color: #ffffff; }
 .bar-tip .tip-row { display: flex; justify-content: space-between; gap: 12px; }
-.bar-tip .tip-row span { color: var(--muted, #9aa3b2); }
-.bar-tip .tip-row b { font-weight: 600; }
+.bar-tip .tip-row span { color: #9aa3b2; }
+.bar-tip .tip-row b { font-weight: 600; color: #e8eaf0; }
 .bar-tip .tip-row.tip-err b { color: #ff7a7a; }
 .bar-col .bar-track { flex: 1 1 auto; width: 100%; display: flex; align-items: flex-end; }
 .bar {
