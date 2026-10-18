@@ -297,7 +297,7 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .bar-col:hover .bar { opacity: 1; }
 .bar-tip {
   position: absolute;
-  bottom: calc(100% - 18px);
+  top: calc(100% + 6px);
   left: 50%;
   transform: translateX(-50%);
   z-index: 20;
