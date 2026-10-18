@@ -57,6 +57,15 @@
       <h2>近 7 日 Tokens</h2>
       <div class="bar-chart" *ngIf="days().length; else noData">
         <div class="bar-col" *ngFor="let d of days()">
+          <div class="bar-tip">
+            <div class="tip-date">{{ d.date }}</div>
+            <div class="tip-row"><span>Tokens</span><b>{{ compact(d.total_tokens) }}</b></div>
+            <div class="tip-row"><span>Prompt</span><b>{{ compact(d.prompt_tokens) }}</b></div>
+            <div class="tip-row"><span>Completion</span><b>{{ compact(d.completion_tokens) }}</b></div>
+            <div class="tip-row"><span>请求</span><b>{{ d.requests }}</b></div>
+            <div class="tip-row"><span>成本</span><b>{{ usd(d.cost_usd) }}</b></div>
+            <div class="tip-row tip-err" *ngIf="d.errors"><span>错误</span><b>{{ d.errors }}</b></div>
+          </div>
           <div class="bar-track"><div class="bar" [style.height.%]="barHeight(d)"></div></div>
           <div class="bar-label">{{ d.date.slice(5) }}</div>
         </div>
