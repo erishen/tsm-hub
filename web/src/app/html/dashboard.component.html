@@ -67,7 +67,10 @@
             <div class="tip-row tip-err" *ngIf="d.errors"><span>错误</span><b>{{ d.errors }}</b></div>
           </div>
           <div class="bar-track"><div class="bar" [style.height.%]="barHeight(d)"></div></div>
-          <div class="bar-label">{{ d.date.slice(5) }}</div>
+          <div class="bar-label">
+            <b class="bar-value">{{ compact(d.total_tokens) }}</b>
+            <span class="bar-date">{{ d.date.slice(5) }}</span>
+          </div>
         </div>
       </div>
       <ng-template #noData><div class="empty">暂无用量数据</div></ng-template>
