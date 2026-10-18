@@ -469,10 +469,7 @@ func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 			fmt.Sprintf("request body exceeds %d bytes", max))
 		return
 	}
-	path := r.URL.Path
-	if path == "/v1" {
-		path = "/v1/chat/completions"
-	}
+	path := normalizeInferencePath(r.URL.Path)
 	// 技能注入：key 配置了 inject_skills 时，把技能库文本注入 chat 请求的
 	// system prompt（只对 chat/completions 生效）。tsm-hub 由此成为
 	// "带技能的路由网关"——任意 OpenAI 兼容客户端走这里都能感知技能库。
@@ -484,6 +481,20 @@ func (s *Server) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.proxy.Handle(w, r, key, path, body)
+}
+
+// normalizeInferencePath 归一化推理入口路径。OpenAI 兼容面只暴露一个推理
+// 路径 /v1/chat/completions；个别客户端会在其后误拼子路径（/tools、/mcps、
+// /skills 等），原样转发会被上游回 404 "Invalid URL (GET /v1/chat/completions/tools)"。
+// 这里统一归位（/v1 的 shortcut 也一并处理）。
+func normalizeInferencePath(path string) string {
+	if path == "/v1" {
+		return "/v1/chat/completions"
+	}
+	if strings.HasPrefix(path, "/v1/chat/completions/") {
+		return "/v1/chat/completions"
+	}
+	return path
 }
 
 // injectSystemMessage 把 content 作为 system 消息插入 chat body 的 messages 头部。

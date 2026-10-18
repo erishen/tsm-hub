@@ -335,6 +335,7 @@ func (p *Proxy) agentRound(r *http.Request, path, model string, msgs []chatMessa
 		return nil, "", err.Error(), 0, false
 	}
 	var lastErr string
+	var lastProvider string
 	for _, c := range cands {
 		body, errMsg, status := p.agentUpstream(r, c, path, msgs, tools)
 		if status > 0 {
@@ -342,11 +343,19 @@ func (p *Proxy) agentRound(r *http.Request, path, model string, msgs []chatMessa
 		}
 		if errMsg != "" {
 			lastErr = errMsg
+			lastProvider = c.ProviderID
+			// 客户端断开/取消：不是上游的错，也不再换候选（客户端已经离开，
+			// 换下游只是浪费一次上游调用）。与主链路 attempt 的处理一致。
+			if strings.Contains(errMsg, "context canceled") {
+				return nil, c.ProviderID, errMsg, 0, false
+			}
 			continue
 		}
 		return body, c.ProviderID, "", 0, true
 	}
-	return nil, "", orDefault(lastErr, "all upstream providers failed"), 0, false
+	// 归因最后一个候选：它的错误就是最终透传的那条（历史上全失败时返回
+	// 空 provider，用量统计出现无主记录）。
+	return nil, lastProvider, orDefault(lastErr, "all upstream providers failed"), 0, false
 }
 
 // keyAllowSets 把 key 的白名单配置转成集合：nil 表示不限制。
@@ -400,9 +409,10 @@ func (p *Proxy) agentUpstream(r *http.Request, c router.Candidate, path string, 
 	resp, err := p.client.Do(upReq)
 	if err != nil {
 		// 客户端断开/取消（context canceled）不是上游故障，不计入健康熔断。
-		if !isClientAbort(err) {
-			p.health.ReportFailure(c.ProviderID, err.Error())
+		if isClientAbort(err) {
+			return nil, fmt.Sprintf("client aborted: %v", err), 0
 		}
+		p.health.ReportFailure(c.ProviderID, err.Error())
 		return nil, fmt.Sprintf("upstream request failed: %v", err), 0
 	}
 	defer resp.Body.Close()

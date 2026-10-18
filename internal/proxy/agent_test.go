@@ -1,9 +1,19 @@
 package proxy
 
 import (
+	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
+	"strings"
+	"sync/atomic"
 	"testing"
+
+	"github.com/erishen/tsm-hub/internal/quota"
+	"github.com/erishen/tsm-hub/internal/router"
+	"github.com/erishen/tsm-hub/internal/skills"
+	"github.com/erishen/tsm-hub/internal/store"
 )
 
 func TestEvalExpr(t *testing.T) {
@@ -152,5 +162,98 @@ func TestAgentChatGate(t *testing.T) {
 	// 无 messages → 不启用（保持旧路径兼容）
 	if agentGate([]byte(`{"model":"m"}`), false, false, false) {
 		t.Fatal("no messages should disable agent")
+	}
+}
+
+// newTwoCandAgentProxy 构造一个双候选（first/second）的 agent Proxy，
+// handler 决定各上游的响应行为。策略 failover 保证 first 优先。
+func newTwoCandAgentProxy(t *testing.T, first, second http.HandlerFunc) *Proxy {
+	t.Helper()
+	firstSrv := httptest.NewServer(first)
+	t.Cleanup(firstSrv.Close)
+	secondSrv := httptest.NewServer(second)
+	t.Cleanup(secondSrv.Close)
+	st, err := store.New(filepath.Join(t.TempDir(), "config.json"))
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	if err := st.Update(func(c *store.Config) error {
+		c.Settings.DefaultTimeoutMS = 5000
+		c.Providers = []store.Provider{
+			{ID: "first", Name: "first", BaseURL: firstSrv.URL + "/v1", APIKey: "k", Models: []string{"m"}, Enabled: true, Weight: 100, Priority: 1},
+			{ID: "second", Name: "second", BaseURL: secondSrv.URL + "/v1", APIKey: "k", Models: []string{"m"}, Enabled: true, Weight: 100, Priority: 2},
+		}
+		c.Routes = []store.Route{
+			{Model: "m", Strategy: "failover", Targets: []store.RouteTarget{
+				{ProviderID: "first", Model: "m", Priority: 1},
+				{ProviderID: "second", Model: "m", Priority: 2},
+			}},
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("store update: %v", err)
+	}
+	h := router.NewTracker(3, 5)
+	rec, err := quota.NewRecorder(filepath.Join(t.TempDir(), "usage"))
+	if err != nil {
+		t.Fatalf("recorder: %v", err)
+	}
+	t.Cleanup(func() { _ = rec.Close() })
+	return New(st, router.New(st, h), h, rec, skills.New(""))
+}
+
+// 客户端断开/取消时 agentRound 必须立即短路：归因当前候选、不再换下游
+// （客户端已经离开，换候选只是浪费上游调用）。与主链路 attempt 一致。
+func TestAgentRoundClientAbortShortCircuit(t *testing.T) {
+	var secondHits int32
+	p := newTwoCandAgentProxy(t,
+		func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusInternalServerError) },
+		func(w http.ResponseWriter, r *http.Request) {
+			atomic.AddInt32(&secondHits, 1)
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"}}]}`))
+		})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // 已取消的上下文：任何上游 Do 都失败于 context canceled
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(ctx)
+
+	_, provider, errText, status, ok := p.agentRound(req, "/v1/chat/completions", "m", nil, nil)
+	if ok || status != 0 {
+		t.Fatalf("ok=%v status=%d, want failure", ok, status)
+	}
+	if provider != "first" {
+		t.Fatalf("provider = %q, want first (abort must attribute current candidate)", provider)
+	}
+	if !strings.Contains(errText, "context canceled") {
+		t.Fatalf("errText = %q, want context canceled", errText)
+	}
+	if n := atomic.LoadInt32(&secondHits); n != 0 {
+		t.Fatalf("second upstream hits = %d, want 0 (no failover after client abort)", n)
+	}
+}
+
+// 全部候选都失败时归因最后一个候选（它的错误就是最终透传的那条）；
+// 历史上这里返回空 provider，用量统计出现无主记录。
+func TestAgentRoundAttributesLastCandidate(t *testing.T) {
+	p := newTwoCandAgentProxy(t,
+		func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"error":{"message":"down"}}`))
+		},
+		func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"error":{"message":"down"}}`))
+		})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	_, provider, errText, status, ok := p.agentRound(req, "/v1/chat/completions", "m", nil, nil)
+	if ok || status != 0 {
+		t.Fatalf("ok=%v status=%d, want failure", ok, status)
+	}
+	if provider != "second" {
+		t.Fatalf("provider = %q, want second (last candidate attribution)", provider)
+	}
+	if errText == "" {
+		t.Fatal("errText empty, want last candidate error")
 	}
 }

@@ -1705,3 +1705,25 @@ func TestClientToolsInvoke(t *testing.T) {
 		t.Fatalf("recall = %q", got)
 	}
 }
+
+// 客户端误拼的 chat/completions 子路径（/tools、/mcps、/skills…）必须归一化到
+// /v1/chat/completions，否则上游回 404 "Invalid URL"；/v1 shortcut 同样处理。
+func TestNormalizeInferencePath(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"/v1", "/v1/chat/completions"},
+		{"/v1/", "/v1/"},
+		{"/v1/chat/completions", "/v1/chat/completions"},
+		{"/v1/chat/completions/", "/v1/chat/completions"},
+		{"/v1/chat/completions/tools", "/v1/chat/completions"},
+		{"/v1/chat/completions/mcps", "/v1/chat/completions"},
+		{"/v1/chat/completions/skills", "/v1/chat/completions"},
+		{"/v1/models", "/v1/models"},
+		{"/v1/embeddings", "/v1/embeddings"},
+		{"/v1/chat/completionsfoo", "/v1/chat/completionsfoo"}, // 无斜杠不算子路径，保持原样
+	}
+	for _, c := range cases {
+		if got := normalizeInferencePath(c.in); got != c.want {
+			t.Errorf("normalizeInferencePath(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}

@@ -234,7 +234,10 @@ func (p *Proxy) Handle(w http.ResponseWriter, r *http.Request, key store.APIKey,
 	// 客户端（如 ax-explorer 的退避策略）据此区分「限流可重试」与
 	// 「配额耗尽别再试」；5xx/网络错误仍报 502。
 	res := Result{
-		ProviderID: strings.Join(providerIDs(cands), ","),
+		// 归因最后一个候选：它的错误就是透传给客户端的那条。完整尝试链在
+		// Failover 数组里；早年把全部候选 id 逗号拼进 ProviderID 会污染
+		// 用量统计的 provider 维度（出现 "nvidia,nvidia,nvidia" 幻影分类）。
+		ProviderID: cands[len(cands)-1].ProviderID,
 		Status:     lastUpstreamStatus(lastErr),
 		Stream:     req.Stream,
 		Latency:    time.Since(started),
@@ -248,9 +251,6 @@ func (p *Proxy) Handle(w http.ResponseWriter, r *http.Request, key store.APIKey,
 	return res
 }
 
-// lastUpstreamStatus 从失败链的 error 文本里解析最后一步的上游状态码
-// （attempt 生成 "upstream 429: …" / "upstream 403: …" 格式）。解析不出
-// 按网络故障处理（502）。
 // isClientAbort 判断错误是否源于客户端断开/取消（context canceled）。
 // 客户端取消不是上游故障：不计入 provider 健康熔断，也不值得 failover。
 func isClientAbort(err error) bool {
@@ -288,14 +288,6 @@ func lastUpstreamStatus(lastErr string) int {
 		}
 	}
 	return http.StatusBadGateway
-}
-
-func providerIDs(cs []router.Candidate) []string {
-	out := make([]string, 0, len(cs))
-	for _, c := range cs {
-		out = append(out, c.ProviderID)
-	}
-	return out
 }
 
 func orDefault(s, def string) string {
