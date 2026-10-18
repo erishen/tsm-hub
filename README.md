@@ -579,3 +579,7 @@ make cover   # Coverage
 
 ## Related Articles
 - [tsm-hub: Bringing LLMs, Tools, MCPs, and Skills into One Unified Gateway](https://erishen.cn/tsm_hub-en/)
+
+## License
+
+[MIT](./LICENSE)

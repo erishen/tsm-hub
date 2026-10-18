@@ -469,3 +469,7 @@ make cover   # 覆盖率
 
 ## 相关文章
 - [tsm-hub：把 LLM、Tools、MCP、Skills 收进一个统一网关](https://erishen.cn/tsm_hub/)
+
+## 许可证
+
+[MIT](./LICENSE)
