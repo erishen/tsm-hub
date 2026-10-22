@@ -320,6 +320,25 @@ func isModelNotFound(body string) bool {
 	return false
 }
 
+// isInvalidToolName 判断上游 400 是否由「工具/函数名非法」引起。
+//
+// OpenAI 规范要求 function name 匹配 ^[a-zA-Z0-9_-]+$；带点号、空格、斜杠等
+// 字符会让严格校验的上游（GLM/DeepSeek/NVIDIA）直接 400。这与「模型不支持
+// tool calling」不同：failover 到任何规范上游都会得到同样的 400，而宽容的
+// 弱模型可能接受请求却输出残缺 tool_calls，反而掩盖客户端 bug。
+//
+// 只匹配带有明确名称线索的响应，避免把普通 tools 不支持错误误判。
+func isInvalidToolName(body string) bool {
+	lower := strings.ToLower(body)
+	if strings.Contains(lower, "function.name") ||
+		strings.Contains(lower, "function at index") ||
+		strings.Contains(lower, "tool name") ||
+		(strings.Contains(lower, "tools[") && strings.Contains(lower, "name")) {
+		return true
+	}
+	return strings.Contains(lower, "invalid name") && strings.Contains(lower, "function")
+}
+
 // attempt 尝试把请求转发给某个候选。
 // 返回值 retryable=true 表示本次没有向客户端写出任何字节，可以换下一个候选重试。
 // clientFor 返回该 Provider 使用的 http.Client：
@@ -576,6 +595,24 @@ func (p *Proxy) attempt(w http.ResponseWriter, r *http.Request, c router.Candida
 				Stream: req.Stream, Latency: time.Since(started),
 				Err:           fmt.Sprintf("upstream %d (model unavailable): %s", resp.StatusCode, decodeUpstreamBody(resp, b)),
 				ProviderFault: true, ModelFault: true}, true
+		}
+		// 400 且请求带 tools：先区分「工具名非法」和「模型不支持 tools」。
+		// 工具名非法（违反 OpenAI 的 ^[a-zA-Z0-9_-]+$）不是上游能力问题：
+		// failover 无法修复，换到宽容的弱模型（Qwen3-8B）反而会把工具调用
+		// 吐成正文。直接 400 回客户端，让它改工具名，且不把模型标记不可用。
+		// 实证：2026-10-20 ax-agent 的 MCP 工具名 "mcp_local_echo.ping" 让
+		// GLM/DeepSeek 返回 400，网关 failover 到 Qwen 后任务静默失败。
+		if resp.StatusCode == http.StatusBadRequest && len(req.Tools) > 0 &&
+			isInvalidToolName(decodeUpstreamBody(resp, b)) {
+			msg := "invalid tool/function name (must match ^[a-zA-Z0-9_-]+$): " +
+				decodeUpstreamBody(resp, b)
+			slog.Warn("upstream 400 invalid tool name, refusing failover",
+				"provider", c.ProviderID, "model", req.Model, "upstream_model", c.UpstreamModel,
+				"tools_count", len(req.Tools), "body", decodeUpstreamBody(resp, b))
+			writeError(w, http.StatusBadRequest, "invalid_tool_name", msg)
+			return Result{ProviderID: c.ProviderID, UpstreamModel: c.UpstreamModel,
+				Status: http.StatusBadRequest, Stream: req.Stream, Latency: time.Since(started),
+				Err: msg, ProviderFault: false, ModelFault: false}, false
 		}
 		// 400 且请求带 tools：很可能是该模型不支持 tool calls（如部分免费模型），
 		// 触发 failover 换到下一个候选，避免客户端拿到 400 后无法自动降级。

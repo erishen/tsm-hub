@@ -179,3 +179,61 @@ func TestNonStreamLongBodyNotTruncated(t *testing.T) {
 		t.Fatalf("response body too short: %d bytes, want > 8000", len(body))
 	}
 }
+
+// TestInvalidToolNameReturns400WithoutFailover 验证工具名非法时不再 failover：
+// 严格上游 400 必须原样（附带明确 code）回给客户端，而不是降级到弱模型后
+// 产生残缺 tool call。见 2026-10-20 mcp_local_echo.ping 事故。
+func TestInvalidToolNameReturns400WithoutFailover(t *testing.T) {
+	goodHits := 0
+	p, w, _ := newFailoverFixture(t,
+		func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":{"message":"Function at index 33 has an invalid name: \"mcp_local_echo.ping\". Only a-z, A-Z, 0-9, underscores, and dashes are allowed.","type":"invalid_request_error"}}`))
+		},
+		func(w http.ResponseWriter, r *http.Request) {
+			goodHits++
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"cmpl-ok","object":"chat.completion","model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`))
+		},
+	)
+	body := `{"model":"m","messages":[{"role":"user","content":"hi"}],"tools":[{"type":"function","function":{"name":"mcp_local_echo.ping","parameters":{"type":"object","properties":{}}}}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	res := p.Handle(w, req, store.APIKey{ID: "k1"}, "/v1/chat/completions", []byte(body))
+
+	if res.Status != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (err=%s)", res.Status, res.Err)
+	}
+	if res.Attempt != 1 {
+		t.Fatalf("attempt = %d, want 1 (invalid tool name must not failover)", res.Attempt)
+	}
+	if goodHits != 0 {
+		t.Fatalf("good upstream hits = %d, want 0", goodHits)
+	}
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("client status = %d, want 400", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "invalid_tool_name") {
+		t.Fatalf("client body = %s, want invalid_tool_name code", w.Body.String())
+	}
+}
+
+func TestIsInvalidToolName(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want bool
+	}{
+		{"nvidia function index", `Function at index 33 has an invalid name: "mcp_local_echo.ping". Only a-z, A-Z, 0-9, underscores, and dashes are allowed.`, true},
+		{"deepseek dotted path", `Invalid 'tools[9].function.name': string does not match pattern '^[a-zA-Z0-9_-]+$'`, true},
+		{"generic tool name", `tool name contains invalid characters`, true},
+		{"tools unsupported", `This model does not support tools`, false},
+		{"tool calling disabled", `function calling is not enabled for this model`, false},
+		{"model not found", `The model does not exist`, false},
+	}
+	for _, tc := range cases {
+		if got := isInvalidToolName(tc.body); got != tc.want {
+			t.Errorf("%s: isInvalidToolName() = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
