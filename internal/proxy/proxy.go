@@ -31,6 +31,12 @@ import (
 	"github.com/erishen/tsm-hub/internal/store"
 )
 
+// browserUA 用于绕过 Cloudflare 反爬：groq / cerebras / together 等前端会对
+// Go / Python 的默认 User-Agent 直接返回 HTTP 403（错误码 1010），即使 API Key
+// 完全有效。聊天转发与模型探测统一注入该浏览器 UA；Provider.Headers 里显式
+// 配置的 User-Agent 仍可覆盖它。
+const browserUA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"
+
 // Proxy 持有转发所需的全部依赖。
 type Proxy struct {
 	store   *store.Store
@@ -412,6 +418,10 @@ func (p *Proxy) attempt(w http.ResponseWriter, r *http.Request, c router.Candida
 			Stream: req.Stream, Latency: time.Since(started), Err: err.Error(), ProviderFault: true}, true
 	}
 	adapter.CopyHeaders(upReq.Header, r.Header)
+	// 覆盖客户端 UA 为浏览器 UA：Cloudflare 前端（groq/cerebras/together 等）
+	// 会拦截 SDK / curl / Go 默认 UA 返回 403(1010)。放在 CopyHeaders 之后、
+	// Provider.Headers 之前，保证 provider 仍可按需自定义 UA。
+	upReq.Header.Set("User-Agent", browserUA)
 	// 协议适配器自定义认证头（如 Azure 用 api-key，Gemini 用 URL 参数不需要认证头）
 	if authKey, authVal := ad.AuthHeader(c.Provider); authKey != "" {
 		upReq.Header.Set(authKey, authVal)

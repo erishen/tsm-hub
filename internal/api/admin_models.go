@@ -727,6 +727,9 @@ func (s *Server) probeModelsOnce(ctx context.Context, baseURL, key string) ([]ma
 		if err != nil {
 			return nil, nil, err
 		}
+		// Cloudflare 前端（groq/cerebras/together 等）会拦截 Go 默认 UA 返回
+		// 403(1010)；注入浏览器 UA 让 /v1/models 探测可用（与 proxy 转发层一致）。
+		upReq.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36")
 		if key != "" {
 			if gemini {
 				upReq.Header.Set("x-goog-api-key", key)
