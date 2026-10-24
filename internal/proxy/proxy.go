@@ -162,6 +162,28 @@ func clientTools(tools []toolDecl) []string {
 	return out
 }
 
+// estimatePromptTokens 粗估请求的输入 token 数：ASCII 场景约 4 字符/token，
+// 直接按请求体字节数除 4（含 JSON 结构字符，偏大=偏保守，安全方向是宁可
+// 少路由也不错路）。仅用于 ITPM 预滤这类宽松判断，不用于计费。
+func estimatePromptTokens(body []byte) int {
+	if len(body) == 0 {
+		return 0
+	}
+	return len(body) / 4
+}
+
+// filterByITPM 剔除 Provider.ITPM > 0 且估算 token 数超限的候选。
+func filterByITPM(cands []router.Candidate, estTokens int) []router.Candidate {
+	out := make([]router.Candidate, 0, len(cands))
+	for _, c := range cands {
+		if c.Provider.ITPM > 0 && estTokens > c.Provider.ITPM {
+			continue
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
 // Handle 处理一个代理请求。path 是 /v1/xxx 形式的 OpenAI 路径。
 func (p *Proxy) Handle(w http.ResponseWriter, r *http.Request, key store.APIKey, path string, body []byte) Result {
 	started := time.Now()
@@ -202,6 +224,23 @@ func (p *Proxy) Handle(w http.ResponseWriter, r *http.Request, key store.APIKey,
 	if err != nil {
 		slog.Warn("no candidate for route", "model", req.Model, "err", err.Error())
 		return p.fail(w, started, key, req.Model, http.StatusBadGateway, err.Error(), scene)
+	}
+
+	// ITPM 预滤：请求体估算 token 数超 provider 输入限额的候选直接跳过，
+	// 不再白吃 413（2026-10-24 实况：22.9K tokens 的 PSE 任务进 groq
+	// 免费池 ITPM=7000，413 秒挂）。过滤后为空则回退全量——宁可试错
+	// 也不把路堵死（限额是分钟级窗口，硬堵会把后续小请求一起饿死）。
+	est := estimatePromptTokens(body)
+	if est > 0 {
+		if filtered := filterByITPM(cands, est); len(filtered) > 0 {
+			if len(filtered) < len(cands) {
+				slog.Info("itpm prefilter applied", "model", req.Model, "est_tokens", est,
+					"kept", len(filtered), "total", len(cands))
+			}
+			cands = filtered
+		} else {
+			slog.Warn("itpm prefilter would empty candidates, ignoring", "model", req.Model, "est_tokens", est)
+		}
 	}
 
 	var lastErr string
@@ -747,35 +786,63 @@ func (p *Proxy) streamResponse(w http.ResponseWriter, resp *http.Response, c rou
 	var prompt, completion, total int
 	br := bufio.NewReaderSize(resp.Body, 32*1024)
 	wrote := false
+	sawDone := false
+	// finishStream 在上游流意外中断（EOF 前无 [DONE]、读错误、上下文超时）
+	// 时补发终止帧并告警。不补的话客户端 SSE 解析器（openai SDK 的
+	// SSEDecoder）会把流的静默截断当成损坏帧 json.loads 崩溃——
+	// 2026-10-24 实况：deepseek 主路 failover 到 siliconflow，3 分钟
+	// context deadline exceeded，半行 data 帧已写给客户端 →
+	// JSONDecodeError → run.py exit 1，整轮 PSE 崩掉。
+	finishStream := func(reason string) {
+		if sawDone || !wrote {
+			return
+		}
+		if _, werr := io.WriteString(w, "data: [DONE]\n\n"); werr == nil && flusher != nil {
+			flusher.Flush()
+		}
+		slog.Warn("upstream stream truncated, sent synthetic [DONE]",
+			"provider", c.ProviderID, "upstream_model", c.UpstreamModel, "reason", reason)
+	}
 	for {
 		line, err := br.ReadString('\n')
 		if line != "" {
-			// 协议适配：把目标协议的 SSE 事件转换为 OpenAI 格式
-			if strings.HasPrefix(line, "data:") {
-				payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-				if converted, skip, convErr := ad.ConvertStreamEvent([]byte(payload)); convErr == nil && !skip {
-					line = "data: " + string(converted) + "\n"
-					// 从转换后的事件里解析 usage
-					if pt, ct, tt, ok := parseSSEUsage(line); ok {
-						prompt, completion, total = pt, ct, tt
+			if err != nil && !strings.HasSuffix(line, "\n") {
+				// 上游中断留下的半行帧：JSON 必残，写给客户端只会让 SSE
+				// 解析器崩。丢弃（内容损失仅最后半行），走 finishStream。
+				slog.Warn("dropping partial SSE frame from upstream",
+					"provider", c.ProviderID, "upstream_model", c.UpstreamModel, "bytes", len(line))
+			} else {
+				// 协议适配：把目标协议的 SSE 事件转换为 OpenAI 格式
+				if strings.HasPrefix(line, "data:") {
+					payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+					if payload == "[DONE]" {
+						sawDone = true
 					}
-				} else if skip {
-					// 跳过该事件（如 Anthropic 的 message_start/content_block_start 等）
-					continue
+					if converted, skip, convErr := ad.ConvertStreamEvent([]byte(payload)); convErr == nil && !skip {
+						line = "data: " + string(converted) + "\n"
+						// 从转换后的事件里解析 usage
+						if pt, ct, tt, ok := parseSSEUsage(line); ok {
+							prompt, completion, total = pt, ct, tt
+						}
+					} else if skip {
+						// 跳过该事件（如 Anthropic 的 message_start/content_block_start 等）
+						continue
+					}
 				}
-			}
-			wrote = true
-			if _, werr := io.WriteString(w, line); werr != nil {
-				res.Err = fmt.Sprintf("write client: %v", werr)
-				res.PromptTokens, res.CompletionToken, res.TotalTokens = prompt, completion, total
-				return res
-			}
-			if flusher != nil {
-				flusher.Flush()
+				wrote = true
+				if _, werr := io.WriteString(w, line); werr != nil {
+					res.Err = fmt.Sprintf("write client: %v", werr)
+					res.PromptTokens, res.CompletionToken, res.TotalTokens = prompt, completion, total
+					return res
+				}
+				if flusher != nil {
+					flusher.Flush()
+				}
 			}
 		}
 		if err != nil {
 			if err == io.EOF {
+				finishStream("eof without [DONE]")
 				break
 			}
 			if !wrote {
@@ -788,6 +855,12 @@ func (p *Proxy) streamResponse(w http.ResponseWriter, resp *http.Response, c rou
 					res.Err = fmt.Sprintf("read upstream stream: %v", err)
 					res.ProviderFault = true
 				}
+			} else if !isClientAbort(err) {
+				// 已写部分帧后断流：内容被截断，标记故障供熔断与观测
+				// （早年此分支静默 return，截断既不计故障也无日志）。
+				res.Err = fmt.Sprintf("read upstream stream after partial write: %v", err)
+				res.ProviderFault = true
+				finishStream(res.Err)
 			}
 			res.PromptTokens, res.CompletionToken, res.TotalTokens = prompt, completion, total
 			return res

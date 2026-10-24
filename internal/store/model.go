@@ -261,7 +261,12 @@ type Provider struct {
 	// Protocol 指定上游 Provider 使用的 API 协议。
 	// 支持："openai"（默认，OpenAI 兼容）、"anthropic"（Anthropic Claude）。
 	// 网关对外只暴露 OpenAI 兼容 API，适配器负责请求/响应格式转换。
-	Protocol  string    `json:"protocol,omitempty"`
+	Protocol string `json:"protocol,omitempty"`
+	// ITPM 是该 Provider 的输入 tokens/分钟限额（免费 tier 常见，如 groq=7000）。
+	// 0 表示不限制。路由时按请求体估算 token 数预滤候选，避免白吃 413
+	// （2026-10-24 实况：22.9K tokens 的 PSE 任务被路由到 groq 免费池
+	// ITPM=7000，413 秒挂并拖垮整条 failover 链）。
+	ITPM      int       `json:"itpm,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 	// ProbeAt 是最近一次探测成功的时间；ProbeModels 是那次探测的模型快照。
