@@ -457,6 +457,16 @@ func (p *Proxy) attempt(w http.ResponseWriter, r *http.Request, c router.Candida
 			Stream: req.Stream, Latency: time.Since(started), Err: err.Error(), ProviderFault: true}, true
 	}
 	adapter.CopyHeaders(upReq.Header, r.Header)
+	// 不透传客户端的 Accept-Encoding：httpx/openai SDK 默认带
+	// "gzip, deflate, br, zstd"，上游（deepseek 等）据此返回 zstd 压缩体。
+	// 而 Go http.Client 只在「Transport 自己添加」Accept-Encoding 时才透明
+	// 解压（且仅 gzip）；显式带头时 br/zstd 原样透传，streamResponse 按行读
+	// SSE 会把压缩字节当文本行处理——丢半行、认不出 [DONE]、写坏字节给客户端，
+	// 客户端解压器必崩（2026-10-25 实况：httpx.DecodingError "zstd
+	// decompressor error: Data corruption detected"，PSE 第一轮循环即挂）。
+	// 删掉后 Transport 自动补 Accept-Encoding: gzip 并透明解压，resp.Body
+	// 恒为明文 SSE；provider 仍可在 Provider.Headers 里按需覆盖。
+	upReq.Header.Del("Accept-Encoding")
 	// 覆盖客户端 UA 为浏览器 UA：Cloudflare 前端（groq/cerebras/together 等）
 	// 会拦截 SDK / curl / Go 默认 UA 返回 403(1010)。放在 CopyHeaders 之后、
 	// Provider.Headers 之前，保证 provider 仍可按需自定义 UA。
@@ -769,6 +779,16 @@ func (p *Proxy) streamResponse(w http.ResponseWriter, resp *http.Response, c rou
 		UpstreamModel: c.UpstreamModel,
 		Status:        resp.StatusCode,
 		Stream:        true,
+	}
+	// 防御护栏：上游仍返回无法透明解压的压缩编码（br/zstd/deflate）时，
+	// 下方按行读 SSE 的逻辑会把压缩字节当文本行处理，损坏压缩流
+	// （见 attempt() 里删 Accept-Encoding 的注释）。Go 只在自动补
+	// gzip 时透明解压并摘掉 Content-Encoding；走到这里说明编码异常，
+	// 直接标记故障 failover，不向客户端写一个坏字节。
+	if ce := resp.Header.Get("Content-Encoding"); ce != "" && !strings.EqualFold(ce, "identity") {
+		res.Err = fmt.Sprintf("upstream returned unsupported Content-Encoding %q in stream", ce)
+		res.ProviderFault = true
+		return res
 	}
 	copyResponseHeaders(w.Header(), resp.Header)
 	w.Header().Set("Content-Type", "text/event-stream")
