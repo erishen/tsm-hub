@@ -14,16 +14,17 @@ glm 平台有两档：
 用法：
     python3 monitor_glm.py            # 立即探一次
     # 挂 crontab（每 6 小时自动探）：
-    #   0 */6 * * * cd /Users/erishen/Workspace/CNB/individular-invest/work/golang/tsm-hub && /usr/bin/python3 monitor_glm.py >> monitor_glm.log 2>&1
+    #   0 */6 * * * cd <repo-root> && /usr/bin/python3 monitor_glm.py >> monitor_glm.log 2>&1
 
 依赖：仅标准库（urllib/json），无第三方包。
 """
 import json
+import os
 import sys
 import urllib.error
 import urllib.request
 
-CFG = "/Users/erishen/Workspace/CNB/individular-invest/work/golang/tsm-hub/data/config.json"
+CFG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "config.json")
 GW = "http://127.0.0.1:19070"
 ROUTE_KEYS = ["", "agnes-2.0-flash", "chat", "fast", "deepseek-v4-flash"]
 
