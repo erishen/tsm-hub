@@ -46,6 +46,7 @@ type Tracker struct {
 	states    map[string]*state
 	failMax   int
 	cool      time.Duration
+	deadMin   int    // 从未成功的 provider 连续失败达到该值后，冷却指数退避
 	persistFn func() // 状态变更后的持久化回调（由调用方注入）
 }
 
@@ -61,6 +62,7 @@ func NewTracker(failThreshold int, cooldownSec int) *Tracker {
 		states:  map[string]*state{},
 		failMax: failThreshold,
 		cool:    time.Duration(cooldownSec) * time.Second,
+		deadMin: 3 * failThreshold,
 	}
 }
 
@@ -113,6 +115,14 @@ func (t *Tracker) ReportSuccess(id string, latency time.Duration) {
 }
 
 // ReportFailure 上报一次失败；连续失败达到阈值则摘除并冷却。
+//
+// 恒死 provider 指数退避：从未成功过（lastOK 为零值）且连续失败达到
+// deadMin 后，冷却时长按 2^k 翻倍、封顶 1h。普通「failMax 次 → 冷却
+// cool → 半开」节奏对配置性死亡（恒 deadline exceeded、域名失效等）是
+// 永久空转：每隔 cool 秒就被半开探测一次，每次白吃一个完整上游超时，
+// 还长期占着 failover 链尾。退避后最长 1 小时才探一次；成功一次即由
+// ReportSuccess 清零 failures，自然回到普通节奏（充值/修复后自愈不变慢）。
+// 已成功过的 provider 不退避——间歇性失败与「从未成功」是两回事。
 func (t *Tracker) ReportFailure(id, errMsg string) {
 	t.mu.Lock()
 	s := t.get(id)
@@ -122,7 +132,20 @@ func (t *Tracker) ReportFailure(id, errMsg string) {
 	s.requests++
 	s.errors++
 	if s.failures >= t.failMax {
-		s.downUntil = time.Now().Add(t.cool)
+		cool := t.cool
+		if s.lastOK.IsZero() && s.failures >= t.deadMin {
+			k := s.failures - t.deadMin
+			if k > 6 {
+				k = 6
+			}
+			if backoff := t.cool * (1 << uint(k)); backoff > cool {
+				cool = backoff
+			}
+			if cool > time.Hour {
+				cool = time.Hour
+			}
+		}
+		s.downUntil = time.Now().Add(cool)
 	}
 	t.mu.Unlock()
 	t.persist()
