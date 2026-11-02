@@ -268,3 +268,65 @@ func TestMCPExecViaProxy(t *testing.T) {
 		t.Fatal("missing server should error")
 	}
 }
+
+// TestMCPStdioReapsChild 回归测试：stdio MCP 子进程退出后必须被 Wait() 回收，
+// 否则会变成僵尸进程（zombie）。长期运行下僵尸持续累积，最终打满容器的
+// cgroup pids 限额，导致容器内无法 fork/exec（healthcheck 报
+// "resource temporarily unavailable"，容器被标记 unhealthy）。
+//
+// 断言方式：cmd.ProcessState 只有在 Wait() 成功返回后才非 nil。
+func TestMCPStdioReapsChild(t *testing.T) {
+	script := fakeMCPServer(t)
+	mgr := newMCPManager()
+	s, err := mgr.ensure("fake", store.MCPServer{Command: "python3", Args: []string{script}})
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+
+	// 记录子进程指针，随后关闭 server 触发子进程退出。
+	s.mu.Lock()
+	cmd := s.cmd
+	s.mu.Unlock()
+	if cmd == nil {
+		t.Fatal("expected stdio child process")
+	}
+
+	s.close()
+
+	// reap goroutine 会在 Wait() 返回后置位 ProcessState；给一点时间。
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if cmd.ProcessState != nil {
+			return // 已回收，无僵尸
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("child process was not reaped: ProcessState is nil (zombie leak)")
+}
+
+// TestMCPStdioRepeatedReconnectNoZombie 反复连接/关闭，确认每次都回收干净。
+// 真实场景里 nc 之类的短命子进程会被反复 spawn，泄漏会线性累积。
+func TestMCPStdioRepeatedReconnectNoZombie(t *testing.T) {
+	script := fakeMCPServer(t)
+	mgr := newMCPManager()
+	for i := 0; i < 5; i++ {
+		s, err := mgr.ensure("fake", store.MCPServer{Command: "python3", Args: []string{script}})
+		if err != nil {
+			t.Fatalf("connect #%d: %v", i, err)
+		}
+		s.mu.Lock()
+		cmd := s.cmd
+		s.mu.Unlock()
+		s.close()
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			if cmd.ProcessState != nil {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		if cmd.ProcessState == nil {
+			t.Fatalf("child #%d not reaped: ProcessState is nil (zombie leak)", i)
+		}
+	}
+}

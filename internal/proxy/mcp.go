@@ -67,6 +67,9 @@ type mcpServer struct {
 	// http 传输状态。
 	httpClient *http.Client
 	sessionID  string
+	// readDone 在 readLoop 退出时关闭；reaped 在子进程被 Wait() 回收后关闭。
+	readDone chan struct{}
+	reaped   chan struct{}
 }
 
 // isHTTP 报告该 server 是否走 Streamable HTTP 传输。
@@ -283,8 +286,22 @@ func (s *mcpServer) connectStdio() error {
 
 	s.mu.Lock()
 	s.cmd, s.stdin, s.read = cmd, stdin, bufio.NewReader(stdout)
+	readDone, reaped := make(chan struct{}), make(chan struct{})
+	s.readDone, s.reaped = readDone, reaped
 	s.mu.Unlock()
-	go s.readLoop()
+	go s.readLoop(readDone)
+	// 回收子进程：os/exec 要求必须 Wait() 才能释放子进程资源，否则子进程
+	// 退出后变成僵尸进程（zombie）。长期运行下僵尸会持续累积（每次重连
+	// 一个），最终打满 cgroup 的 pids 限额，导致容器内无法 fork/exec
+	// （healthcheck 报 "resource temporarily unavailable"）。
+	//
+	// Wait() 会关闭 cmd 创建的 pipe 读端，所以必须等 readLoop 读完 stdout
+	// 之后再 Wait，否则会与 readLoop 抢读、导致正在等待的请求拿不到响应。
+	go func() {
+		<-readDone
+		_ = cmd.Wait()
+		close(reaped)
+	}()
 
 	// MCP 协议握手。
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -493,7 +510,9 @@ func (s *mcpServer) notify(method string, params map[string]any) {
 // readLoop 持续读取 stdout，把响应投递到 pending channel。
 // r 在锁内取一次本地副本：s.read 由 connectStdio 持锁写入、readLoop 并发读取，
 // 用本地副本消除 -race 报出的数据竞争（两者未受同一把锁保护）。
-func (s *mcpServer) readLoop() {
+func (s *mcpServer) readLoop(readDone chan struct{}) {
+	// 退出时通知 reap goroutine：stdout 已读完，可以安全 Wait() 回收子进程。
+	defer close(readDone)
 	s.mu.Lock()
 	r := s.read
 	s.mu.Unlock()
@@ -551,15 +570,23 @@ func (s *mcpServer) readLoop() {
 
 func (s *mcpServer) close() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.cmd != nil && s.cmd.Process != nil {
-		_ = s.cmd.Process.Kill()
+	cmd, reaped := s.cmd, s.reaped
+	s.mu.Unlock()
+	if cmd != nil && cmd.Process != nil {
+		_ = cmd.Process.Kill()
 	}
+	s.mu.Lock()
 	if s.stdin != nil {
 		_ = s.stdin.Close()
 	}
 	s.cmd, s.stdin, s.read = nil, nil, nil
 	s.sessionID = ""
+	s.mu.Unlock()
+	// 等 reap goroutine 完成 Wait()：Kill 只是发信号，进程要等 Wait() 收割
+	// 才会被系统回收，否则会留下僵尸进程。
+	if reaped != nil {
+		<-reaped
+	}
 }
 
 // toolNames 返回该 server 的工具名列表（已排序）。
