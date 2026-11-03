@@ -64,18 +64,37 @@ func GetAdapter(p store.Provider) ProtocolAdapter {
 
 // === 共享函数 ===
 
-// UpstreamURL 拼接上游 URL，处理 /v1 前缀重复的问题。
+// UpstreamURL 拼接上游 URL，处理客户端路径 /v1 前缀与 base_url 版本段重复的问题。
 func UpstreamURL(base, path string) string {
 	return upstreamURL(base, path)
 }
 
-// upstreamURL 拼接上游 URL，处理 /v1 前缀重复的问题。
+// upstreamURL 拼接上游 URL。客户端 path 固定以 /v1/ 开头（OpenAI 兼容形态）；
+// 当 base_url 末段本身就是版本号（v1 / v4 / v1beta…，如 deepseek 的 /v1、
+// bigmodel 的 /api/paas/v4）时，须剥离 path 的 /v1 前缀，否则拼出
+// /v4/v1/chat/completions 这类双重版本路径（bigmodel 实测 404，2026-11-03）。
 func upstreamURL(base, path string) string {
 	base = strings.TrimRight(base, "/")
-	if strings.HasSuffix(base, "/v1") && strings.HasPrefix(path, "/v1/") {
+	if strings.HasPrefix(path, "/v1/") && versionedBase(base) {
 		path = strings.TrimPrefix(path, "/v1")
 	}
 	return base + path
+}
+
+// versionedBase 判断 base 的最后一段是否为版本号形态（v 后跟至少一个数字，
+// 如 v1 / v4 / v1beta / v2free）。段内无数字（如 vendor、openai）不算版本。
+func versionedBase(base string) bool {
+	i := strings.LastIndex(base, "/")
+	seg := base[i+1:]
+	if len(seg) < 2 || seg[0] != 'v' {
+		return false
+	}
+	for j := 1; j < len(seg); j++ {
+		if seg[j] >= '0' && seg[j] <= '9' {
+			return true
+		}
+	}
+	return false
 }
 
 // CopyHeaders 复制客户端请求头到上游请求（跳过逐跳头和鉴权头）。

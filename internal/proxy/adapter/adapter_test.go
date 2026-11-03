@@ -30,3 +30,25 @@ func TestCopyHeadersFiltersInternalAndSensitive(t *testing.T) {
 		}
 	}
 }
+
+func TestUpstreamURL(t *testing.T) {
+	cases := []struct {
+		name string
+		base string
+		path string
+		want string
+	}{
+		{"v1 base dedups client v1", "https://api.deepseek.com/v1", "/v1/chat/completions", "https://api.deepseek.com/v1/chat/completions"},
+		{"v4 base (bigmodel) dedups client v1", "https://open.bigmodel.cn/api/paas/v4/", "/v1/chat/completions", "https://open.bigmodel.cn/api/paas/v4/chat/completions"},
+		{"v1beta segment counts as version", "https://example.com/api/v1beta", "/v1/chat/completions", "https://example.com/api/v1beta/chat/completions"},
+		{"non-version last segment keeps v1", "https://router.example.com/api", "/v1/chat/completions", "https://router.example.com/api/v1/chat/completions"},
+		{"vendor-named segment keeps v1", "https://x.example.com/openai", "/v1/chat/completions", "https://x.example.com/openai/v1/chat/completions"},
+		{"non-chat path untouched", "https://api.deepseek.com/v1", "/v1/models", "https://api.deepseek.com/v1/models"},
+		{"trailing slash trimmed", "https://api.siliconflow.cn/v1/", "/v1/chat/completions", "https://api.siliconflow.cn/v1/chat/completions"},
+	}
+	for _, tc := range cases {
+		if got := upstreamURL(tc.base, tc.path); got != tc.want {
+			t.Errorf("%s: upstreamURL(%q,%q) = %q, want %q", tc.name, tc.base, tc.path, got, tc.want)
+		}
+	}
+}
