@@ -640,6 +640,12 @@ func (p *Proxy) mcpToolSchemasAllow(serverAllow, toolAllow map[string]bool) []ma
 			}
 			for _, t := range s.tools {
 				full := mcpToolName(name, t.Name)
+				if !validToolName(full) {
+					// MCP server 可能返回含 '*'、空格等非法字符的工具名；OpenAI 兼容上游
+					// （如 deepseek）要求工具名匹配 ^[a-zA-Z0-9_-]+$，直接注入会让整请求
+					// 400。跳过而非改名：改名会使执行分发时的名字无法还原。
+					continue
+				}
 				if toolAllow != nil && !toolAllow[full] {
 					continue
 				}
@@ -718,6 +724,23 @@ func (p *Proxy) mcpExec(name, tool string, args toolArgs) string {
 // mcpToolName 生成全局唯一工具名。
 func mcpToolName(server, tool string) string {
 	return "mcp_" + server + "_" + tool
+}
+
+// validToolName 报告工具名是否满足主流 OpenAI 兼容上游（如 deepseek）的
+// 命名约束 ^[a-zA-Z0-9_-]+$。MCP server 可能返回含 '*'、空格等非法字符的
+// 工具名，直接注入会让 deepseek 等上游整请求 400（Invalid schema ...）。
+func validToolName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_', r == '-':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // splitMCPToolName 从全局工具名还原 server 与 tool。

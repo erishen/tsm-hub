@@ -165,6 +165,10 @@ func fakeHTTPMCP(t *testing.T) string {
 					"inputSchema": map[string]any{"type": "object",
 						"properties": map[string]any{"a": map[string]any{"type": "number"}, "b": map[string]any{"type": "number"}},
 						"required":   []string{"a", "b"}}},
+				map[string]any{"name": "star*", "description": "illegal name with asterisk",
+					"inputSchema": map[string]any{"type": "object",
+						"properties": map[string]any{"q": map[string]any{"type": "string"}},
+						"required":   []string{"q"}}},
 			}}
 		case "tools/call":
 			args, _ := msg.Params["arguments"].(map[string]any)

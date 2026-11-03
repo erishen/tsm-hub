@@ -124,3 +124,49 @@ func TestCleanSchemaTrimsPropertyDesc(t *testing.T) {
 		t.Fatal("trimmed desc must be a prefix of original")
 	}
 }
+
+// TestToolSchemasSkipInvalidNames 验证非法工具名（不符合 ^[a-zA-Z0-9_-]+$）的
+// 工具不会进入工具池：deepseek 等上游对含 '*' 等字符的工具名整请求 400。
+func TestToolSchemasSkipInvalidNames(t *testing.T) {
+	url := fakeHTTPMCP(t) // fake server 返回 add 与 star*（非法名）
+	st, err := store.New(filepath.Join(t.TempDir(), "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Update(func(c *store.Config) error {
+		c.Settings.Mcps = map[string]store.MCPServer{
+			"remote": {Transport: "http", URL: url},
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	p := &Proxy{store: st, mcps: newMCPManager()}
+
+	hasTool := func(schemas []map[string]any, name string) bool {
+		for _, s := range schemas {
+			if fn, ok := s["function"].(map[string]any); ok && fn["name"] == name {
+				return true
+			}
+		}
+		return false
+	}
+
+	schemas := p.toolSchemas()
+	if !hasTool(schemas, "mcp_remote_add") {
+		t.Fatal("valid MCP tool mcp_remote_add should be registered")
+	}
+	if hasTool(schemas, "mcp_remote_star*") {
+		t.Fatal("MCP tool with illegal name (mcp_remote_star*) must be skipped")
+	}
+	for _, s := range schemas {
+		fn, ok := s["function"].(map[string]any)
+		if !ok {
+			continue
+		}
+		name, _ := fn["name"].(string)
+		if !validToolName(name) {
+			t.Fatalf("tool pool contains illegal tool name %q", name)
+		}
+	}
+}

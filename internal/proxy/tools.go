@@ -355,7 +355,7 @@ func (p *Proxy) toolSchemasAllow(serverAllow, toolAllow map[string]bool) []map[s
 	}
 	out = append(out, p.mcpToolSchemasAllow(serverAllow, toolAllow)...)
 	for _, pl := range p.FastToolPlugins() {
-		if !keep(pl.Name) {
+		if !keep(pl.Name) || !validToolName(pl.Name) {
 			continue
 		}
 		desc := "FastPath 检测器（晋升为工具，由 LLM 生成）：输入问题文本，返回确定性答案。"
@@ -365,7 +365,7 @@ func (p *Proxy) toolSchemasAllow(serverAllow, toolAllow map[string]bool) []map[s
 		out = append(out, toolSchema(pl.Name, desc))
 	}
 	for _, t := range p.store.ListExternalTools() {
-		if keep(t.Name) {
+		if keep(t.Name) && validToolName(t.Name) {
 			out = append(out, toolSchema(t.Name, orDesc(t.Description, "外部调用方声明并录用的工具")))
 		}
 	}
