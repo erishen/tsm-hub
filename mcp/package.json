@@ -9,6 +9,6 @@
     "@modelcontextprotocol/server-memory": "^2026.8.31",
     "@modelcontextprotocol/server-github": "^2025.4.8",
     "@modelcontextprotocol/server-brave-search": "^0.6.2",
-    "@playwright/mcp": "^0.0.80"
+    "@playwright/mcp": "^0.0.84"
   }
 }
