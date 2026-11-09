@@ -9,6 +9,12 @@ import (
 	"time"
 )
 
+// defaultFailureTTL 是「连续失败计数」的有效期。超过该时长没有新的失败，
+// 历史 failures 自动视为过期归零：一次偶发 500/429 不该把 provider 永久钉在
+// 半开池里（详见 router.Pick 的健康分档说明）。5 分钟 > 默认冷却 60s，
+// 保证真正持续故障的 provider 仍会被熔断与指数退避覆盖。
+const defaultFailureTTL = 5 * time.Minute
+
 // ProviderHealth 是单个 provider 的运行时健康状态。
 type ProviderHealth struct {
 	ProviderID string `json:"provider_id"`
@@ -42,12 +48,13 @@ type state struct {
 
 // Tracker 记录所有 provider 的健康状态。
 type Tracker struct {
-	mu        sync.RWMutex
-	states    map[string]*state
-	failMax   int
-	cool      time.Duration
-	deadMin   int    // 从未成功的 provider 连续失败达到该值后，冷却指数退避
-	persistFn func() // 状态变更后的持久化回调（由调用方注入）
+	mu         sync.RWMutex
+	states     map[string]*state
+	failMax    int
+	cool       time.Duration
+	deadMin    int           // 从未成功的 provider 连续失败达到该值后，冷却指数退避
+	failureTTL time.Duration // 连续失败计数有效期，过期后惰性归零
+	persistFn  func()        // 状态变更后的持久化回调（由调用方注入）
 }
 
 // NewTracker 创建健康跟踪器。
@@ -59,11 +66,44 @@ func NewTracker(failThreshold int, cooldownSec int) *Tracker {
 		cooldownSec = 60
 	}
 	return &Tracker{
-		states:  map[string]*state{},
-		failMax: failThreshold,
-		cool:    time.Duration(cooldownSec) * time.Second,
-		deadMin: 3 * failThreshold,
+		states:     map[string]*state{},
+		failMax:    failThreshold,
+		cool:       time.Duration(cooldownSec) * time.Second,
+		deadMin:    3 * failThreshold,
+		failureTTL: defaultFailureTTL,
 	}
+}
+
+// SetFailureTTL 覆盖连续失败计数的有效期；<=0 时恢复默认值。
+// 由 main 从 settings.failure_ttl_sec 注入，测试可用短 TTL 验证自愈。
+func (t *Tracker) SetFailureTTL(d time.Duration) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if d <= 0 {
+		d = defaultFailureTTL
+	}
+	t.failureTTL = d
+}
+
+// effectiveFailuresLocked 返回当前「有效」的连续失败数。
+//
+// 惰性计算：只在读取时判断 lastFail 是否已过期，不改 state、不起后台
+// goroutine，也不额外触发持久化。因此：
+//   - 持续故障（每次失败都会刷新 lastFail）→ 计数不清零，熔断/退避照常；
+//   - 一次偶发失败后长期无请求 → TTL 到期自动回到健康池；
+//   - 重启 Restore 回来的陈旧计数（如十几天前的 500）→ 当场过期。
+//
+// 调用方必须已持有 t.mu（读锁或写锁）。
+func (t *Tracker) effectiveFailuresLocked(s *state, now time.Time) int {
+	if s == nil || s.failures <= 0 {
+		return 0
+	}
+	// lastFail 为零值只可能来自手写快照；保守起见按「未过期」处理，
+	// 避免把真实故障误判成健康。
+	if !s.lastFail.IsZero() && now.Sub(s.lastFail) >= t.failureTTL {
+		return 0
+	}
+	return s.failures
 }
 
 func (t *Tracker) get(id string) *state {
@@ -126,9 +166,12 @@ func (t *Tracker) ReportSuccess(id string, latency time.Duration) {
 func (t *Tracker) ReportFailure(id, errMsg string) {
 	t.mu.Lock()
 	s := t.get(id)
-	s.failures++
+	now := time.Now()
+	// 基于「有效」失败数累加：陈旧计数已过期时从 1 重新爬，
+	// 否则十几天前的一次历史失败会被无上限累加，让新故障直接触发指数退避。
+	s.failures = t.effectiveFailuresLocked(s, now) + 1
 	s.lastErr = errMsg
-	s.lastFail = time.Now()
+	s.lastFail = now
 	s.requests++
 	s.errors++
 	if s.failures >= t.failMax {
@@ -145,7 +188,7 @@ func (t *Tracker) ReportFailure(id, errMsg string) {
 				cool = time.Hour
 			}
 		}
-		s.downUntil = time.Now().Add(cool)
+		s.downUntil = now.Add(cool)
 	}
 	t.mu.Unlock()
 	t.persist()
@@ -157,12 +200,13 @@ func (t *Tracker) ReportFailure(id, errMsg string) {
 func (t *Tracker) ReportThrottle(id, errMsg string, cool time.Duration) {
 	t.mu.Lock()
 	s := t.get(id)
-	s.failures++
+	now := time.Now()
+	s.failures = t.effectiveFailuresLocked(s, now) + 1
 	s.lastErr = errMsg
-	s.lastFail = time.Now()
+	s.lastFail = now
 	s.requests++
 	s.errors++
-	until := time.Now().Add(cool)
+	until := now.Add(cool)
 	if until.After(s.downUntil) {
 		s.downUntil = until
 	}
@@ -195,7 +239,7 @@ func (t *Tracker) Snapshot() []ProviderHealth {
 			ProviderID:    id,
 			Healthy:       avail,
 			HalfOpen:      !s.downUntil.IsZero() && avail,
-			Failures:      s.failures,
+			Failures:      t.effectiveFailuresLocked(s, now),
 			LastError:     s.lastErr,
 			LastOKAt:      s.lastOK,
 			LastFailAt:    s.lastFail,
@@ -225,7 +269,7 @@ func (t *Tracker) Health(id string) ProviderHealth {
 		ProviderID: id,
 		Healthy:    avail,
 		HalfOpen:   !s.downUntil.IsZero() && avail,
-		Failures:   s.failures,
+		Failures:   t.effectiveFailuresLocked(s, now),
 		LastError:  s.lastErr,
 		LastOKAt:   s.lastOK,
 		LastFailAt: s.lastFail,
@@ -236,14 +280,12 @@ func (t *Tracker) Health(id string) ProviderHealth {
 	}
 }
 
-// Failures 返回 provider 当前的连续失败次数，用于判断是否处于半开探测。
+// Failures 返回 provider 当前「有效」的连续失败次数，用于判断是否处于半开探测。
+// 超过 failureTTL 没有新失败时返回 0（惰性衰减，见 effectiveFailuresLocked）。
 func (t *Tracker) Failures(id string) int {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
-	if s, ok := t.states[id]; ok {
-		return s.failures
-	}
-	return 0
+	return t.effectiveFailuresLocked(t.states[id], time.Now())
 }
 
 // DownUntil 返回 provider 的冷却到期时间，零值表示未处于冷却。

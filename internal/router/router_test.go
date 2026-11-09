@@ -504,3 +504,79 @@ func TestUpsertCatchAllRouteAllowsEmptyModel(t *testing.T) {
 		t.Fatalf("expected exactly one catch-all route, got %d", empty)
 	}
 }
+
+// 回归：旧实现把健康池整体排在半开池之前，导致高优先级主路一旦失败过
+// 就被任何低优先级的健康兜底压住、永远拿不到成功样本（永久降权死锁）。
+// 现在半开只加有限 priority 罚分，主路仍应排在慢兜底之前。
+func TestPickHalfOpenHighPriorityStillLeads(t *testing.T) {
+	st := newStore(t,
+		[]store.Provider{p("primary", 1, 100, "m"), p("backup", 9, 100, "m")},
+		[]store.Route{{Model: "m", Strategy: "failover", Targets: []store.RouteTarget{
+			{ProviderID: "primary", Priority: 10}, {ProviderID: "backup", Priority: 90},
+		}}},
+	)
+	tracker := NewTracker(5, 60) // 失败 1 次不摘除，只进半开
+	rt := New(st, tracker)
+
+	tracker.ReportFailure("primary", "one 500")
+	cands, err := rt.Pick("m", false)
+	if err != nil {
+		t.Fatalf("pick: %v", err)
+	}
+	if len(cands) != 2 {
+		t.Fatalf("半开候选必须保留，got %+v", cands)
+	}
+	if cands[0].ProviderID != "primary" || !cands[0].HalfOpen {
+		t.Fatalf("高优先级半开主路应仍是链首，got %+v", cands[0])
+	}
+	wantPrio := 10 + defaultHalfOpenPriorityPenalty
+	if cands[0].Priority != wantPrio {
+		t.Fatalf("半开罚分未生效：priority = %d, want %d", cands[0].Priority, wantPrio)
+	}
+
+	// 拿到一次成功样本后清零失败计数，罚分消失、回到配置的 priority。
+	tracker.ReportSuccess("primary", 5*time.Millisecond)
+	cands, err = rt.Pick("m", false)
+	if err != nil {
+		t.Fatalf("pick after recovery: %v", err)
+	}
+	if cands[0].ProviderID != "primary" || cands[0].HalfOpen || cands[0].Priority != 10 {
+		t.Fatalf("恢复后应回到健康链首且无罚分，got %+v", cands[0])
+	}
+}
+
+// TTL 衰减与排序联动：长期无流量后，半开 provider 无需成功样本即可
+// 自动回到健康池并恢复原 priority。这是「历史失败永久降权」的根治路径。
+func TestPickRecoversAfterFailureTTL(t *testing.T) {
+	st := newStore(t,
+		[]store.Provider{p("a", 1, 100, "m"), p("b", 2, 100, "m")},
+		[]store.Route{{Model: "m", Strategy: "failover", Targets: []store.RouteTarget{
+			{ProviderID: "a", Priority: 1}, {ProviderID: "b", Priority: 2},
+		}}},
+	)
+	tracker := NewTracker(5, 60)
+	tracker.SetFailureTTL(time.Minute)
+	rt := New(st, tracker)
+
+	tracker.ReportFailure("a", "boom")
+	cands, err := rt.Pick("m", false)
+	if err != nil {
+		t.Fatalf("pick: %v", err)
+	}
+	// a 半开 prio 1+5=6 > b 的 2：健康节点仍优先（既有语义保持不变）。
+	if cands[0].ProviderID != "b" {
+		t.Fatalf("健康 b 应暂时领先，got %+v", cands[0])
+	}
+
+	tracker.mu.Lock()
+	tracker.states["a"].lastFail = time.Now().Add(-2 * time.Minute)
+	tracker.mu.Unlock()
+
+	cands, err = rt.Pick("m", false)
+	if err != nil {
+		t.Fatalf("pick after TTL: %v", err)
+	}
+	if cands[0].ProviderID != "a" || cands[0].HalfOpen || cands[0].Priority != 1 {
+		t.Fatalf("TTL 到期后应自动恢复健康链首且无罚分，got %+v", cands[0])
+	}
+}

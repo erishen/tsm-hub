@@ -134,6 +134,8 @@ func run(cfg config.Config) error {
 
 	limiter := quota.NewLimiter(rec)
 	tracker := router.NewTracker(settings.FailThreshold, settings.CooldownSec)
+	// 失败计数有效期：settings 未配置时 SetFailureTTL(0) 会回落到默认 300s。
+	tracker.SetFailureTTL(time.Duration(settings.FailureTTLsec) * time.Second)
 	rt := router.New(st, tracker)
 	px := proxy.New(st, rt, tracker, rec, skills.New(settings.SkillsDir))
 	// 常驻连接 MCP servers（断开自动重连），管理台打开即有状态、工具池稳定。

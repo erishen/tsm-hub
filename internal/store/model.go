@@ -54,6 +54,12 @@ type Settings struct {
 	FailThreshold int `json:"fail_threshold"`
 	// CooldownSec 不健康 provider 的冷却期，冷却结束后进入半开探测。
 	CooldownSec int `json:"cooldown_sec"`
+	// FailureTTLsec 是连续失败计数的有效期（秒）：过期且无新失败时自动归零，
+	// 避免一次偶发失败把 provider 永久钉在半开池。0 = 用代码默认（300s）。
+	FailureTTLsec int `json:"failure_ttl_sec,omitempty"`
+	// HalfOpenPriorityPenalty 是半开候选参与 failover/weighted 排序时的
+	// priority 罚分（健康度有限降权，而非整体分档压制）。0 = 用默认（5）。
+	HalfOpenPriorityPenalty int `json:"half_open_priority_penalty,omitempty"`
 	// Smart 是 smart 成本智能路由的评分参数；未配置时用代码默认值。
 	Smart SmartScoreCfg `json:"smart,omitempty"`
 	// SkillsDir 指向外部 Agent Skills 技能库目录（如 resolve-skills/skills）。

@@ -12,6 +12,19 @@ import (
 	"github.com/erishen/tsm-hub/internal/store"
 )
 
+// defaultHalfOpenPriorityPenalty 是半开候选在 failover/weighted 排序中的
+// 优先级罚分。健康度应当是「有限降权」而不是「整体分档压制」：
+// 罚分太小会让刚失败的节点继续霸占链首，太大又退化成旧的死锁。
+const defaultHalfOpenPriorityPenalty = 5
+
+// halfOpenPriorityPenalty 读取可配置罚分；<=0 用默认值。
+func (r *Router) halfOpenPriorityPenalty() int {
+	if n := r.store.Settings().HalfOpenPriorityPenalty; n > 0 {
+		return n
+	}
+	return defaultHalfOpenPriorityPenalty
+}
+
 // Candidate 是一个可转发的上游目标。
 type Candidate struct {
 	ProviderID string
@@ -95,7 +108,16 @@ func (r *Router) Pick(model string, hasTools bool) ([]Candidate, error) {
 		return nil, fmt.Errorf("no provider serves model %q", model)
 	}
 
-	// 健康过滤分三档：健康 / 刚过冷却的半开 / 仍在冷却中。
+	// 健康过滤分三档：健康 / 曾失败但可接客（半开） / 仍在冷却中。
+	// 半开只做「有限降权」：给它的 priority 加一个小罚分，而不是整体排到
+	// 健康池之后。旧实现是 usable = order(healthy) + order(halfOpen)，导致
+	// 任何失败过的 provider 都被全部健康候选压住（无视路由表 priority），
+	// 于是永远拿不到成功样本 → ReportSuccess 永不触发 → failures 永不清零，
+	// 一次偶发 500 就能把高优先级主路永久钉死（状态还会持久化到 memory.db）。
+	// 现在健康度与 priority 一起参与排序：同优先级内健康节点仍靠前
+	// （weightedShuffle 对 HalfOpen ×0.1、smartScore 有 half_open_penalty），
+	// 但低优先级的健康兜底不再能整体压过高优先级的半开主路。
+	penalty := r.halfOpenPriorityPenalty()
 	healthy := make([]Candidate, 0, len(cands))
 	halfOpen := make([]Candidate, 0, len(cands))
 	cooling := make([]Candidate, 0, len(cands))
@@ -106,6 +128,7 @@ func (r *Router) Pick(model string, hasTools bool) ([]Candidate, error) {
 			cooling = append(cooling, c)
 		case r.health.Failures(c.ProviderID) > 0:
 			c.HalfOpen = true
+			c.Priority += penalty
 			halfOpen = append(halfOpen, c)
 		default:
 			healthy = append(healthy, c)
@@ -122,12 +145,12 @@ func (r *Router) Pick(model string, hasTools bool) ([]Candidate, error) {
 		return r.order(cooling[:1], strategy), nil
 	}
 
-	// 健康候选优先，半开候选（曾失败、但仍可用）追加其后而不是被整体丢弃：
-	// 若只保留健康池，失败过的 provider 只要还有健康节点就永远选不中，其
-	// 失败计数也永远等不到 ReportSuccess 清零 → 永久降权、池子越用越小。
-	// order() 已对 HalfOpen 降权（smart -penalty / weighted ×0.1），故正常
-	// 节点仍排在前，半开仅作为 failover 兜底并借成功样本自我恢复。
-	usable := append(r.order(healthy, strategy), r.order(halfOpen, strategy)...)
+	// 健康 + 半开同池统一排序：priority 才真正生效。半开候选已带 priority
+	// 罚分，且 order() 内还有第二层降权（smart -half_open_penalty /
+	// weighted ×0.1），所以健康节点在同优先级下依旧优先，半开只是「可以
+	// 被选到」而不是「永远排最后」。配合 Tracker 的 failureTTL 惰性衰减，
+	// 偶发故障的 provider 既能借成功样本自愈，也能在长期无流量后自动归零。
+	usable := r.order(append(healthy, halfOpen...), strategy)
 	if len(usable) == 0 {
 		return nil, fmt.Errorf("no healthy provider for model %q (all in cooldown)", model)
 	}
