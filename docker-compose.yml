@@ -64,6 +64,9 @@ services:
       context: ./deploy
       dockerfile: mcp-gateway.Dockerfile
     container_name: mcp-fs
+    environment:
+      MCP_GW_MAX_SESSIONS: "${MCP_GW_MAX_SESSIONS:-4}"
+      MCP_GW_IDLE_TTL_SEC: "${MCP_GW_IDLE_TTL_SEC:-600}"
     restart: unless-stopped
     volumes:
       - ./mcp/node_modules:/mcp/node_modules:ro
@@ -86,6 +89,8 @@ services:
     restart: unless-stopped
     environment:
       MEMORY_FILE_PATH: /memory/memory.json
+      MCP_GW_MAX_SESSIONS: "${MCP_GW_MAX_SESSIONS:-4}"
+      MCP_GW_IDLE_TTL_SEC: "${MCP_GW_IDLE_TTL_SEC:-600}"
     volumes:
       - ./mcp/node_modules:/mcp/node_modules:ro
       - mcp-memory-data:/memory
@@ -103,6 +108,9 @@ services:
       context: ./deploy
       dockerfile: mcp-gateway.Dockerfile
     container_name: mcp-think
+    environment:
+      MCP_GW_MAX_SESSIONS: "${MCP_GW_MAX_SESSIONS:-4}"
+      MCP_GW_IDLE_TTL_SEC: "${MCP_GW_IDLE_TTL_SEC:-600}"
     restart: unless-stopped
     volumes:
       - ./mcp/node_modules:/mcp/node_modules:ro
@@ -125,6 +133,9 @@ services:
       context: ./deploy
       dockerfile: mcp-gateway.Dockerfile
     container_name: mcp-fetch
+    environment:
+      MCP_GW_MAX_SESSIONS: "${MCP_GW_MAX_SESSIONS:-4}"
+      MCP_GW_IDLE_TTL_SEC: "${MCP_GW_IDLE_TTL_SEC:-600}"
     restart: unless-stopped
     volumes:
       - ./mcp/node_modules:/mcp/node_modules:ro
@@ -152,6 +163,8 @@ services:
       GIT_AUTHOR_EMAIL: 3292057+erishen@users.noreply.github.com
       GIT_COMMITTER_NAME: Erishen
       GIT_COMMITTER_EMAIL: 3292057+erishen@users.noreply.github.com
+      MCP_GW_MAX_SESSIONS: "${MCP_GW_MAX_SESSIONS:-4}"
+      MCP_GW_IDLE_TTL_SEC: "${MCP_GW_IDLE_TTL_SEC:-600}"
     command: ["8000", "node /mcp/node_modules/@cyanheads/git-mcp-server/dist/index.js"]
     healthcheck:
       test: ["CMD", "node", "-e", "require('net').connect(8000,'127.0.0.1').on('connect',function(){process.exit(0)}).on('error',function(){process.exit(1)})"]

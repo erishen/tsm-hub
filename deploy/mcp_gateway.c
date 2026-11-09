@@ -43,11 +43,22 @@
 
 #define REQ_MAX 65536
 #define LINE_MAX 262144
-#define MAX_SESSIONS 4
-#define IDLE_TTL_SEC 1800
+#define MAX_SESSIONS 4        /* 默认值；可用 MCP_GW_MAX_SESSIONS 覆盖 */
+#define IDLE_TTL_SEC 600      /* 默认值；可用 MCP_GW_IDLE_TTL_SEC 覆盖 */
 #define CALL_TIMEOUT_SEC 300
+#define REAP_INTERVAL_SEC 15  /* 回收线程的粒度 */
 
 static char g_cmd[4096];
+static int g_max_sessions = MAX_SESSIONS;
+static int g_idle_ttl = IDLE_TTL_SEC;
+
+/* 读 env 里的正整数，<=0 或非数字时用默认值。 */
+static int env_int(const char *name, int def) {
+    const char *v = getenv(name);
+    if (!v || !*v) return def;
+    int n = atoi(v);
+    return n > 0 ? n : def;
+}
 
 static void logf_(const char *fmt, ...) {
     va_list ap;
@@ -363,27 +374,58 @@ static session_t *session_new(void) {
  * 进程退出时由内核回收，量级是每会话一条，不至于涨。 */
 static void session_close(session_t *s) {
     if (!s) return;
-    session_unlink(s);
+    session_unlink(s);   /* 调用方持有 g_slock */
     if (s->in_fd >= 0) close(s->in_fd);
     if (s->out_fd >= 0) close(s->out_fd);
     if (s->pid > 0) {
         kill(s->pid, SIGTERM);
-        waitpid(s->pid, NULL, 0);
+        /* 最多等 1s 优雅退出；回收线程是持锁调用的，不能无限期卡住受理循环。 */
+        int st = 0;
+        for (int i = 0; i < 20; i++) {
+            if (waitpid(s->pid, &st, WNOHANG) == s->pid) { s->pid = 0; break; }
+            usleep(50000);
+        }
+        if (s->pid > 0) {
+            kill(s->pid, SIGKILL);
+            waitpid(s->pid, &st, 0);
+            s->pid = 0;
+        }
     }
     fail_all_pending(s);
     logf_("session %s closed pid=%d", s->sid, (int)s->pid);
 }
 
+/* 回收：子进程已死的会话立刻关（否则会白占一个槽位和一条僵尸进程），
+ * 空闲超过 TTL 的也关。由后台线程周期调用，不依赖是否还有请求进来。 */
 static void reap_idle(void) {
     time_t now = time(NULL);
+    int dead = 0, idle = 0;
     pthread_mutex_lock(&g_slock);
     session_t *s = g_sessions;
     while (s) {
         session_t *next = s->next;
-        if (s->inflight == 0 && now - s->last_used > IDLE_TTL_SEC) session_close(s);
+        if (!s->alive && s->inflight == 0) {
+            session_close(s);
+            dead++;
+        } else if (s->inflight == 0 && now - s->last_used > g_idle_ttl) {
+            session_close(s);
+            idle++;
+        }
         s = next;
     }
     pthread_mutex_unlock(&g_slock);
+    if (dead || idle) logf_("reap: dead=%d idle=%d", dead, idle);
+}
+
+/* 后台回收线程：以前只在 accept 计数到 256 时才跑一次，流量一停就永不回收，
+ * 后端重启留下的旧会话会挂到 TTL 才消失。 */
+static void *reaper_main(void *arg) {
+    (void)arg;
+    for (;;) {
+        for (int i = 0; i < REAP_INTERVAL_SEC; i++) sleep(1);
+        reap_idle();
+    }
+    return NULL;
 }
 
 /* ===================== HTTP ===================== */
@@ -442,13 +484,13 @@ static void handle_rpc(int fd, const char *req_headers, const char *body, size_t
     pthread_mutex_lock(&g_slock);
     session_t *s = has_sid ? session_find(sidbuf) : NULL;
     if (!s) {
-        if (session_count() >= MAX_SESSIONS) {
+        if (session_count() >= g_max_sessions) {
             session_t *victim = NULL;
             for (session_t *it = g_sessions; it; it = it->next)
                 if (it->inflight == 0 && (!victim || it->last_used < victim->last_used)) victim = it;
             if (victim) session_close(victim);
         }
-        if (session_count() >= MAX_SESSIONS) {
+        if (session_count() >= g_max_sessions) {
             pthread_mutex_unlock(&g_slock);
             static const char *err = "{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{\"code\":-32001,\"message\":\"gateway: too many sessions\"}}";
             respond(fd, 503, "Service Unavailable", "application/json", NULL, err, strlen(err));
@@ -671,6 +713,8 @@ int main(int argc, char **argv) {
     }
     int port = atoi(argv[1]);
     snprintf(g_cmd, sizeof g_cmd, "%s", argv[2]);
+    g_max_sessions = env_int("MCP_GW_MAX_SESSIONS", MAX_SESSIONS);
+    g_idle_ttl = env_int("MCP_GW_IDLE_TTL_SEC", IDLE_TTL_SEC);
 
     signal(SIGPIPE, SIG_IGN);
 
@@ -686,16 +730,17 @@ int main(int argc, char **argv) {
     addr.sin_port = htons((uint16_t)port);
     if (bind(ls, (struct sockaddr *)&addr, sizeof addr) != 0) { perror("bind"); return 1; }
     if (listen(ls, 64) != 0) { perror("listen"); return 1; }
-    logf_("mcp_gateway listening on :%d cmd=%s", port, g_cmd);
+    logf_("mcp_gateway listening on :%d cmd=%s max_sessions=%d idle_ttl=%ds",
+          port, g_cmd, g_max_sessions, g_idle_ttl);
+    pthread_t reaper;
+    spawn_detached(&reaper, reaper_main, NULL);
 
-    int ticks = 0;
     for (;;) {
         int cfd = accept(ls, NULL, NULL);
         if (cfd < 0) {
             if (errno == EINTR) continue;
             break;
         }
-        if (++ticks % 256 == 0) reap_idle();
 
         int *arg = malloc(sizeof(int));
         if (!arg) { close(cfd); continue; }
