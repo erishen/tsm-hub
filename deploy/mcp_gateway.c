@@ -16,7 +16,9 @@
  *                -> 通知类（无 id）回 202 空体
  *   GET  /health -> 200 ok（不依赖 node，容器探活用）
  *   DELETE /mcp  -> 200（关闭该会话的子进程）
- *   GET  /mcp    -> 405（服务端推送流未实现，协议里属可选通道）
+ *   GET  /mcp    -> 200 text/event-stream（服务端推送：子进程的无 id 通知按
+ *                   `event: message` 下发，15s 一次 `: ping` 心跳；会话关闭/子进程
+ *                   退出时收尾结束流）
  *
  * 用法：mcp_gateway <port> <stdio-command>
  *   例：mcp_gateway 8000 "node /mcp/node_modules/fetch-mcp-server.cjs"
@@ -47,6 +49,8 @@
 #define IDLE_TTL_SEC 600      /* 默认值；可用 MCP_GW_IDLE_TTL_SEC 覆盖 */
 #define CALL_TIMEOUT_SEC 300
 #define REAP_INTERVAL_SEC 15  /* 回收线程的粒度 */
+#define SSE_QUEUE_MAX 32      /* 每条会话最多缓存多少条待下发的通知 */
+#define SSE_PING_SEC 15       /* SSE 心跳间隔 */
 
 static char g_cmd[4096];
 static int g_max_sessions = MAX_SESSIONS;
@@ -113,6 +117,15 @@ typedef struct session {
     int inflight;
     int alive;
     time_t last_used;
+    /* 服务端推送（GET /mcp 的 SSE 下行流）：单会话单订阅者，队列只存无 id 的通知。 */
+    int sse_active;
+    int sse_fd;
+    int sse_done;
+    char *sse_q[SSE_QUEUE_MAX];
+    int sse_qh;
+    int sse_qn;
+    pthread_mutex_t sse_lock;
+    pthread_cond_t sse_cv;
     struct session *next;
 } session_t;
 
@@ -285,6 +298,31 @@ static void fail_all_pending(session_t *s) {
     pthread_mutex_unlock(&s->plock);
 }
 
+/* 子进程发出的通知（无顶层 id）投进会话的 SSE 队列；没有订阅者就直接丢。 */
+static void sse_push(session_t *s, const char *line) {
+    pthread_mutex_lock(&s->sse_lock);
+    if (!s->sse_active || s->sse_done) { pthread_mutex_unlock(&s->sse_lock); return; }
+    if (s->sse_qn == SSE_QUEUE_MAX) {          /* 满了丢最旧的一条，不阻塞读线程 */
+        free(s->sse_q[s->sse_qh]);
+        s->sse_q[s->sse_qh] = NULL;
+        s->sse_qh = (s->sse_qh + 1) % SSE_QUEUE_MAX;
+        s->sse_qn--;
+    }
+    int slot = (s->sse_qh + s->sse_qn) % SSE_QUEUE_MAX;
+    s->sse_q[slot] = strdup(line);
+    s->sse_qn++;
+    pthread_cond_signal(&s->sse_cv);
+    pthread_mutex_unlock(&s->sse_lock);
+}
+
+/* 会话结束/子进程退出：唤醒等待者并结束流。 */
+static void sse_finish(session_t *s) {
+    pthread_mutex_lock(&s->sse_lock);
+    s->sse_done = 1;
+    pthread_cond_broadcast(&s->sse_cv);
+    pthread_mutex_unlock(&s->sse_lock);
+}
+
 static void *reader_main(void *arg) {
     session_t *s = (session_t *)arg;
     char *line = malloc(LINE_MAX);
@@ -297,7 +335,8 @@ static void *reader_main(void *arg) {
 
         const char *ida = NULL, *idb = NULL;
         if (find_toplevel_id(line, &ida, &idb) != 0) {
-            logf_("[%s] child line without id: %.60s", s->sid, line);
+            /* 无顶层 id = 服务端通知，走 SSE 下行；没有订阅者时静默丢弃。 */
+            sse_push(s, line);
             continue;
         }
         long long key = atoll(ida);
@@ -323,6 +362,7 @@ static void *reader_main(void *arg) {
     s->alive = 0;
     pthread_mutex_unlock(&s->plock);
     fail_all_pending(s);
+    sse_finish(s);
     free(line);
     return NULL;
 }
@@ -357,6 +397,9 @@ static session_t *session_new(void) {
     s->last_used = time(NULL);
     pthread_mutex_init(&s->wlock, NULL);
     pthread_mutex_init(&s->plock, NULL);
+    pthread_mutex_init(&s->sse_lock, NULL);
+    pthread_cond_init(&s->sse_cv, NULL);
+    s->sse_fd = -1;
 
     unsigned long long r = (unsigned long long)time(NULL) ^ ((unsigned long long)pid << 24)
                          ^ ((unsigned long long)now_ms() << 8);
@@ -392,6 +435,7 @@ static void session_close(session_t *s) {
         }
     }
     fail_all_pending(s);
+    sse_finish(s);
     logf_("session %s closed pid=%d", s->sid, (int)s->pid);
 }
 
@@ -615,6 +659,92 @@ static void handle_rpc(int fd, const char *req_headers, const char *body, size_t
     free(resp);
 }
 
+/* GET /mcp：把子进程的无 id 通知以 SSE 下发。单会话单订阅者；会话结束或客户端断开
+ * 就收尾。返回时关闭 fd，调用方不要再 close。 */
+static void handle_sse(int fd, const char *sidbuf) {
+    session_t *s;
+    pthread_mutex_lock(&g_slock);
+    s = session_find(sidbuf);
+    if (s) {
+        pthread_mutex_lock(&s->sse_lock);
+        if (s->sse_active) {
+            pthread_mutex_unlock(&s->sse_lock);
+            pthread_mutex_unlock(&g_slock);
+            respond(fd, 409, "Conflict", "text/plain", NULL, "sse stream already open", 22);
+            close(fd);
+            return;
+        }
+        s->sse_active = 1;
+        s->sse_fd = fd;
+        s->sse_done = 0;
+        pthread_mutex_unlock(&s->sse_lock);
+    }
+    pthread_mutex_unlock(&g_slock);
+
+    if (!s) {
+        respond(fd, 404, "Not Found", "text/plain", NULL, "unknown session", 15);
+        close(fd);
+        return;
+    }
+
+    char head[512];
+    int n = snprintf(head, sizeof head,
+                     "HTTP/1.1 200 OK\r\n"
+                     "Content-Type: text/event-stream\r\n"
+                     "Cache-Control: no-cache\r\n"
+                     "Connection: keep-alive\r\n"
+                     "mcp-session-id: %s\r\n\r\n",
+                     s->sid);
+    int err = (n > 0 && send_all(fd, head, (size_t)n) == 0) ? 0 : 1;
+    if (!err) send_all(fd, ": connected\n\n", 13);
+
+    while (!err) {
+        pthread_mutex_lock(&s->sse_lock);
+        while (!s->sse_done && s->sse_qn == 0) {
+            struct timespec ts;
+            clock_gettime(CLOCK_REALTIME, &ts);
+            ts.tv_sec += SSE_PING_SEC;
+            if (pthread_cond_timedwait(&s->sse_cv, &s->sse_lock, &ts) == ETIMEDOUT) break;
+        }
+        int done = s->sse_done && s->sse_qn == 0;
+        char *msgs[SSE_QUEUE_MAX];
+        int cnt = 0;
+        while (s->sse_qn > 0 && cnt < SSE_QUEUE_MAX) {
+            msgs[cnt++] = s->sse_q[s->sse_qh];
+            s->sse_q[s->sse_qh] = NULL;
+            s->sse_qh = (s->sse_qh + 1) % SSE_QUEUE_MAX;
+            s->sse_qn--;
+        }
+        pthread_mutex_unlock(&s->sse_lock);
+
+        if (done) break;
+        if (cnt == 0) {                      /* 没有待发消息 = 一次心跳 */
+            if (send_all(fd, ": ping\n\n", 8) != 0) err = 1;
+            continue;
+        }
+        for (int i = 0; i < cnt && !err; i++) {
+            char *m = msgs[i];
+            size_t flen = strlen(m) + 32;
+            char *frame = malloc(flen);
+            if (!frame) { free(m); err = 1; break; }
+            snprintf(frame, flen, "event: message\ndata: %s\n\n", m);
+            if (send_all(fd, frame, strlen(frame)) != 0) err = 1;
+            free(frame);
+            free(m);
+        }
+    }
+
+    pthread_mutex_lock(&s->sse_lock);
+    s->sse_active = 0;
+    s->sse_fd = -1;
+    s->sse_done = 0;
+    for (int i = 0; i < SSE_QUEUE_MAX; i++) { free(s->sse_q[i]); s->sse_q[i] = NULL; }
+    s->sse_qh = 0;
+    s->sse_qn = 0;
+    pthread_mutex_unlock(&s->sse_lock);
+    close(fd);
+}
+
 static void *conn_main(void *arg) {
     int fd = *(int *)arg;
     free(arg);
@@ -649,9 +779,13 @@ static void *conn_main(void *arg) {
         return NULL;
     }
     if (strcmp(method, "GET") == 0 && strcmp(path, "/mcp") == 0) {
-        respond(fd, 405, "Method Not Allowed", "text/plain", "Allow: POST, DELETE\r\n",
-                "gateway: GET /mcp (server push) not implemented", 46);
-        close(fd);
+        char sidbuf[128] = {0};
+        if (header_value(req, "mcp-session-id", sidbuf, sizeof sidbuf) != 0) {
+            respond(fd, 400, "Bad Request", "text/plain", NULL, "missing mcp-session-id", 24);
+            close(fd);
+            return NULL;
+        }
+        handle_sse(fd, sidbuf);   /* 自带 close */
         return NULL;
     }
     if (strcmp(method, "DELETE") == 0) {
