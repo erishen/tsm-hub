@@ -401,6 +401,22 @@ TSM_HUB_PEER_ROOT=<与 Lume 同值>   # derived 模式（推荐，防冒充）
 - Agent Card 的 `url` 取监听地址；绑 0.0.0.0 时回落 127.0.0.1，跨机部署设
   `TSM_HUB_A2A_PUBLIC_URL`。
 
+### 接入 lume 集群（实操步骤）
+
+1. **两端同一把根密钥**：`TSM_HUB_PEER_ROOT` 必须与 lume 节点 `.env` 的 `PEER_ROOT`
+   完全同值；容器里用 `printenv TSM_HUB_PEER_ROOT` 确认确实注入（compose 只注入显式列出的变量）。
+2. **注册表互登记对方节点名**（最易漏的一步）：
+   - tsm-hub 的 `data/peers-identity.json` 的 `peers` 要含 lume 节点的**实际运行名**
+     （即对方 `.env` 的 `PEER_NAME`；本项目为 `resolve-lume`，不要写 `lume-a2a` 这类历史别名）；
+   - lume 的 `.data/peers-identity.json` 的 `peers` 要含 `tsm-hub`（或在其 `PEER_REG_DIR`
+     自注册目录放 `tsm-hub.json`）。
+   - 缺任一边都是单向通，报错为 `unknown peer '<name>' (not in registry)`：看到这行先核
+     节点名，不要去核密钥。
+3. **生效方式不同**：lume 侧 `known()` 每次请求重读注册表（改完即生效）；tsm-hub 侧启动时
+   加载，改完必须 `docker compose restart tsm-hub`。
+4. **验收**：未签名 `/peer/health` → `missing auth params`；用真实节点名签一次 GET 应得
+   `ok:true, mode:"derived"`；再用编造名签一次应得 `unknown peer`——两条链都覆盖才算通。
+
 ---
 
 ## Admin API
