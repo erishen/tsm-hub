@@ -69,6 +69,20 @@ func Handler() (http.Handler, error) {
 		setCacheHeaders(w, name)
 		fileServer.ServeHTTP(w, r)
 	}
+	// serveIndex 直接读 index.html 回 200，**不走 http.FileServer**：
+	// 标准库 FileServer 会把 GET /index.html（含 SPA 回退改写后的 /index.html）
+	// 当路径规范化处理，回 301 → "./"，于是所有 SPA 深链（/usage、/a2a-panel…）
+	// 直接访问都会被弹回根目录。实测：FileServer GET /index.html → 301，GET / → 200。
+	serveIndex := func(w http.ResponseWriter) {
+		data, err := fs.ReadFile(root, "index.html")
+		if err != nil {
+			http.Error(w, "index.html not found", http.StatusNotFound)
+			return
+		}
+		setCacheHeaders(w, "index.html")
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write(data)
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// 只处理 GET/HEAD，其余交给上层。
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -76,14 +90,13 @@ func Handler() (http.Handler, error) {
 			return
 		}
 		path := strings.TrimPrefix(r.URL.Path, "/")
-		if path == "" {
-			path = "index.html"
+		if path == "" || path == "index.html" {
+			serveIndex(w)
+			return
 		}
 		if _, err := fs.Stat(root, path); err != nil {
-			// SPA 回退
-			r2 := r.Clone(r.Context())
-			r2.URL.Path = "/index.html"
-			serveWithCache(w, r2, "index.html")
+			// SPA 回退：未知路径 → index.html，交给前端路由（Angular Router）。
+			serveIndex(w)
 			return
 		}
 		serveWithCache(w, r, path)

@@ -1,0 +1,146 @@
+    <div class="page-head">
+      <div>
+        <h1>A2A 能力盘</h1>
+        <div class="sub">lume 集群接入 · tsm-hub 作为只读能力节点（工具 / 技能 / MCP / 用量 / provider 健康）</div>
+      </div>
+      <div class="inline-form">
+        <button (click)="load()">刷新</button>
+      </div>
+    </div>
+
+    <div class="banner error" *ngIf="error()">{{ error() }}</div>
+
+    <!-- 总览：节点 / peer 模式 / 活跃任务 / uptime -->
+    <div class="grid" *ngIf="overview()">
+      <div class="stat">
+        <div class="label">节点</div>
+        <div class="value mono">{{ overview()!.node }}</div>
+        <div class="hint">能力数 {{ overview()!.caps }}</div>
+      </div>
+      <div class="stat">
+        <div class="label">peer 签名模式</div>
+        <div class="value">
+          <span class="badge" [class.ok]="overview()!.peer_mode !== 'off'" [class.warn]="overview()!.peer_mode === 'off'">
+            {{ overview()!.peer_mode }}
+          </span>
+        </div>
+        <div class="hint">
+          <ng-container *ngIf="overview()!.peer_mode === 'off'">未配凭据，fail-closed</ng-container>
+          <ng-container *ngIf="overview()!.peer_mode === 'derived'">防冒充（按节点派生）</ng-container>
+          <ng-container *ngIf="overview()!.peer_mode === 'shared'">共享密钥（兼容）</ng-container>
+        </div>
+      </div>
+      <div class="stat" *ngIf="overview()!.tasks_active !== undefined">
+        <div class="label">活跃 A2A 任务</div>
+        <div class="value">{{ overview()!.tasks_active }}</div>
+        <div class="hint">非终结态（submitted / working / input-required）</div>
+      </div>
+      <div class="stat" *ngIf="overview()!.uptime_secs !== undefined">
+        <div class="label">服务运行</div>
+        <div class="value">{{ fmtDuration(overview()!.uptime_secs) }}</div>
+        <div class="hint">自启动</div>
+      </div>
+    </div>
+    <div class="banner warn" *ngFor="let w of overview()?.peer_warnings">
+      <b>peer 告警</b>：{{ w }}
+    </div>
+
+    <div class="page-loading" *ngIf="loading()">加载中…</div>
+
+    <!-- 能力清单（Agent Card skills） -->
+    <div class="card" *ngIf="skills().length">
+      <h2>能力（{{ skills().length }}）</h2>
+      <div class="muted small" style="margin-bottom:10px">
+        Agent Card <span class="mono">/.well-known/agent-card.json</span> 公开发现；全部只读，写入/执行仍只走 Admin API。
+      </div>
+      <div class="cap-grid">
+        <div class="cap-card" [class.selected]="invokeTool() === s.id"
+             [title]="invokeTool() === s.id ? '已选中（快速调用中）' : '点击选中，快速调用区会用示例参数预填'"
+             *ngFor="let s of skills()" (click)="selectTool(s.id)">
+          <div class="cap-name mono">{{ s.id }}
+            <span class="badge ok small" *ngIf="invokeTool() === s.id">已选中</span>
+          </div>
+          <div class="cap-title">{{ s.name }}</div>
+          <div class="cap-desc muted small">{{ s.description }}</div>
+          <div class="cap-ex mono small muted" *ngIf="s.examples?.length">例：{{ s.examples[0] }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="card" *ngIf="!loading() && !skills().length">
+      <h2>能力</h2>
+      <div class="empty">未取到 Agent Card（服务未启用 A2A 面或网络不通）</div>
+    </div>
+
+    <!-- 快速调用 -->
+    <div class="card">
+      <h2>快速调用</h2>
+      <div class="invoke-form">
+        <div style="flex:0 0 220px">
+          <label>能力</label>
+          <select [ngModel]="invokeTool()" (ngModelChange)="onToolChange($event)">
+            <option *ngFor="let s of skills()" [ngValue]="s.id">{{ s.id }}</option>
+          </select>
+        </div>
+        <div style="flex:1">
+          <label>参数（JSON，已按能力示例预填，可直接调用）</label>
+          <textarea rows="2" [ngModel]="invokeArgs()" (ngModelChange)="invokeArgs.set($event)"
+                    placeholder='{} 或 {"name":"code-review"}'></textarea>
+        </div>
+        <div style="flex:0 0 auto;align-items:flex-end">
+          <button class="primary" (click)="invoke()" [disabled]="invoking()">
+            {{ invoking() ? '调用中…' : '调用' }}
+          </button>
+        </div>
+      </div>
+
+      <div class="muted small" style="margin-top:8px">
+        直接执行（同步返回结果），**不生成任务记录**；需任务轨迹/多轮 input-required 请走 <span class="mono">POST /a2a</span>（Lume 侧 A2A 客户端）。
+      </div>
+
+      <div class="invoke-result" *ngIf="invokeResult()">
+        <div>
+          <span class="badge" [ngClass]="invokeResult()!.ok ? 'ok' : 'err'">
+            {{ invokeResult()!.state || (invokeResult()!.ok ? 'ok' : 'failed') }}
+          </span>
+          <span class="muted small" style="margin-left:8px">{{ invokeResult()!.tool }}</span>
+        </div>
+        <div class="muted small" *ngIf="invokeResult()!.note && invokeResult()!.note !== 'ok'" style="margin-top:4px">{{ invokeResult()!.note }}</div>
+        <pre class="mono small" *ngIf="invokeResult()!.ok && invokeResult()!.result">{{ prettyJson(invokeResult()!.result || '') }}</pre>
+        <div class="banner error" *ngIf="!invokeResult()!.ok && invokeResult()!.error" style="margin:8px 0 0">
+          {{ invokeResult()!.error }}
+          <span *ngIf="invokeResult()!.known?.length"> · 可选：{{ (invokeResult()!.known || []).join(', ') }}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 任务轨迹 -->
+    <div class="card">
+      <h2>任务轨迹（{{ tasks().length }}）</h2>
+      <div class="muted small" style="margin-bottom:10px">
+        来自 <span class="mono">data/a2a-tasks/{{ overview()?.node }}/</span>，state + trace 时间线（每步在哪个节点发生什么）。
+      </div>
+      <div class="task-row" *ngFor="let t of tasks(); let i = index" (click)="toggleTask(t.id)">
+        <div class="task-main">
+          <span class="badge" [class.state]="true" [ngClass]="stateClass(t.status.state)">{{ t.status.state }}</span>
+          <span class="mono cap-tag">{{ t.metadata.capability }}</span>
+          <span class="muted small">{{ fmtTs(t.created) }}</span>
+          <span class="muted small" *ngIf="openTasks()[t.id]">· 点击收起</span>
+        </div>
+        <div class="task-trace" *ngIf="openTasks()[t.id]">
+          <div class="trace-step" *ngFor="let step of t.metadata.trace">
+            <span class="dot"></span>
+            <span class="mono small">{{ step.node }}</span>
+            <span class="muted small">{{ fmtTs(step.at) }}</span>
+            <span class="trace-note" *ngIf="step.note">{{ step.note }}</span>
+            <span class="muted small" *ngIf="step.cap">· {{ step.cap }}</span>
+          </div>
+          <div class="trace-art mono small" *ngIf="t.artifacts?.length">
+            → {{ prettyJson(firstArtifact(t)) }}
+          </div>
+          <div class="trace-msg muted small" *ngIf="t.status.message?.parts?.length">
+            提问：{{ (t.status.message?.parts?.[0]?.text || '') }}
+          </div>
+        </div>
+      </div>
+      <div class="empty" *ngIf="!tasks().length">暂无 A2A 任务（还没有 Lume 节点调用过 tsm-hub 的能力）</div>
+    </div>

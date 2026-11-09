@@ -11,12 +11,15 @@ import (
 	"log"
 	"log/slog"
 	"net/http"
+	"os"
 	"runtime/debug"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/erishen/tsm-hub/internal/a2a"
 	"github.com/erishen/tsm-hub/internal/audit"
 	"github.com/erishen/tsm-hub/internal/auth"
 	"github.com/erishen/tsm-hub/internal/proxy"
@@ -46,6 +49,9 @@ type Server struct {
 	statusCounts map[string]int64 // "200" / "401" ... -> 计数（/metrics）
 	denyCounts   map[string]int64 // 配额拒绝原因 -> 计数（/metrics）
 	adminHandler http.Handler
+
+	// a2a 是可选的 A2A/peer 面（未配凭据时为 nil，整面不挂载）。
+	a2a *a2a.Server
 
 	loginMu    sync.Mutex
 	loginFails map[string]loginFail // ip -> 失败登录状态（暴力尝试防护）
@@ -99,7 +105,81 @@ func New(o Options) *Server {
 		s.audit = auditStore
 	}
 	s.adminHandler = s.adminMux()
+	s.a2a = s.newA2AServer()
 	return s
+}
+
+// newA2AServer 组装 A2A 面。
+//
+// 凭据来源与 Lume 侧一致（纯 env / .env）：
+//   - TSM_HUB_PEER_NAME     本节点名（默认 "tsm-hub"）
+//   - TSM_HUB_PEER_ROOT     按节点派生密钥模式（与 Lume 的 PEER_ROOT 同值）
+//   - TSM_HUB_PEER_SHARED   共享密钥模式（Lume 的 PEER_SHARED）
+//   - TSM_HUB_PEER_REGISTRY 节点注册表文件（Lume 的 .data/peers-identity.json）
+//   - TSM_HUB_PEER_SKEW     时间窗（默认 120s）
+//
+// Root/Shared 都未配时 peer 签名面**关闭**（fail-closed），但 A2A 标准面
+// （Agent Card + /a2a）仍然挂载 —— 与 Lume 侧行为一致：A2A 是公开发现面，
+// peer 私有通道才需要凭据。
+func (s *Server) newA2AServer() *a2a.Server {
+	name := "tsm-hub"
+	if v := os.Getenv("TSM_HUB_PEER_NAME"); v != "" {
+		name = v
+	} else if v := os.Getenv("PEER_NAME"); v != "" {
+		name = v
+	}
+	root := envFirst("TSM_HUB_PEER_ROOT", "PEER_ROOT")
+	shared := envFirst("TSM_HUB_PEER_SHARED", "PEER_SHARED")
+	registry := ""
+	if v := envFirst("TSM_HUB_PEER_REGISTRY", "PEER_REGISTRY"); v != "" {
+		registry = v
+	} else if s.store != nil {
+		// 缺省用数据目录下的 peers-identity.json（与 Lume 节点同路径惯例），
+		// 这样两侧可以用**同一份文件**互相当对端注册表。
+		registry = s.store.DataDir() + "/peers-identity.json"
+	}
+	skew := 120
+	if v := envFirst("TSM_HUB_PEER_SKEW", "PEER_SKEW_SECS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			skew = n
+		}
+	}
+
+	var peer *a2a.Peer
+	if root != "" || shared != "" {
+		peer = a2a.New(name, shared, root, registry, skew)
+	}
+
+	baseDir := ""
+	if s.store != nil {
+		baseDir = s.store.DataDir()
+	}
+	tasks := a2a.NewTaskStore(baseDir, name)
+	deps := a2a.Deps{
+		Store:  s.store,
+		Health: s.health,
+		Rec:    s.rec,
+		Proxy:  s.proxy,
+		Skills: s.skills,
+		Tasks:  tasks,
+		Uptime: func() time.Duration { return time.Since(s.startAt) },
+	}
+	caps := a2a.NewCapabilities()
+	a2a.RegisterTSMCapabilities(caps, deps)
+
+	srv := &a2a.Server{Node: name, Caps: caps, Tasks: tasks, PEER: peer,
+		Uptime: func() time.Duration { return time.Since(s.startAt) }}
+	return srv
+}
+
+// envFirst 取第一个非空的环境变量。
+func envFirst(keys ...string) string {
+	for _, k := range keys {
+		if v := os.Getenv(k); v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // Handler 返回根路由，最外层包 panic 兜底 + 请求 ID 中间件。
@@ -116,6 +196,18 @@ func (s *Server) Handler() http.Handler {
 	// 管理 API。
 	mux.HandleFunc("/api/admin/login", s.withLogging(s.handleAdminLogin))
 	mux.Handle("/api/admin/", s.withLogging(s.adminHandler.ServeHTTP))
+
+	// A2A 标准面 + peer 签名面（未配凭据时 peer 面 fail-closed 返回统一错误）。
+	// Agent Card 按规范公开未认证（先发现再认证）；/a2a 与 peer 端点的
+	// 保护靠 HMAC 签名（peer）与 capability 白名单（a2a，全部只读）。
+	if s.a2a != nil {
+		mux.HandleFunc("/.well-known/agent-card.json", s.a2a.HandleAgentCard)
+		mux.HandleFunc("/a2a", s.withLogging(s.a2a.HandleA2A))
+		mux.HandleFunc("/peer/health", s.a2a.HandlePeerHealth)
+		mux.HandleFunc("/peer/tools", s.a2a.HandlePeerTools)
+		mux.HandleFunc("/peer/invoke", s.a2a.HandlePeerInvoke)
+		mux.HandleFunc("/peer/relay", s.a2a.HandlePeerRelay)
+	}
 
 	// 前端。
 	if webHandler, err := web.Handler(); err == nil {

@@ -101,6 +101,7 @@ export class AppComponent {
         { label: '用量', route: '/usage' },
         { label: '监控', route: '/observability' },
         { label: '审计日志', route: '/audit-logs' },
+        { label: 'A2A 能力盘', route: '/a2a-panel' },
       ],
     },
     {

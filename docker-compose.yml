@@ -20,6 +20,30 @@ services:
       # TSM_HUB_SMART_COST_WEIGHT: 40
       # TSM_HUB_SMART_STABILITY_WEIGHT: 100
       # TSM_HUB_SMART_LATENCY_WEIGHT: 60
+      # A2A / Peer 接入 lume 集群（tsm-hub 作为只读能力节点）。
+      # TSM_HUB_PEER_ROOT 用 ${} 从同目录 .env（gitignore）插值，密钥不入 compose 文件。
+      # 未设 TSM_HUB_PEER_ROOT 时容器 peer 签名面 fail-closed（不影响 A2A 公开发现面）。
+      # 注册表缺省读 /data/peers-identity.json（= ./data/peers-identity.json，已挂载）。
+      TSM_HUB_PEER_NAME: tsm-hub
+      TSM_HUB_PEER_ROOT: ${TSM_HUB_PEER_ROOT}
+      TSM_HUB_PEER_SKEW: "120"
+      # 上游 provider API keys。config.json 里已改成 "env:TSM_HUB_KEY_*" 引用
+      # （密钥不落 config.json），这里 ${} 从同目录 .env（gitignore）插值注入容器。
+      # compose 只注入显式列出的变量，.env 里的其它值（WORKSPACE 等）不会进容器。
+      TSM_HUB_KEY_KIMI: ${TSM_HUB_KEY_KIMI}
+      TSM_HUB_KEY_AGNES: ${TSM_HUB_KEY_AGNES}
+      TSM_HUB_KEY_DEEPSEEK: ${TSM_HUB_KEY_DEEPSEEK}
+      TSM_HUB_KEY_SENSENOVA: ${TSM_HUB_KEY_SENSENOVA}
+      TSM_HUB_KEY_TOKENROUTER: ${TSM_HUB_KEY_TOKENROUTER}
+      TSM_HUB_KEY_OPENROUTER: ${TSM_HUB_KEY_OPENROUTER}
+      TSM_HUB_KEY_ALIBAILIAN: ${TSM_HUB_KEY_ALIBAILIAN}
+      TSM_HUB_KEY_BAI: ${TSM_HUB_KEY_BAI}
+      TSM_HUB_KEY_GEMINI: ${TSM_HUB_KEY_GEMINI}
+      TSM_HUB_KEY_GLM: ${TSM_HUB_KEY_GLM}
+      TSM_HUB_KEY_SILICONFLOW: ${TSM_HUB_KEY_SILICONFLOW}
+      TSM_HUB_KEY_NVIDIA: ${TSM_HUB_KEY_NVIDIA}
+      TSM_HUB_KEY_GROQ: ${TSM_HUB_KEY_GROQ}
+      TSM_HUB_KEY_MODELSCOPE: ${TSM_HUB_KEY_MODELSCOPE}
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9070/healthz"]
       interval: 30s

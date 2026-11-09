@@ -3,6 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { Observable, of, throwError } from 'rxjs';
 import { catchError, map, tap } from 'rxjs/operators';
 import {
+  A2AInvokeResp, A2AOverview, A2ATasksResp,
   Agg, ApiKey, Balance, CatalogModel, McpServer, ObservabilityResponse, Overview, ProbeModel, Provider, ProviderBalance, ProviderHealth, Quota, RecommendationsResp, Route, SkillDetail, SkillSummary, ToolInfo, UpstreamPlatform, UpstreamPlatformsResp, UsageResponse,
 } from './models';
 
@@ -362,6 +363,28 @@ export class ApiService {
 
   observability(days = 14): Observable<ObservabilityResponse> {
     return this.http.get<ObservabilityResponse>(`/api/admin/observability/overview?days=${days}`, { headers: this.headers() })
+      .pipe(catchError(this.handleError));
+  }
+
+  // ── A2A 能力盘 ──────────────────────────────────────────────────
+  a2aOverview(): Observable<A2AOverview> {
+    return this.http.get<A2AOverview>('/api/admin/a2a/overview', { headers: this.headers() })
+      .pipe(catchError(this.handleError));
+  }
+
+  a2aTasks(n = 20): Observable<A2ATasksResp> {
+    return this.http.get<A2ATasksResp>(`/api/admin/a2a/tasks?n=${n}`, { headers: this.headers() })
+      .pipe(catchError(this.handleError));
+  }
+
+  a2aInvoke(tool: string, args: Record<string, any> = {}): Observable<A2AInvokeResp> {
+    return this.http.post<A2AInvokeResp>('/api/admin/a2a/invoke', { tool, arguments: args }, { headers: this.headers() })
+      .pipe(catchError(this.handleError));
+  }
+
+  /** Agent Card 是公开发现端点（A2A 规范：先发现再认证），无需 admin 鉴权。 */
+  a2aAgentCard(): Observable<any> {
+    return this.http.get<any>('/.well-known/agent-card.json')
       .pipe(catchError(this.handleError));
   }
 

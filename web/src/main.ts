@@ -22,6 +22,9 @@ const routes: Routes = [
   { path: 'memory', loadComponent: () => import('./app/ts/memory.component').then((m) => m.MemoryComponent) },
   { path: 'sandbox', loadComponent: () => import('./app/ts/sandbox.component').then((m) => m.SandboxComponent) },
   { path: 'fastpath', loadComponent: () => import('./app/ts/fastpath.component').then((m) => m.FastpathComponent) },
+  // 注意：页面路由不能用 'a2a' —— 那是 A2A 协议官方端点（POST /a2a，JSON-RPC），
+  // 浏览器 GET /a2a 会打到协议 handler 回 405。能力盘页走 /a2a-panel。
+  { path: 'a2a-panel', loadComponent: () => import('./app/ts/a2a.component').then((m) => m.A2aComponent) },
   { path: 'playground', loadComponent: () => import('./app/ts/playground.component').then((m) => m.PlaygroundComponent) },
   { path: '**', redirectTo: '' },
 ];

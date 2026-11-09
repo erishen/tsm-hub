@@ -348,3 +348,55 @@ export interface UpstreamPlatformsResp {
   platforms: UpstreamPlatform[];
   total: number;
 }
+
+// ── A2A 能力盘 ──────────────────────────────────────────────────────
+export interface A2AOverview {
+  node: string;
+  caps: number;
+  tasks_active?: number;
+  peer_mode: string; // off / shared / derived
+  peer_warnings?: string[];
+  uptime_secs?: number;
+}
+
+export interface A2ATaskMessage {
+  role: string;
+  messageId: string;
+  kind: string;
+  parts: { kind: string; text: string }[];
+}
+
+export interface A2ATaskTraceStep {
+  node: string;
+  at: number;
+  note?: string;
+  cap?: string;
+}
+
+export interface A2ATask {
+  id: string;
+  contextId: string;
+  kind: string;
+  status: { state: string; timestamp: string; message?: A2ATaskMessage };
+  artifacts: { artifactId: string; parts: { kind: string; text: string }[] }[];
+  history: A2ATaskMessage[];
+  metadata: { capability: string; hops: number; trace: A2ATaskTraceStep[]; args?: Record<string, any> };
+  node: string;
+  created: number;
+  updated: number;
+}
+
+export interface A2ATasksResp {
+  node: string;
+  tasks: A2ATask[];
+}
+
+export interface A2AInvokeResp {
+  ok: boolean;
+  tool: string;
+  state?: string;
+  result?: string;
+  note?: string;
+  known?: string[];
+  error?: string;
+}

@@ -11,7 +11,7 @@
 - **Capability pool**: built-in generic tools + Agent Skills library + MCP servers + Docker sandbox + session memory
 - **Smart routing**: priority failover, weighted distribution, smart cost-aware routing, auto scene routing, deterministic fastpath
 - **Security & compliance**: SHA-256 key hashing, audit logs (auto-redacted secrets), automatic usage cleanup, upstream key `env:` references, native TLS/HTTPS, CORS middleware, startup security self-check (config permissions / plaintext key warnings / TLS warnings), [Security Guide](./docs/SECURITY.md), [Privacy Policy](./docs/PRIVACY.md), [DPA Template](./docs/DPA.md)
-- **Admin console**: 18 pages (Dashboard/Providers/Upstream Platforms/Routes/Keys/Models/Balances/Usage/Observability/Skills/MCP/Tools/Memory/Sandbox/Fastpath/Recommendations/Playground/Audit Logs), dark mode, global search, PWA
+- **Admin console**: 19 pages (Dashboard/Providers/Upstream Platforms/Routes/Keys/Models/Balances/Usage/Observability/Skills/MCP/Tools/Memory/Sandbox/Fastpath/Recommendations/Playground/Audit Logs/A2A Panel), dark mode, global search, PWA
 
 ---
 
@@ -363,6 +363,43 @@ curl http://localhost:9070/v1/skills -H "Authorization: Bearer <your-key>"
 > serves the catalog directly instead of proxying upstream (which would only
 > answer 404/405 to a GET). Likewise, non-POST methods on the plain chat path
 > get a local 405 (`Allow: POST`) without burning an upstream call.
+
+---
+
+## A2A & peer 面（lume 集群接入）
+
+tsm-hub 可作为 **A2A 能力节点**接入 lume 集群（lume-a2a 协议），把「工具 / 技能 /
+MCP / 用量 / provider 健康」暴露给 Lume 侧的 agent，供跨系统协商与发现。
+
+| 端点 | 认证 | 说明 |
+|------|------|------|
+| `GET /.well-known/agent-card.json` | 公开（A2A 发现规范） | 节点名 + `tsm.*` 能力目录（skills[]） |
+| `POST /a2a` | 白名单（仅只读 capability） | A2A JSON-RPC：`message/send` / `tasks/get` / `tasks/cancel` |
+| `GET /peer/health` | peer 签名 | 身份 + 健康（与 Lume 侧同名端点逐字段对齐） |
+| `POST /peer/invoke` | peer 签名 | 按 tool 名执行一个 `tsm.*` 能力（body 与 Lume 侧同形） |
+| `POST /peer/relay` | peer 签名 | 410 Gone（多跳转发已退役，端点保留并说明原因） |
+
+**能力（全部只读）**：`tsm.overview`（服务概况）/ `tsm.capabilities`（工具+技能目录）/
+`tsm.skill`（技能全文，缺 name 回 `input-required`）/ `tsm.usage`（用量统计）/
+`tsm.model_health`（provider 健康快照）/ `tsm.routes`（路由表，不含凭据）。
+写入/执行仍只走 Admin API（admin token）——A2A 面不提供任何变更能力。
+
+**签名与 lume-core/lib/peer.lume 字节级一致**（HMAC-SHA256 hex、同一 scope 拼接、
+derived 模式 `key_for(node)=hmac_sha256(PEER_ROOT,"peer:"+node)`），配置见
+[`.env.example`](./.env.example) 的 A2A 段：
+
+```bash
+TSM_HUB_PEER_NAME=tsm-hub        # 本节点名
+TSM_HUB_PEER_ROOT=<与 Lume 同值>   # derived 模式（推荐，防冒充）
+# TSM_HUB_PEER_SHARED=<...>        # shared 模式（向后兼容，无法防冒充）
+# TSM_HUB_PEER_REGISTRY=./data/peers-identity.json
+```
+
+- 未配任何凭据 → peer 签名面 **fail-closed**（整面拒绝，不放行）；A2A 标准面仍挂载（公开发现）。
+- derived 模式下节点必须在注册表里（与 Lume 侧 `.data/peers-identity.json` 同路径惯例，
+  两侧可共用一份文件）；未登记节点 / 冒充 / 时间窗外 / 错误签名一律拒。
+- Agent Card 的 `url` 取监听地址；绑 0.0.0.0 时回落 127.0.0.1，跨机部署设
+  `TSM_HUB_A2A_PUBLIC_URL`。
 
 ---
 
