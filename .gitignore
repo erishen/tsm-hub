@@ -3,6 +3,9 @@ coverage.out
 data/
 *.log
 .dev/
+# 本地构建缓存（沙箱环境把 GOCACHE/GOPATH 重定向到工作区内时使用）
+.go-cache/
+.go-gopath/
 
 # buildx 缓存（BUILDX_CONFIG 重定向目录，构建噪音非密钥，但勿入库）
 .data/
@@ -22,3 +25,4 @@ mcp/node_modules/
 
 # npm config (may contain registry auth tokens; keep local only)
 .npmrc
+web/.fakehome/
