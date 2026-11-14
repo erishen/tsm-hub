@@ -174,3 +174,116 @@ func TestFailureTTLDefault(t *testing.T) {
 		t.Fatalf("SetFailureTTL(0) 应恢复默认，got %v", tr.failureTTL)
 	}
 }
+
+// 延迟 EWMA 与失败计数一样需要惰性过期：只在 ReportSuccess 更新、失败不动，
+// 没有 TTL 时 2026-11-04 一次慢成功会让 58185ms 一直挂到 11-14（kimi 假告警
+// 的根因），同时让 Router.Pick 的延迟降权长期误判。
+func TestLatencyDecaysAfterTTL(t *testing.T) {
+	tr := NewTracker(3, 60)
+	tr.SetLatencyTTL(2 * time.Minute)
+	const id = "p-latency-stale"
+
+	tr.ReportSuccess(id, 4000*time.Millisecond)
+	if got := tr.Latency(id); got != 4000 {
+		t.Fatalf("刚成功应为 4000，got %d", got)
+	}
+	// 把最后一次成功拨到 TTL 之前，模拟「十几天前的一次慢响应」。
+	tr.mu.Lock()
+	tr.states[id].lastOK = time.Now().Add(-3 * time.Minute)
+	tr.mu.Unlock()
+
+	if got := tr.Latency(id); got != 0 {
+		t.Fatalf("过期 EWMA 应衰减为 0，got %d", got)
+	}
+	if got := tr.Health(id).LatencyMS; got != 0 {
+		t.Fatalf("Health().LatencyMS 应同步衰减，got %d", got)
+	}
+	for _, h := range tr.Snapshot() {
+		if h.ProviderID == id && h.LatencyMS != 0 {
+			t.Fatalf("Snapshot().LatencyMS 应同步衰减（/metrics 读这里），got %d", h.LatencyMS)
+		}
+	}
+}
+
+// 陈旧值过期后的第一次成功必须直接采新样本，不能让化石值以 7/10 权重继续污染。
+func TestLatencyStaleBaseDoesNotPollute(t *testing.T) {
+	tr := NewTracker(3, 60)
+	tr.SetLatencyTTL(time.Minute)
+	const id = "p-latency-reseed"
+
+	tr.ReportSuccess(id, 5000*time.Millisecond)
+	tr.mu.Lock()
+	tr.states[id].lastOK = time.Now().Add(-2 * time.Minute)
+	tr.mu.Unlock()
+
+	tr.ReportSuccess(id, 100*time.Millisecond)
+	if got := tr.Latency(id); got != 100 {
+		t.Fatalf("过期后首次成功应重置为 100ms，got %d（若读到 ~3530 说明旧值仍在污染）", got)
+	}
+}
+
+// 重启 Restore 回来的陈旧延迟应立即过期 —— kimi 的 health 快照正是
+// latency_ms=58185 + last_ok_at=2026-11-04 的原始场景。
+func TestRestoreStaleLatencyDecays(t *testing.T) {
+	tr := NewTracker(3, 60)
+	tr.Restore([]ProviderHealth{{
+		ProviderID: "kimi",
+		LatencyMS:  58185,
+		LastOKAt:   time.Now().AddDate(0, 0, -10),
+		Requests:   33,
+		Errors:     22,
+	}})
+	if got := tr.Latency("kimi"); got != 0 {
+		t.Fatalf("10 天前的 EWMA 应过期，got %d", got)
+	}
+	for _, h := range tr.Snapshot() {
+		if h.ProviderID == "kimi" && h.LatencyMS != 0 {
+			t.Fatalf("Snapshot 不得把陈旧 EWMA 导出到 /metrics，got %d", h.LatencyMS)
+		}
+	}
+	// 计数与失败状态不受影响。
+	if h := tr.Health("kimi"); h.Requests != 33 || h.Errors != 22 {
+		t.Fatalf("requests/errors 应原样恢复，got %+v", h)
+	}
+}
+
+// 手写/旧版快照没有 lastOK 时保守按过期处理。
+func TestLatencyZeroLastOKIsStale(t *testing.T) {
+	tr := NewTracker(3, 60)
+	tr.Restore([]ProviderHealth{{ProviderID: "legacy", LatencyMS: 9000}})
+	if got := tr.Latency("legacy"); got != 0 {
+		t.Fatalf("无成功时间戳的 EWMA 应视为过期，got %d", got)
+	}
+}
+
+// 持续成功不受 TTL 影响：每次都刷新 lastOK，EWMA 按 7:3 正常收敛。
+func TestLatencyDoesNotDecayWhileSucceeding(t *testing.T) {
+	tr := NewTracker(3, 60)
+	tr.SetLatencyTTL(time.Minute)
+	const id = "p-active"
+	tr.ReportSuccess(id, 1000*time.Millisecond)
+	tr.ReportSuccess(id, 1000*time.Millisecond)
+	if got := tr.Latency(id); got != 1000 {
+		t.Fatalf("持续成功应保持 1000，got %d", got)
+	}
+	tr.ReportSuccess(id, 500*time.Millisecond)
+	if got := tr.Latency(id); got != 850 {
+		t.Fatalf("EWMA 应为 (1000*7+500*3)/10=850，got %d", got)
+	}
+}
+
+// 默认 TTL 与 SetLatencyTTL(0) 回落。
+func TestLatencyTTLDefault(t *testing.T) {
+	tr := NewTracker(3, 60)
+	if tr.latencyTTL != defaultLatencyTTL {
+		t.Fatalf("默认 latencyTTL = %v, want %v", tr.latencyTTL, defaultLatencyTTL)
+	}
+	tr.SetLatencyTTL(time.Second)
+	if tr.latencyTTL != time.Second {
+		t.Fatalf("SetLatencyTTL 未生效，got %v", tr.latencyTTL)
+	}
+	tr.SetLatencyTTL(0)
+	if tr.latencyTTL != defaultLatencyTTL {
+		t.Fatalf("SetLatencyTTL(0) 应恢复默认，got %v", tr.latencyTTL)
+	}
+}

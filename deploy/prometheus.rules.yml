@@ -16,9 +16,16 @@ groups:
           description: "Prometheus 已连续 2 分钟无法从 tsm-hub:9070/metrics 取到指标。检查容器与健康探针 /healthz。"
 
       - alert: TSMHubUpstreamErrorRateHigh
+        # 低流量时 1~2 个请求失败就会算出 100% 错误率（2026-11-14 agnes 近 5m
+        # 仅 2 次请求、2 次失败即进入 pending）。要求窗口内至少 5 次请求，
+        # 避免把偶发单点失败当持续故障。
         expr: |
-          sum by (provider) (rate(tsm_hub_upstream_errors_total[5m]))
-            / clamp_min(sum by (provider) (rate(tsm_hub_upstream_requests_total[5m])), 0.001) > 0.3
+          (
+            sum by (provider) (rate(tsm_hub_upstream_errors_total[5m]))
+              / clamp_min(sum by (provider) (rate(tsm_hub_upstream_requests_total[5m])), 0.001) > 0.3
+          )
+          and on(provider)
+          (sum by (provider) (increase(tsm_hub_upstream_requests_total[5m])) >= 5)
         for: 10m
         labels:
           severity: warning
@@ -46,12 +53,12 @@ groups:
           description: "近 5 分钟有请求被 RPM / token / 金额 / 每日额度挡下，核对 Key 配额配置。"
 
       - alert: TSMHubUpstreamLatencyHigh
-        # tsm_hub_upstream_latency_ms 是 EWMA gauge：只在 ReportSuccess 时更新，
-        # 失败不更新、没有时间衰减，且随 SQLite 健康快照跨重启 Restore。一个历史
-        # 慢请求会让裸 gauge 永久超阈值（2026-11-14 kimi 的 58185ms 实际来自
-        # 11-04 最后一次成功，之后 10 天没有任何成功请求）。因此判阈值前必须
-        # 先确认「近 15m 有成功样本」：成功数 = 请求增量 - 错误增量
-        # （ReportSuccess 只 ++requests，失败两个都 ++）。
+        # tsm_hub_upstream_latency_ms 是 EWMA gauge，只在 ReportSuccess 时更新、
+        # 失败不更新。health.go 已给 Latency/Snapshot 加 15m 惰性 TTL（过期导出 0），
+        # 并让 SQLite 快照 Restore 回来的陈旧值立即过期。这里再叠加「近 15m 有
+        # 成功样本」做防御性双保险：旧镜像、指标回填、Prometheus staleness 都
+        # 不会让 2026-11-14 kimi 那种「10 天前的 58185ms」假告警重演。
+        # 成功数 = 请求增量 - 错误增量（ReportSuccess 只 ++requests，失败两个都 ++）。
         expr: |
           (tsm_hub_upstream_latency_ms > 30000)
           and on(provider)

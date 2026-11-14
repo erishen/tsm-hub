@@ -378,6 +378,9 @@ func keyAllowSets(key store.APIKey) (serverAllow, toolAllow map[string]bool) {
 // agentUpstream 构造并发送一轮上游请求（非流式）。
 // 返回 status>0 表示该状态应原样透传给客户端（4xx）。
 func (p *Proxy) agentUpstream(r *http.Request, c router.Candidate, path string, msgs []chatMessage, tools []map[string]any) ([]byte, string, int) {
+	// 这一轮上游调用的真实耗时；成功时用于更新延迟 EWMA。不能传 0，
+	// 否则每次成功都会把 EWMA 往 0 拽 30%，掩盖真实的慢响应。
+	started := time.Now()
 	reqBody := map[string]any{
 		"model":       c.UpstreamModel,
 		"messages":    msgs,
@@ -486,7 +489,7 @@ func (p *Proxy) agentUpstream(r *http.Request, c router.Candidate, path string, 
 		// 4xx 是客户端/上游固定错误：原样透传，不换候选、不驱逐 provider。
 		return b, compact(string(b)), resp.StatusCode
 	}
-	p.health.ReportSuccess(c.ProviderID, 0)
+	p.health.ReportSuccess(c.ProviderID, time.Since(started))
 	return b, "", 0
 }
 

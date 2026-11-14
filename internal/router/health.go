@@ -15,6 +15,14 @@ import (
 // 保证真正持续故障的 provider 仍会被熔断与指数退避覆盖。
 const defaultFailureTTL = 5 * time.Minute
 
+// defaultLatencyTTL 是延迟 EWMA 的有效期。EWMA 只在 ReportSuccess 时更新，
+// 失败不更新；一次慢成功之后若长期没有成功请求，旧值仍会被 /metrics、管理台
+// 当成实时延迟，并让 Router.Pick 的延迟降权持续误判（2026-11-14 kimi 的
+// 58185ms 来自 11-04 最后一次成功）。超过该时长没有新成功，一律惰性返回 0：
+// 不改 state、不额外触发持久化，语义与 effectiveFailuresLocked 对称。
+// 15m 与 deploy/prometheus.rules.yml 的延迟告警新鲜度门控窗口保持一致。
+const defaultLatencyTTL = 15 * time.Minute
+
 // ProviderHealth 是单个 provider 的运行时健康状态。
 type ProviderHealth struct {
 	ProviderID string `json:"provider_id"`
@@ -54,6 +62,7 @@ type Tracker struct {
 	cool       time.Duration
 	deadMin    int           // 从未成功的 provider 连续失败达到该值后，冷却指数退避
 	failureTTL time.Duration // 连续失败计数有效期，过期后惰性归零
+	latencyTTL time.Duration // 延迟 EWMA 有效期，过期后惰性导出 0
 	persistFn  func()        // 状态变更后的持久化回调（由调用方注入）
 }
 
@@ -71,6 +80,7 @@ func NewTracker(failThreshold int, cooldownSec int) *Tracker {
 		cool:       time.Duration(cooldownSec) * time.Second,
 		deadMin:    3 * failThreshold,
 		failureTTL: defaultFailureTTL,
+		latencyTTL: defaultLatencyTTL,
 	}
 }
 
@@ -106,6 +116,35 @@ func (t *Tracker) effectiveFailuresLocked(s *state, now time.Time) int {
 	return s.failures
 }
 
+// SetLatencyTTL 覆盖延迟 EWMA 的有效期；<=0 时恢复默认值。
+// 主要供测试注入短 TTL；生产保持 defaultLatencyTTL（与告警门控一致）。
+func (t *Tracker) SetLatencyTTL(d time.Duration) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if d <= 0 {
+		d = defaultLatencyTTL
+	}
+	t.latencyTTL = d
+}
+
+// effectiveLatencyLocked 返回当前「有效」的延迟 EWMA（毫秒）。
+//
+// EWMA 只在 ReportSuccess 时更新，失败不更新；lastOK 正是最后一次成功时间，
+// 无需新增字段或改动快照结构 —— 旧快照里 10 天前的 lastOK 会当场判定过期。
+// 惰性计算：不改 state、不额外触发持久化，与 effectiveFailuresLocked 对称。
+// 调用方必须已持有 t.mu（读锁或写锁）。
+func (t *Tracker) effectiveLatencyLocked(s *state, now time.Time) int64 {
+	if s == nil || s.latencyMS <= 0 {
+		return 0
+	}
+	// lastOK 为零值只可能来自手写/旧版快照：没有成功时间戳就无法证明新鲜，
+	// 保守按过期处理，避免把化石值当实时延迟。
+	if s.lastOK.IsZero() || now.Sub(s.lastOK) >= t.latencyTTL {
+		return 0
+	}
+	return s.latencyMS
+}
+
 func (t *Tracker) get(id string) *state {
 	s := t.states[id]
 	if s == nil {
@@ -137,17 +176,21 @@ func (s *state) availableLocked(now time.Time) bool {
 func (t *Tracker) ReportSuccess(id string, latency time.Duration) {
 	t.mu.Lock()
 	s := t.get(id)
+	now := time.Now()
+	// 必须在刷新 lastOK 之前取「有效」EWMA：陈旧值过期后第一次成功直接采
+	// 新样本，否则 11-04 的 58185ms 会以 7/10 权重继续污染新值。
+	base := t.effectiveLatencyLocked(s, now)
 	s.failures = 0
 	s.lastErr = ""
 	s.downUntil = time.Time{}
 	s.throttleUntil = time.Time{}
-	s.lastOK = time.Now()
+	s.lastOK = now
 	s.requests++
 	ms := latency.Milliseconds()
-	if s.latencyMS == 0 {
+	if base == 0 {
 		s.latencyMS = ms
 	} else {
-		s.latencyMS = (s.latencyMS*7 + ms*3) / 10
+		s.latencyMS = (base*7 + ms*3) / 10
 	}
 	t.mu.Unlock()
 	// persist 必须在锁外调用：RLock 会与上面的写锁互斥（同 goroutine 死锁）。
@@ -245,7 +288,7 @@ func (t *Tracker) Snapshot() []ProviderHealth {
 			LastFailAt:    s.lastFail,
 			DownUntil:     s.downUntil,
 			ThrottleUntil: s.throttleUntil,
-			LatencyMS:     s.latencyMS,
+			LatencyMS:     t.effectiveLatencyLocked(s, now),
 			Requests:      s.requests,
 			Errors:        s.errors,
 		})
@@ -274,7 +317,7 @@ func (t *Tracker) Health(id string) ProviderHealth {
 		LastOKAt:   s.lastOK,
 		LastFailAt: s.lastFail,
 		DownUntil:  s.downUntil,
-		LatencyMS:  s.latencyMS,
+		LatencyMS:  t.effectiveLatencyLocked(s, now),
 		Requests:   s.requests,
 		Errors:     s.errors,
 	}
@@ -298,14 +341,12 @@ func (t *Tracker) DownUntil(id string) time.Time {
 	return time.Time{}
 }
 
-// Latency 返回 provider 的延迟 EWMA（毫秒）。
+// Latency 返回 provider 的「有效」延迟 EWMA（毫秒）；距最后一次成功超过
+// latencyTTL 时返回 0，避免陈旧值影响 Router.Pick 的延迟降权。
 func (t *Tracker) Latency(id string) int64 {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
-	if s, ok := t.states[id]; ok {
-		return s.latencyMS
-	}
-	return 0
+	return t.effectiveLatencyLocked(t.states[id], time.Now())
 }
 
 // SetPersist 注册状态变更后的持久化回调；变更合并由调用方负责。

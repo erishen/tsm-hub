@@ -268,7 +268,10 @@ func (p *Proxy) Handle(w http.ResponseWriter, r *http.Request, key store.APIKey,
 		case res.ProviderFault:
 			p.health.ReportFailure(c.ProviderID, res.Err)
 		case res.Err == "":
-			p.health.ReportSuccess(c.ProviderID, time.Since(started))
+			// res.Latency 是本次 attempt 的耗时（streamResponse/bufferedResponse 返回处赋值）；
+			// 不要用 time.Since(started)：那是整个请求的起点，会把前面 failover
+			// 失败的耗时全算到最终成功的 provider 头上，虚高 EWMA 并误伤路由降权。
+			p.health.ReportSuccess(c.ProviderID, res.Latency)
 		}
 		res.Failover = failChain
 		p.account(key, req.Model, res)
