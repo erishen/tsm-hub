@@ -446,6 +446,15 @@ docker compose up -d prometheus grafana
 | Prometheus | <http://127.0.0.1:19090> | `/-/healthy`、`/targets`、`/alerts`；数据保留 30 天 |
 | Grafana | <http://127.0.0.1:19091> | 数据源与「tsm-hub 网关监控」面板自动注册 |
 
+**Grafana 登录**：打开 <http://127.0.0.1:19091/>，用户名 `admin`，密码取 `.env` 里的
+`GRAFANA_ADMIN_PASSWORD`；未设置时回落默认口令 `admin`。
+⚠️ `GF_SECURITY_ADMIN_PASSWORD` **只在 `grafana-data` 卷首次初始化时生效**，卷已存在后
+改 `.env` 再重启不会改密码。要改请在 UI 里改，或执行：
+
+```bash
+docker compose exec grafana grafana cli admin reset-admin-password '<新口令>'
+```
+
 抓取目标是 **`tsm-hub:9070`**（容器 DNS），不要写 `127.0.0.1:19070` —— 在 Prometheus
 容器里那是它自己的 loopback。两个端口都只绑 `127.0.0.1`。
 
@@ -471,6 +480,22 @@ docker compose up -d prometheus grafana
 
 改完告警规则可热加载，无需重启：
 `curl --noproxy '*' -X POST http://127.0.0.1:19090/-/reload`。
+
+## 配置隐私门禁
+
+`data/config.json` 及所有 `config.json.bak-*` 权限必须是 `0600`，且每个
+`providers[].api_key` 必须写成 `env:TSM_HUB_KEY_*` 引用，不允许明文上游 key。
+历史备份保留作回滚点，但已就地脱敏。
+
+```bash
+make privacy-check                                    # 只读；权限/明文 key 不合格则 exit 1
+python3 -S scripts/config-privacy-check.py --redact   # 只脱敏 *.bak-*，绝不动现用 config.json
+```
+
+`--redact` 把明文替换成 `env:TSM_HUB_KEY_<ID>`，备份恢复后仍能用当前 `.env` 取密钥。
+若要迁移现用配置里的明文 key：值写进 `.env` → `api_key` 改成 `env:TSM_HUB_KEY_<ID>`
+→ `docker-compose.yml` 的 `tsm-hub` 服务加同名变量 → `docker compose up -d tsm-hub`
+（recreate 注入新变量即可，不需要重建镜像）。
 
 ---
 

@@ -27,9 +27,11 @@ services:
       TSM_HUB_PEER_NAME: tsm-hub
       TSM_HUB_PEER_ROOT: ${TSM_HUB_PEER_ROOT}
       TSM_HUB_PEER_SKEW: "120"
-      # 上游 provider API keys。config.json 里已改成 "env:TSM_HUB_KEY_*" 引用
+      # 上游 provider API keys。config.json 里全部是 "env:TSM_HUB_KEY_*" 引用
       # （密钥不落 config.json），这里 ${} 从同目录 .env（gitignore）插值注入容器。
       # compose 只注入显式列出的变量，.env 里的其它值（WORKSPACE 等）不会进容器。
+      # 新增 provider 三步：config.json 写 env: 引用 → .env 补同名键 → 这里加一行；
+      # make privacy-check 会拒绝任何明文 api_key 漏进 config.json / 历史备份。
       TSM_HUB_KEY_KIMI: ${TSM_HUB_KEY_KIMI}
       TSM_HUB_KEY_AGNES: ${TSM_HUB_KEY_AGNES}
       TSM_HUB_KEY_DEEPSEEK: ${TSM_HUB_KEY_DEEPSEEK}
@@ -44,6 +46,7 @@ services:
       TSM_HUB_KEY_NVIDIA: ${TSM_HUB_KEY_NVIDIA}
       TSM_HUB_KEY_GROQ: ${TSM_HUB_KEY_GROQ}
       TSM_HUB_KEY_MODELSCOPE: ${TSM_HUB_KEY_MODELSCOPE}
+      TSM_HUB_KEY_TEAMOROUTER: ${TSM_HUB_KEY_TEAMOROUTER}
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9070/healthz"]
       interval: 30s
@@ -209,6 +212,8 @@ services:
       GF_SECURITY_ADMIN_USER: admin
       # ⚠️ 首次启动前请在 .env 设置 GRAFANA_ADMIN_PASSWORD（见 .env.example）。
       # 未设置时回落 admin/admin；端口只绑回环，切勿把 19091 改绑 0.0.0.0。
+      # 该变量只在 grafana-data 卷首次初始化时生效；卷已存在后改 .env 不会改密码，
+      # 需在 UI 改，或 docker compose exec grafana grafana cli admin reset-admin-password '<新口令>'
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_SERVER_ROOT_URL: "http://127.0.0.1:19091/"

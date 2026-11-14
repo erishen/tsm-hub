@@ -10,7 +10,7 @@ VERSION    ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo d
 export CGO_ENABLED := 1
 LDFLAGS := -X main.version=$(VERSION) -linkmode=external
 
-.PHONY: all build run test test-race vet fmt cover web-install web-build web-dev web-check dev dev-stop dev-logs dev-status mock mock-run mock-run-500 clean smoke help docker-build docker-up docker-down docker-stop docker-restart docker-logs docker-status
+.PHONY: all build run test test-race vet fmt cover web-install web-build web-dev web-check dev dev-stop dev-logs dev-status mock mock-run mock-run-500 clean smoke help docker-build docker-up docker-down docker-stop docker-restart docker-logs docker-status privacy-check
 
 all: build
 
@@ -57,6 +57,10 @@ run: build
 ## test: 跑单测与端到端冒烟
 test:
 	go test -ldflags '-linkmode=external' ./...
+
+## privacy-check: 校验 data/config.json* 权限(0600)且 provider api_key 全是 env: 引用
+privacy-check:
+	@python3 -S scripts/config-privacy-check.py --check
 
 ## test-race: 在竞态检测器下跑单测（并发安全回归；比 test 慢，单独跑）
 test-race:

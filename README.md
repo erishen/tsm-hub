@@ -597,6 +597,16 @@ docker compose up -d prometheus grafana
 | Prometheus | <http://127.0.0.1:19090> | `/-/healthy`, `/targets`, `/alerts`; 30d retention |
 | Grafana | <http://127.0.0.1:19091> | datasource + "tsm-hub 网关监控" dashboard auto-provisioned |
 
+**Grafana login**: open <http://127.0.0.1:19091/>, user `admin`, password is
+`GRAFANA_ADMIN_PASSWORD` from `.env` (compose falls back to `admin` when unset).
+`GF_SECURITY_ADMIN_PASSWORD` only applies when the `grafana-data` volume is first
+initialized — once that volume exists, editing `.env` and restarting does **not**
+change the password. Change it in the UI, or run:
+
+```bash
+docker compose exec grafana grafana cli admin reset-admin-password '<new-password>'
+```
+
 The scrape target is **`tsm-hub:9070`** (container DNS), not `127.0.0.1:19070` — inside the
 Prometheus container that address is its own loopback. Both ports bind to `127.0.0.1` only.
 
@@ -623,6 +633,23 @@ Caveats:
 
 After editing rules, hot-reload without restarting:
 `curl --noproxy '*' -X POST http://127.0.0.1:19090/-/reload`.
+
+## Config privacy gate
+
+`data/config.json` and every `config.json.bak-*` must be mode `0600`, and every
+`providers[].api_key` must be an `env:TSM_HUB_KEY_*` reference — never a literal
+upstream key. Historical backups are kept as rollback points but redacted in place.
+
+```bash
+make privacy-check                                    # read-only; exit 1 on bad perms / plaintext key
+python3 -S scripts/config-privacy-check.py --redact   # redact *.bak-* only (never the live config)
+```
+
+`--redact` replaces literal keys with `env:TSM_HUB_KEY_<ID>` so a restored backup
+keeps working with the current `.env`. To migrate a literal key in the live config:
+put the value in `.env`, set `api_key` to `env:TSM_HUB_KEY_<ID>`, add the same
+variable to the `tsm-hub` service in `docker-compose.yml`, then
+`docker compose up -d tsm-hub` (recreate to inject the variable; no rebuild needed).
 
 ---
 
