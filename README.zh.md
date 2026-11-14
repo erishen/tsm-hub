@@ -49,6 +49,12 @@ $EDITOR data/config.json          # 必改：settings.admin_token、各 provider
 
 打开 <http://localhost:9070> 进入管理台，用 `admin_token` 登录。
 
+> **Docker Compose 部署的端口不一样**：`docker-compose.yml` 把容器内 `9070` 映射到宿主
+> **<http://127.0.0.1:19070>**（只绑回环）。用 `make docker-up` 启动时，下面所有示例的
+> `localhost:9070` 都要换成 `127.0.0.1:19070`；`9070` 只适用于上面 `make run`／直接跑
+> 二进制的本地直连方式。本机若设了 `http_proxy`，`curl` 还要加 `--noproxy '*'`，
+> 否则请求会被代理接走返回 502（这也是 `make docker-status` 曾经一直显示「服务未响应」的原因）。
+
 像用 OpenAI 一样调用（只换 Key、换 base_url、换 model 别名）：
 
 ```bash
@@ -464,7 +470,7 @@ docker compose exec grafana grafana cli admin reset-admin-password '<新口令>'
 ```
 
 面板已设为**默认首页**（`GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH`），登录后直接落到
-「tsm-hub 网关监控」，不用再去 Dashboards 里找。共 **39 个面板**（v8）：
+「tsm-hub 网关监控」，不用再去 Dashboards 里找。共 **39 个面板**（v9）：
 
 | 区间 | 面板 |
 |---|---|
@@ -493,7 +499,7 @@ docker compose exec grafana grafana cli admin reset-admin-password '<新口令>'
 | `deploy/dingtalk_bridge.py` | 仅标准库：Alertmanager webhook → 钉钉 markdown + 加签；见下节 |
 | `deploy/mcp_gateway.c` | C 版桥的 `GET /metrics`，输出 `mcp_gateway_*`；两个桥 Dockerfile 共用这份源码 |
 | `deploy/grafana/provisioning/` | Prometheus 数据源（`uid: prometheus`）+ 面板自动加载 |
-| `deploy/grafana/dashboards/tsm-hub.json` | 39 个面板（v8）、4 个变量；成本面板单独看 24h |
+| `deploy/grafana/dashboards/tsm-hub.json` | 39 个面板（v9，面板 36 补了分类计数口径说明）、4 个变量；成本面板单独看 24h |
 
 **指标分层**（下表指标名均省略统一前缀 `tsm_hub_`；全部复用已有内存聚合，不新增状态、不改业务路径）：
 
@@ -521,6 +527,9 @@ docker compose exec grafana grafana cli admin reset-admin-password '<新口令>'
   `data/usage/*.jsonl` 回放，进程重启不清零，所以成本面板直接画累计值。
   失败类别与 `errors_total` 同源（同一处 `++`），每次计入健康的失败恰好落到一个类别；
   模型 404 / 客户端断开按原设计不计入健康，因此也不出现在分类里。
+  ⚠️ **两个数字的绝对值不要直接比较**：`errors_total` 会把 SQLite 快照里的历史累计
+  值恢复回来（例如重启后仍是 1720），而分类计数重启即归零，所以「分类之和 = 总错误数」
+  只在进程从未重启时才成立；排查故障请一律看 `increase()` 增量，别看裸累计值。
 - **三个「延迟」别混淆**：`upstream_latency_ms` 是上游单次尝试的 **EWMA gauge**（无 p95/p99）；
   `http_request_duration_seconds` 是网关整个 HTTP 请求的**总耗时直方图**；
   `http_first_byte_seconds` 是流式请求到**首次 Flush（首字节）**的直方图，
@@ -655,8 +664,9 @@ python3 -S scripts/config-privacy-check.py --redact   # 只脱敏 *.bak-*，绝�
 ## 测试
 
 ```bash
-make test         # 全部 Go 包
-make cover        # 覆盖率
+make test         # 全部 Go 包（先跑 fmt-check 门禁）
+make fmt-check    # gofmt -l 非空即失败
+make cover        # 覆盖率（需完整 Go 1.25 工具链，缺 covdata 会打印修复指引）
 make privacy-check # config.json* 权限与明文 key 门禁
 make alert-check  # 钉钉桥单测 + MCP 桥 /metrics 冒烟 + 面板结构 + AM/Prometheus 配置（配置校验需监控栈已 up）
 ```

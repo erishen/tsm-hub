@@ -6,9 +6,9 @@
 //     协议与 lume-core/lib/peer.lume 字节级一致（同一套凭据与算法）。
 //
 // 设计原则与 lume-a2a 同源：
-//   * 凭据缺失 = 整面关闭（fail-closed），绝不放行；
-//   * 不认识的 capability 不猜、不兜底转发 → 回 rejected / input-required；
-//   * 签名串、scope 拼接、密钥派生公式**一字不改** —— 任何一侧改动都会让
+//   - 凭据缺失 = 整面关闭（fail-closed），绝不放行；
+//   - 不认识的 capability 不猜、不兜底转发 → 回 rejected / input-required；
+//   - 签名串、scope 拼接、密钥派生公式**一字不改** —— 任何一侧改动都会让
 //     全舰队同时 401，表现为"密钥配错"，排查成本极高。
 package a2a
 
@@ -32,9 +32,9 @@ import (
 type Mode string
 
 const (
-	ModeOff      Mode = "off"      // 未配任何凭据，peer 面关闭
-	ModeShared   Mode = "shared"   // PEER_SHARED 单密钥（无法防冒充）
-	ModeDerived  Mode = "derived"  // PEER_ROOT + 按节点派生（防冒充）
+	ModeOff     Mode = "off"     // 未配任何凭据，peer 面关闭
+	ModeShared  Mode = "shared"  // PEER_SHARED 单密钥（无法防冒充）
+	ModeDerived Mode = "derived" // PEER_ROOT + 按节点派生（防冒充）
 )
 
 // Peer 持有签名凭据与节点注册表。

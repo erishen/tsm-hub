@@ -10,7 +10,7 @@ VERSION    ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo d
 export CGO_ENABLED := 1
 LDFLAGS := -X main.version=$(VERSION) -linkmode=external
 
-.PHONY: all build run test test-race vet fmt cover web-install web-build web-dev web-check dev dev-stop dev-logs dev-status mock mock-run mock-run-500 clean smoke help docker-build docker-up docker-down docker-stop docker-restart docker-logs docker-status privacy-check alert-check
+.PHONY: all build run test test-race vet fmt fmt-check cover web-install web-build web-dev web-check dev dev-stop dev-logs dev-status mock mock-run mock-run-500 clean smoke help docker-build docker-up docker-down docker-stop docker-restart docker-logs docker-status privacy-check alert-check
 
 all: build
 
@@ -54,9 +54,19 @@ mock-run-500: mock
 run: build
 	./$(BINARY) -data ./data
 
-## test: 跑单测与端到端冒烟
-test:
+## test: 跑单测与端到端冒烟（先过 gofmt 门禁）
+test: fmt-check
 	go test -ldflags '-linkmode=external' ./...
+
+## fmt-check: 校验 Go 源码格式，gofmt -l 非空即失败（防止历史漂移反复出现）
+fmt-check:
+	@out=`gofmt -l internal cmd`; \
+	if [ -n "$$out" ]; then \
+		echo "✗ gofmt drift detected, run 'make fmt' first:"; \
+		echo "$$out"; \
+		exit 1; \
+	fi
+	@echo "✓ gofmt clean"
 
 ## privacy-check: 校验 data/config.json* 权限(0600)且 provider api_key 全是 env: 引用
 privacy-check:
@@ -66,7 +76,7 @@ privacy-check:
 alert-check:
 	@python3 -S -m unittest discover -s deploy -p 'test_*.py'
 	@sh deploy/test_mcp_gateway_metrics.sh
-	@python3 -S -c "import json; d=json.load(open('deploy/grafana/dashboards/tsm-hub.json')); ids=[p['id'] for p in d['panels']]; assert len(ids)==len(set(ids)), 'duplicate panel ids'; assert d['version']>=8, 'dashboard version too old'; assert len(ids)>=39, 'missing v8 panels'; exprs=' '.join(t['expr'] for p in d['panels'] for t in p.get('targets',[])); assert all(m in exprs for m in ('tsm_hub_upstream_error_classes_total','tsm_hub_http_first_byte_seconds_bucket','flow=')), 'v8 metrics not wired into panels'"
+	@python3 -S -c "import json; d=json.load(open('deploy/grafana/dashboards/tsm-hub.json')); ids=[p['id'] for p in d['panels']]; assert len(ids)==len(set(ids)), 'duplicate panel ids'; assert d['version']>=9, 'dashboard version too old'; assert len(ids)>=39, 'missing v8 panels'; assert '重启归零' in next(p for p in d['panels'] if p['id']==36)['description'], 'panel 36 counter-scope note missing'; exprs=' '.join(t['expr'] for p in d['panels'] for t in p.get('targets',[])); assert all(m in exprs for m in ('tsm_hub_upstream_error_classes_total','tsm_hub_http_first_byte_seconds_bucket','flow=')), 'v8 metrics not wired into panels'"
 	@docker compose exec -T alertmanager amtool check-config /etc/alertmanager/alertmanager.yml
 	@docker compose exec -T prometheus promtool check config /etc/prometheus/prometheus.yml
 	@docker compose exec -T prometheus promtool check rules /etc/prometheus/prometheus.rules.yml
@@ -75,7 +85,23 @@ alert-check:
 test-race:
 	go test -race -ldflags '-linkmode=external' ./...
 
+## cover: 生成覆盖率报告（需要完整的 Go 1.25 工具链，见下方自检）
+# go.mod / go.work 要求 go >= 1.25。若本机只装了 1.22，Go 会自动下载
+# golang.org/toolchain 模块；该缓存若被裁剪（缺 covdata），连 go test -cover
+# 都会失败。与其让用户看到莫名其妙的 "go: no such tool covdata"，不如直接
+# 自检并给出修复方式。注意：这与仓库代码无关，make test / 镜像构建不受影响。
 cover:
+	@command -v go >/dev/null 2>&1 || { echo "✗ 未找到 go；请先安装 Go 1.25 并加入 PATH"; exit 1; }
+	@tool_dir=`go env GOROOT`/pkg/tool/`go env GOOS`_`go env GOARCH`; \
+	if [ ! -x "$$tool_dir/covdata" ]; then \
+		echo "✗ 当前 Go 工具链缺 covdata：GOROOT=$$(go env GOROOT)"; \
+		echo "  go.work 要求 go 1.25，自动下载的 toolchain 缓存不完整时会出现此问题。"; \
+		echo "  修复（任选其一，在宿主机执行）："; \
+		echo "    go install golang.org/dl/go1.25.0@latest && go1.25.0 download"; \
+		echo "    export GOROOT=~/sdk/go1.25.0; export PATH=~/sdk/go1.25.0/bin:\$$PATH"; \
+		echo "  或安装官方 Go 1.25 安装包后重跑 make cover。"; \
+		exit 1; \
+	fi
 	go test -ldflags '-linkmode=external' -coverprofile=coverage.out ./...
 	go tool cover -func=coverage.out | tail -1
 
@@ -152,9 +178,10 @@ docker-build: web-build
 	docker build -t tsm-hub:latest .
 
 ## docker-up: docker compose 启动（自动先构建前端，挂载 ./data，后台运行）
+# compose 把容器内 9070 映射到宿主 19070；9070 是 make run 的本地直连端口。
 docker-up: web-build
 	docker compose up -d --build
-	@echo "✓ tsm-hub started, visit http://localhost:9070"
+	@echo "✓ tsm-hub started, visit http://127.0.0.1:19070"
 
 ## docker-down: 停止并删除 docker 容器（保留 ./data 数据）
 docker-down:
@@ -181,11 +208,12 @@ docker-logs:
 	docker compose logs -f --tail=100
 
 ## docker-status: 查看 docker 容器状态
+# 宿主端口是 19070；本机 http_proxy 会接走 localhost 请求并返回 502，必须 --noproxy 绕过。
 docker-status:
 	@docker compose ps
 	@echo ""
 	@echo "健康检查："
-	@curl -s http://localhost:9070/healthz 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'  状态: {d[\"status\"]}, 运行: {d[\"uptime_s\"]}s, Provider: {len(d[\"providers\"])}个')" 2>/dev/null || echo "  服务未响应"
+	@curl -s --noproxy '*' http://127.0.0.1:19070/healthz 2>/dev/null | python3 -S -c "import sys,json; d=json.load(sys.stdin); print(f'  状态: {d[\"status\"]}, 运行: {d[\"uptime_s\"]}s, Provider: {len(d[\"providers\"])}个')" 2>/dev/null || echo "  服务未响应"
 
 clean: dev-stop
 	rm -rf bin coverage.out $(DEV_DIR)

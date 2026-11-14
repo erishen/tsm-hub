@@ -1,7 +1,7 @@
 {
   "uid": "tsm-hub-overview",
   "title": "tsm-hub 网关监控",
-  "description": "LLM 网关 /metrics 总览（v8）。复用 quota.Recorder / Tracker.Snapshot() / MCPStatuses() / AdminOverview() 等已有内存聚合，覆盖用量成本、健康状态机、MCP/A2A、配置与运行时、HTTP 耗时直方图、黑盒探测与 5 个 C 版 MCP 桥。本版新增上游失败类别（quota/auth/rate_limit/…）、按 flow 拆分的 HTTP p95 与流式首字节延迟（TTFB）。所有标签均为代码内有限枚举或配置里写死的 ID，不含密钥、URL、路径或会话 ID。数据源由 provisioning 自动注册。",
+  "description": "LLM 网关 /metrics 总览（v9）。复用 quota.Recorder / Tracker.Snapshot() / MCPStatuses() / AdminOverview() 等已有内存聚合，覆盖用量成本、健康状态机、MCP/A2A、配置与运行时、HTTP 耗时直方图、黑盒探测与 5 个 C 版 MCP 桥。本版新增上游失败类别（quota/auth/rate_limit/…）、按 flow 拆分的 HTTP p95 与流式首字节延迟（TTFB）。所有标签均为代码内有限枚举或配置里写死的 ID，不含密钥、URL、路径或会话 ID。数据源由 provisioning 自动注册。",
   "tags": [
     "tsm-hub",
     "llm-gateway",
@@ -10,7 +10,7 @@
   ],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 8,
+  "version": 9,
   "editable": true,
   "refresh": "30s",
   "time": {
@@ -2227,7 +2227,7 @@
       "id": 36,
       "type": "timeseries",
       "title": "上游失败类别 (10m 增量 by class)",
-      "description": "计入健康状态机的失败按固定类别拆分，与 upstream_errors_total 同源。402 额度耗尽 / 429 限流在免费池属常态，刻意不设告警，只看趋势；401/403 单独告警。类别是代码内枚举，错误正文从不进标签。",
+      "description": "计入健康状态机的失败按固定类别拆分，与 upstream_errors_total 同源。402 额度耗尽 / 429 限流在免费池属常态，刻意不设告警，只看趋势；401/403 单独告警。类别是代码内枚举，错误正文从不进标签。 ⚠️ 分类是进程内计数、重启归零；upstream_errors_total 可能从 SQLite 健康快照恢复历史累计值，两者长期口径不同，不要直接相加或相减。",
       "gridPos": {
         "h": 8,
         "w": 24,

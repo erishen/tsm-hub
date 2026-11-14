@@ -5,10 +5,10 @@
 // 只认 Capabilities 声明过的名字。
 //
 // 脱敏边界：
-//   * Provider 只出 id/name/models/enabled/weight/priority/protocol ——
+//   - Provider 只出 id/name/models/enabled/weight/priority/protocol ——
 //     不出 api_key / headers / proxy_url（它们是唯一能当凭据用的字段）；
-//   * 路由表只出别名与候选（RouteTarget 无凭据字段）；
-//   * 用量/健康是统计量；skill 正文是用户自己写的技能库内容。
+//   - 路由表只出别名与候选（RouteTarget 无凭据字段）；
+//   - 用量/健康是统计量；skill 正文是用户自己写的技能库内容。
 package a2a
 
 import (
@@ -38,7 +38,7 @@ type Deps struct {
 // 顺序即 Agent Card 里 skills[] 的顺序。
 func RegisterTSMCapabilities(c *Capabilities, d Deps) {
 	c.Register(Capability{
-		Name: "tsm.overview",
+		Name:  "tsm.overview",
 		Title: "服务概况",
 		Desc:  "tsm-hub 自检：运行时长、provider/路由/key/工具/技能/MCP 数量、A2A 活跃任务数。",
 		Tag:   "general", ArgsExample: `{}`,
@@ -46,7 +46,7 @@ func RegisterTSMCapabilities(c *Capabilities, d Deps) {
 	}, capOverview(d))
 
 	c.Register(Capability{
-		Name: "tsm.capabilities",
+		Name:  "tsm.capabilities",
 		Title: "能力目录",
 		Desc:  "网关工具池（内置 + 条件 + MCP）与技能库目录。一次回答『我有什么能用』。",
 		Tag:   "general", ArgsExample: `{}`,
@@ -54,7 +54,7 @@ func RegisterTSMCapabilities(c *Capabilities, d Deps) {
 	}, capCapabilities(d))
 
 	c.Register(Capability{
-		Name: "tsm.skill",
+		Name:  "tsm.skill",
 		Title: "技能全文",
 		Desc:  "取单个技能的完整 SKILL.md 正文（跨运行时复用）。缺 name 时回 input-required。",
 		Tag:   "general", ArgsExample: `{"name":"code-review"}`,
@@ -62,7 +62,7 @@ func RegisterTSMCapabilities(c *Capabilities, d Deps) {
 	}, capSkill(d))
 
 	c.Register(Capability{
-		Name: "tsm.usage",
+		Name:  "tsm.usage",
 		Title: "用量统计",
 		Desc:  "请求数/token/成本（今日 + 累计）。可指定 key 名（缺省为全部 key 汇总）。",
 		Tag:   "general", ArgsExample: `{"key":"prod"}`,
@@ -70,7 +70,7 @@ func RegisterTSMCapabilities(c *Capabilities, d Deps) {
 	}, capUsage(d))
 
 	c.Register(Capability{
-		Name: "tsm.model_health",
+		Name:  "tsm.model_health",
 		Title: "provider 健康",
 		Desc:  "各上游 provider 的实时健康快照（熔断/冷却/半开/延迟 EWMA/成败计数）。",
 		Tag:   "general", ArgsExample: `{}`,
@@ -78,7 +78,7 @@ func RegisterTSMCapabilities(c *Capabilities, d Deps) {
 	}, capModelHealth(d))
 
 	c.Register(Capability{
-		Name: "tsm.routes",
+		Name:  "tsm.routes",
 		Title: "路由表",
 		Desc:  "对外模型别名 → 候选 provider 列表（含策略与权重），不含任何凭据。",
 		Tag:   "general", ArgsExample: `{}`,
@@ -102,7 +102,7 @@ func capOverview(d Deps) DispatchFunc {
 			uptimeSecs = int64(d.Uptime().Seconds())
 		}
 		body := map[string]any{
-			"node":      "tsm-hub",
+			"node":        "tsm-hub",
 			"uptime_secs": uptimeSecs,
 		}
 		if d.Store != nil {
@@ -274,11 +274,11 @@ func capUsage(d Deps) DispatchFunc {
 			}
 		}
 		return completedArtifact(map[string]any{
-			"scope":  usageScopeName(keyName),
-			"key":    keyID,
-			"today":  usageView(aggToday),
-			"total":  usageView(aggTotal),
-			"note":   "cost 为按 settings.pricing 的估算值；streaming 取决于上游回不回 usage",
+			"scope": usageScopeName(keyName),
+			"key":   keyID,
+			"today": usageView(aggToday),
+			"total": usageView(aggTotal),
+			"note":  "cost 为按 settings.pricing 的估算值；streaming 取决于上游回不回 usage",
 		})
 	}
 }
@@ -296,11 +296,11 @@ func usageView(a quota.Agg) map[string]any {
 		avgLatency = a.LatencySumMS / int64(a.Requests)
 	}
 	return map[string]any{
-		"requests":   a.Requests,
-		"tokens":     a.TotalTokens,
-		"cost_usd":   a.CostUSD,
-		"errors":     a.Errors,
-		"failovers":  a.Failovers,
+		"requests":       a.Requests,
+		"tokens":         a.TotalTokens,
+		"cost_usd":       a.CostUSD,
+		"errors":         a.Errors,
+		"failovers":      a.Failovers,
 		"avg_latency_ms": avgLatency,
 	}
 }

@@ -13,6 +13,9 @@ data/
 .env
 .env.local
 
+# 一次性数据清理快照（2026-11-03，仅本机留档，勿入库；不删除文件本身）
+.data-cleanup-manifest.txt
+
 # Python 工具脚本（scripts/ 与 deploy/）的字节码缓存
 __pycache__/
 *.pyc

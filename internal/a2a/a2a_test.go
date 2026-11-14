@@ -1,11 +1,11 @@
 // a2a 包测试：
-//   1) 静态 HMAC 向量 —— 与 Lume 的 hmac_sha256（hex 输出）+ identity.lume 的
-//      key_for() 派生公式做字节级对齐锚点（向量独立用 Python 计算）；
-//   2) peer 验签行为 —— 错误签名 / 未登记节点 / 时间窗外的**必须被拒**
-//      （lume-a2a 的 fleet-verify 第 6 条原话：只测"正确签名能过"等于什么都没测）；
-//   3) A2A JSON-RPC 行为 —— 未知能力不猜（rejected / input-required）、
-//      多轮续发参数合并、tasks/get 与 cancel 的错误码；
-//   4) peer/invoke 白名单 —— 未知名直接拒。
+//  1. 静态 HMAC 向量 —— 与 Lume 的 hmac_sha256（hex 输出）+ identity.lume 的
+//     key_for() 派生公式做字节级对齐锚点（向量独立用 Python 计算）；
+//  2. peer 验签行为 —— 错误签名 / 未登记节点 / 时间窗外的**必须被拒**
+//     （lume-a2a 的 fleet-verify 第 6 条原话：只测"正确签名能过"等于什么都没测）；
+//  3. A2A JSON-RPC 行为 —— 未知能力不猜（rejected / input-required）、
+//     多轮续发参数合并、tasks/get 与 cancel 的错误码；
+//  4. peer/invoke 白名单 —— 未知名直接拒。
 package a2a
 
 import (
@@ -16,9 +16,9 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"time"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestStaticVectors 纯公式对齐：派生密钥与签名拼接的字节级语义。
@@ -39,9 +39,9 @@ const (
 	keyTSM  = "2b4bdf78ba7c03833ef6d40358d359001743d399365c72f173642dd7af55abdb"
 	keyCRM  = "664b6d34f3bdbed4b7b45a3c3df8690d169856bb5b2f9506b583b98ecde2c3d4"
 	sigGET  = "aeda436ed3aff5b32e5ea3388257f221a84a9ea3e450c57e0720824d47ed4ab1" // tsm-hub, GET /peer/health
-	sigPOST = "9bc6a86eaaec9cb0201eb9efcdc517b864322319bdedd1d7bbf18b782b2f4c3f"  // tsm-hub, POST /peer/invoke + invBody
-	sigSHRD = "80962b75e4e90d600d7289cd43aaa2409edd9b0e94bbdc38e8759bbb156493ec"  // shared key, tsm-hub, GET /peer/health
-	sigCRM  = "a2ddd44f082c572f84f0bba78ae13f22756a4da343ec4e63a9d89697aa54165e"  // crm derived key, crm, GET /peer/health
+	sigPOST = "9bc6a86eaaec9cb0201eb9efcdc517b864322319bdedd1d7bbf18b782b2f4c3f" // tsm-hub, POST /peer/invoke + invBody
+	sigSHRD = "80962b75e4e90d600d7289cd43aaa2409edd9b0e94bbdc38e8759bbb156493ec" // shared key, tsm-hub, GET /peer/health
+	sigCRM  = "a2ddd44f082c572f84f0bba78ae13f22756a4da343ec4e63a9d89697aa54165e" // crm derived key, crm, GET /peer/health
 )
 
 func TestStaticVectors(t *testing.T) {
@@ -288,7 +288,9 @@ func TestA2ARPC(t *testing.T) {
 	resp.Body.Close()
 	var rpc2 struct {
 		Result struct {
-			Status    struct{ State string `json:"state"` } `json:"status"`
+			Status struct {
+				State string `json:"state"`
+			} `json:"status"`
 			Artifacts []struct {
 				Parts []struct {
 					Text string `json:"text"`
@@ -482,7 +484,6 @@ func TestTaskStoreIsolationAndPersist(t *testing.T) {
 func dynTs() string {
 	return strconv.FormatInt(time.Now().Unix(), 10)
 }
-
 
 // peerInvokeRequest 构造 /peer/invoke 请求（签名走 query，Lume 出站同款形态）。
 func peerInvokeRequest(t *testing.T, node, ts, nonce, sig, body string) *http.Request {

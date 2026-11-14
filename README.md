@@ -50,6 +50,14 @@ $EDITOR data/config.json          # Must change: settings.admin_token, each prov
 
 Open <http://localhost:9070> for the admin console, log in with `admin_token`.
 
+> **Docker Compose uses a different port**: `docker-compose.yml` maps container port
+> `9070` to host **<http://127.0.0.1:19070>** (loopback only). When starting with
+> `make docker-up`, replace `localhost:9070` in every example below with
+> `127.0.0.1:19070`; `9070` applies only to `make run` / running the binary directly.
+> If the host has `http_proxy` set, add `--noproxy '*'` to `curl` as well — otherwise
+> the proxy returns 502 (this is why `make docker-status` used to always say
+> "service not responding").
+
 Call it just like OpenAI (only change the key, base_url, and model alias):
 
 ```bash
@@ -617,7 +625,7 @@ docker compose exec grafana grafana cli admin reset-admin-password '<new-passwor
 
 The dashboard is the **default home dashboard** (via
 `GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH`), so logging in lands on it directly.
-It has **39 panels** (v8):
+It has **39 panels** (v9):
 
 | Panels | Coverage |
 |--------|----------|
@@ -648,7 +656,7 @@ the bridges, probe and DingTalk bridge publish no host port at all.
 | `deploy/dingtalk_bridge.py` | stdlib only: Alertmanager webhook -> DingTalk markdown + HMAC signing; see below |
 | `deploy/mcp_gateway.c` | `GET /metrics` for the C bridges, emitting `mcp_gateway_*`; both bridge Dockerfiles share this source |
 | `deploy/grafana/provisioning/` | Prometheus datasource (`uid: prometheus`) + dashboard provider |
-| `deploy/grafana/dashboards/tsm-hub.json` | 39 panels (v8), four variables; cost panel uses its own 24h window |
+| `deploy/grafana/dashboards/tsm-hub.json` | 39 panels (v9, panel 36 now documents the counter-scope caveat), four variables; cost panel uses its own 24h window |
 
 **Metric groups** (all names below omit the common `tsm_hub_` prefix; every group reuses
 existing in-memory aggregates — no new state, no business-path changes):
@@ -679,6 +687,10 @@ Caveats:
   with `errors_total`, so every failure counted in the health tracker lands in exactly one
   class; model-404 (`ModelFault`) and client aborts are excluded from health tracking by
   design and therefore do not appear here either.
+  **Do not compare the two absolute values**: `errors_total` restores its historical
+  cumulative value from the SQLite snapshot (e.g. still 1720 after a restart), while the
+  class counters reset to zero on restart, so "sum of classes == total errors" only holds
+  within a single process lifetime. Always debug with `increase()`, never raw counters.
 - **Three different "latency" metrics**: `upstream_latency_ms` is an **EWMA gauge** for a
   single upstream attempt (no p95/p99 of its own); `http_request_duration_seconds` is a
   **histogram of whole HTTP requests**; `http_first_byte_seconds` is the histogram up to
@@ -828,20 +840,22 @@ variable to the `tsm-hub` service in `docker-compose.yml`, then
 ## Testing
 
 ```bash
-make test          # All Go packages
-make cover         # Coverage
+make test          # All Go packages (runs the fmt-check gate first)
+make fmt-check     # Fails on any gofmt -l output
+make cover         # Coverage (needs a complete Go 1.25 toolchain; prints a fix hint if covdata is missing)
 make privacy-check # config.json* permissions + plaintext key gate
 make alert-check   # DingTalk unit tests + MCP bridge /metrics smoke + dashboard structure + AM/Prometheus config (config checks need the stack up)
 ```
 
 | Package | Coverage |
 |---------|----------|
-| `internal/api` | E2E: auth, failover, SSE, rate limiting, key lifecycle, /v1/models, config persistence, provider response header, 4xx no circuit break, upstream pricing, login rate limit, 413, panic fallback, healthz health, env key, /metrics gating and label whitelist, histogram format / route folding / nil safety / endpoint privacy |
+| `internal/api` | E2E: auth, failover, SSE, rate limiting, key lifecycle, /v1/models, config persistence, provider response header, 4xx no circuit break, upstream pricing, login rate limit, 413, panic fallback, healthz health, env key, /metrics gating and label whitelist, histogram format / route folding / flow split / first-byte family / nil safety / endpoint privacy, `withLogging` streaming Flush instrumentation, zero-value error-class matrix and no error-body leakage |
 | `internal/proxy` | Request body rewrite, `stream_options` injection, SSE usage parsing, URL concatenation (forwarding main chain covered by `internal/api` e2e tests) |
-| `internal/router` | Priority sorting, weight preference, latency penalty, health removal and half-open pass |
+| `internal/router` | Priority sorting, weight preference, latency penalty, health removal and half-open pass, **error-class enums / prefix parsing / same-site counting with errors / deep copy** |
 | `internal/store` | Atomic write, update rollback, route cleanup on provider deletion, Key CRUD |
 | `internal/quota` | Aggregation and replay, RPM window, four quota rejections, TopKeys, recent logs |
 | `internal/auth` | Key format, Bearer parsing, constant-time comparison, session expiry |
+| `deploy` | 16 DingTalk bridge unit tests: signing vectors, alert/resolved message layout, errcode handling, URL and secret redaction; `test_mcp_gateway_metrics.sh` compiles the C bridge locally and checks the 10 `/metrics` families, counters and privacy boundary (`make alert-check`) |
 | `deploy` | 16 DingTalk bridge cases: signing vector, firing/resolved rendering, errcode handling, URL/secret redaction; `test_mcp_gateway_metrics.sh` compiles the C bridge locally and checks all 10 `/metrics` families, counters and privacy (`make alert-check`) |
 
 `make smoke` has an additional script-level e2e suite (real process startup + curl assertions).

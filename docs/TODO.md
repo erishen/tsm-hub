@@ -74,7 +74,8 @@
 
 - [x] Go 编译零警告、`go vet` 通过
 - [x] 前端编译零警告（Angular）
-- [x] 单元测试全部通过（8 个包，平均覆盖率 ~60%）
+- [x] 单元测试全部通过（`go test ./...` 覆盖 14 个包；`make test` 现前置 `fmt-check` 门禁，
+      `make test-race` 竞态回归亦全绿）。`make cover` 能否运行取决于本机 Go 工具链，见下方技术债
 - [x] 端到端冒烟脚本（`make smoke`）
 - [x] Dockerfile + docker-compose（多阶段构建，镜像 ~20MB）
 - [x] 代码重构：admin.go 拆分（2656行→6文件）、前端模板抽取（内联→外部HTML/CSS）、app 目录按类型分子目录、适配器子包
@@ -104,8 +105,11 @@
 - [ ] **成本告警管理台红点**：后端 warn 日志已上线，管理台红点提示待前端接入
 - [ ] **Provider API Key AES 加密存储**：当前默认明文存 config.json（权限 600 + env: 引用可规避），
       可加 master key 配置，存储时 AES 加密/读取时解密
-- [ ] **admin token 轮换提醒已加**（2026-10-18）：启动时长度 <16 只告警不拒绝；当前部署用的
-      口令过短，建议用户在管理台/配置里换成 16+ 位随机串
+- [x] **admin token 保持现状，不再提醒**（2026-11-14 用户明确指令）：启动时长度 <16 只告警
+      不拒绝；当前部署口令偏短，但服务只绑 `127.0.0.1`，**刻意不调整**。另注意
+      `docker-compose.yml` 里 `TSM_HUB_ADMIN_TOKEN` 是注释掉的、compose 只注入显式列出的
+      变量，因此改 `.env` 的同名键不会生效；生效值始终是 `data/config.json` 的
+      `settings.admin_token`
 
 ### P2 — 有空再做
 
@@ -127,5 +131,11 @@
 - `Router.Pick` 每次都 `ListRoutes()` / `ListProviders()`（会拷贝切片），高频场景应加读缓存
 - `quota.Recorder.Recent()` 从当天往前扫文件，流水量大时应改为倒序索引文件
 - `api.Settings()` 每次请求读配置要加 RLock，`quota.Limiter` 的 hits 无清理
-- **无 gofmt/lint 门禁**（2026-10-18）：19 个文件曾不符合 gofmt（历史编辑的空行/对齐），已统一
-  `gofmt -w` 清理；建议 CI 或 pre-commit 加 `gofmt -l` 非空即失败，防止再次漂移
+- ~~无 gofmt/lint 门禁~~ **（2026-11-14 已修）**：新增 `make fmt-check`（`gofmt -l internal cmd`
+  非空即失败）并挂到 `make test` 前置；本次又清掉 `internal/a2a/` 4 个文件的漂移
+  （Go 1.25 把注释列表 `* ` 规范成 `- `、struct tag 对齐变化）。仓库仍无 CI，门禁落在 Makefile
+- **`make cover` 依赖完整 Go 1.25 工具链**（2026-11-14 记录，非仓库缺陷）：本机只装了
+  Go 1.22.2，因 `go.mod` / `go.work` 要求 1.25，Go 自动下载的 `golang.org/toolchain` 缓存
+  被裁剪、缺 `covdata`，任何覆盖率命令都会失败。`GOTOOLCHAIN=local` 会被版本要求挡回。
+  `make cover` 已加自检并打印修复指引；在宿主机装好完整 1.25 后即可用。
+  `make test` / `go vet` / 镜像构建都不受影响

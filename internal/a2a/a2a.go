@@ -3,11 +3,11 @@
 // /peer/invoke、/peer/relay）。
 //
 // 任务模型与 lume-a2a 的 src/a2a.lume 对齐：
-//   * 状态值域取自 A2A 规范：submitted / working / completed / failed /
+//   - 状态值域取自 A2A 规范：submitted / working / completed / failed /
 //     rejected / input-required / canceled；
-//   * 任务一创建就落盘（长任务崩掉时客户端看到 working 而非 not found）；
-//   * 输入缺失不猜 → input-required + status.message（客户端才知道缺什么）；
-//   * 多轮续发：已终结任务不可重启（-32004），合并 args（空串不覆盖）。
+//   - 任务一创建就落盘（长任务崩掉时客户端看到 working 而非 not found）；
+//   - 输入缺失不猜 → input-required + status.message（客户端才知道缺什么）；
+//   - 多轮续发：已终结任务不可重启（-32004），合并 args（空串不覆盖）。
 package a2a
 
 import (
@@ -49,10 +49,10 @@ func IsTerminal(state string) bool {
 // ── 任务模型 ────────────────────────────────────────────────────────
 
 type message struct {
-	Role      string   `json:"role"`
-	MessageID string   `json:"messageId"`
-	Kind      string   `json:"kind"`
-	Parts     []part   `json:"parts"`
+	Role      string `json:"role"`
+	MessageID string `json:"messageId"`
+	Kind      string `json:"kind"`
+	Parts     []part `json:"parts"`
 }
 
 type part struct {
@@ -61,8 +61,8 @@ type part struct {
 }
 
 type artifact struct {
-	ArtifactID string   `json:"artifactId"`
-	Parts      []part   `json:"parts"`
+	ArtifactID string `json:"artifactId"`
+	Parts      []part `json:"parts"`
 }
 
 type taskStatus struct {
@@ -79,10 +79,10 @@ type taskTraceStep struct {
 }
 
 type taskMeta struct {
-	Capability string         `json:"capability"`
-	Hops       int            `json:"hops"`
+	Capability string          `json:"capability"`
+	Hops       int             `json:"hops"`
 	Trace      []taskTraceStep `json:"trace"`
-	Args       map[string]any `json:"args,omitempty"`
+	Args       map[string]any  `json:"args,omitempty"`
 }
 
 // Task 是 A2A 的可查询承诺。ID 只允许 [A-Za-z0-9_-]：它会拼进文件路径，
@@ -412,7 +412,7 @@ func completedArtifact(v any) DispatchResult {
 		return DispatchResult{State: StateFailed, Note: "serialize result: " + err.Error()}
 	}
 	return DispatchResult{
-		State:     StateCompleted,
+		State: StateCompleted,
 		Artifacts: []artifact{{ArtifactID: newMessageID(),
 			Parts: []part{{Kind: "text", Text: string(raw)}}}},
 		Note: "ok",
@@ -442,10 +442,10 @@ func Card(nodeName, base, desc string, caps *Capabilities) map[string]any {
 		})
 	}
 	return map[string]any{
-		"name":             nodeName,
-		"description":    desc,
+		"name":            nodeName,
+		"description":     desc,
 		"version":         "1.0.0",
-		"protocolVersion":  "1.0",
+		"protocolVersion": "1.0",
 		"supportedInterfaces": []map[string]any{
 			{"protocolVersion": "1.0", "protocolBinding": "JSONRPC", "url": base + "/a2a"},
 		},
@@ -465,8 +465,8 @@ type rpcRequest struct {
 	Method  string `json:"method"`
 	Params  struct {
 		Message struct {
-			Role    string `json:"role"`
-			Parts   []struct {
+			Role  string `json:"role"`
+			Parts []struct {
 				Kind string `json:"kind"`
 				Text string `json:"text"`
 			} `json:"parts"`
@@ -798,7 +798,7 @@ func (s *Server) HandlePeerHealth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSONBody(w, http.StatusOK, map[string]any{
-		"ok": true,
+		"ok":   true,
 		"node": s.Node,
 		"site": "tsm-hub",
 		"peer": v.Node,
@@ -877,7 +877,9 @@ func structuredResult(arts []artifact) any {
 
 // HandlePeerTools 是签名 GET：能力清单。
 // 形状对齐 Lume 侧 /peer/tools（lume-a2a fleet probe 的第二个探测目标）：
-//   {ok, node, site, summary, tools:[{name, desc, when_to_use}]}
+//
+//	{ok, node, site, summary, tools:[{name, desc, when_to_use}]}
+//
 // 清单与 Agent Card 同源（Capabilities 单一事实源），只出已登记能力，
 // 不含任何凭据/配置细节。
 func (s *Server) HandlePeerTools(w http.ResponseWriter, r *http.Request) {
