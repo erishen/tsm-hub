@@ -1,0 +1,27 @@
+# blackbox_exporter 探测配置（由 docker-compose.yml 只读挂载）。
+# 只在 compose 默认网络内被 Prometheus 调用，不发布宿主端口。
+#
+# 为什么需要黑盒探测：/metrics 抓取只能说明「exporter 还能吐数据」，
+# 而 /healthz 是绕过业务路由的独立存活面。用主动 HTTP GET 才知道
+# 「用户视角下网关是否真的能应答」。上游降级（degraded=true）在这里
+# 仍算探测成功 —— 那是 provider 级问题，由 tsm_hub_upstream_healthy
+# 单独告警，不该把整台网关判成 down。
+modules:
+  # MCP 桥的 /health 只回 200 "ok"，用最宽松的 2xx 判定。
+  http_2xx:
+    prober: http
+    timeout: 5s
+    http:
+      method: GET
+      valid_status_codes: [200]
+
+  # tsm-hub 的 /healthz 是 liveness JSON：除了 200 还要求 status=ok。
+  # 只做正则匹配，不回显 body（body 内含上游 last_error 文本，不能进日志/指标）。
+  http_healthz:
+    prober: http
+    timeout: 5s
+    http:
+      method: GET
+      valid_status_codes: [200]
+      fail_if_body_not_matches_regexp:
+        - '"status"\s*:\s*"ok"'

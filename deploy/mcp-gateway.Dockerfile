@@ -5,8 +5,10 @@
 # 运行：docker run mcp-gateway:latest 8000 "node /mcp/node_modules/<server>.js"
 #
 # 并行能力：每条 HTTP 连接一个线程；一个 mcp-session-id 一个子进程；
-# 会话内多条请求按内部 id 混流收发（慢调用不堵同会话的其它请求）。
-# 未实现：GET /mcp 的 SSE 下行推流（协议里的可选通道），请求回 405。
+# 会话内多条请求按内部 id 混流收发（慢调用不堵同会话的其它请求）；
+# GET /mcp 的 SSE 下行推流已实现。
+# GET /metrics 暴露 Prometheus 0.0.4 文本（会话数、SSE 活跃数、请求/响应计数），
+# 不占用会话槽位，供 compose 默认网络内的 Prometheus 抓取。
 
 FROM alpine:3.20 AS build
 RUN apk add --no-cache gcc musl-dev

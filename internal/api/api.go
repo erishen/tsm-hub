@@ -50,6 +50,9 @@ type Server struct {
 	denyCounts   map[string]int64 // 配额拒绝原因 -> 计数（/metrics）
 	adminHandler http.Handler
 
+	// HTTP 耗时直方图（独立锁，避免与 mu 竞争）；route/method 标签白名单见 http_duration.go。
+	durations *requestDurations
+
 	// a2a 是可选的 A2A/peer 面（未配凭据时为 nil，整面不挂载）。
 	a2a *a2a.Server
 
@@ -90,6 +93,7 @@ func New(o Options) *Server {
 		startAt:      time.Now(),
 		statusCounts: map[string]int64{},
 		denyCounts:   map[string]int64{},
+		durations:    newRequestDurations(),
 
 		loginFails: map[string]loginFail{},
 		revealMap:  map[string]keyReveal{},
@@ -313,17 +317,21 @@ func (s *Server) withLogging(next http.HandlerFunc) http.HandlerFunc {
 		start := time.Now()
 		rec := &statusRecorder{ResponseWriter: w, code: http.StatusOK}
 		next(rec, r)
+		elapsed := time.Since(start)
 		s.mu.Lock()
 		s.requests++
 		s.statusCounts[fmt.Sprintf("%d", rec.code)]++
 		s.mu.Unlock()
+		// 复用同一次 elapsed：直方图只按白名单枚举的 route/method 聚合，
+		// 原始 URL（含 query / 技能名 / session id）绝不进标签。
+		s.durations.observe(metricRoute(r.URL.Path), metricMethod(r.Method), elapsed)
 		id, _ := r.Context().Value(reqIDKey).(string)
 		s.logger.Info("request",
 			"request_id", id,
 			"method", r.Method,
 			"path", r.URL.Path,
 			"status", rec.code,
-			"ms", time.Since(start).Milliseconds(),
+			"ms", elapsed.Milliseconds(),
 		)
 	}
 }

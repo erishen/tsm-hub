@@ -15,6 +15,8 @@
  *                -> initialize 响应带 mcp-session-id 头
  *                -> 通知类（无 id）回 202 空体
  *   GET  /health -> 200 ok（不依赖 node，容器探活用）
+ *   GET  /metrics -> Prometheus text/plain 0.0.4（进程内计数 + 会话快照；
+ *                   不含命令、session id、URL、请求体，供同网络 Prometheus 抓取）
  *   DELETE /mcp  -> 200（关闭该会话的子进程）
  *   GET  /mcp    -> 200 text/event-stream（服务端推送：子进程的无 id 通知按
  *                   `event: message` 下发，15s 一次 `: ping` 心跳；会话关闭/子进程
@@ -133,6 +135,26 @@ static session_t *g_sessions = NULL;
 static pthread_mutex_t g_slock = PTHREAD_MUTEX_INITIALIZER;
 static long long g_id_seq = 0;
 static pthread_mutex_t g_idlock = PTHREAD_MUTEX_INITIALIZER;
+
+/* ===================== /metrics 计数 =====================
+ * 独立锁：/metrics 抓取要同时读会话链表和计数器，不能与 g_slock 形成嵌套等待。
+ * 所有计数都是无标签或固定枚举标签，绝不包含 sid / g_cmd / URL / body。 */
+typedef struct {
+    unsigned long long route_health, route_metrics, route_rpc, route_sse,
+                       route_delete, route_other;
+    unsigned long long resp_2xx, resp_4xx, resp_5xx;
+    unsigned long long sessions_created, sessions_closed;
+    time_t started;
+} gw_metrics_t;
+
+static gw_metrics_t g_m = {0};
+static pthread_mutex_t g_mlock = PTHREAD_MUTEX_INITIALIZER;
+
+#define METRIC_ADD(field, n) do {                              \
+    pthread_mutex_lock(&g_mlock);                              \
+    g_m.field += (unsigned long long)(n);                      \
+    pthread_mutex_unlock(&g_mlock);                            \
+} while (0)
 
 static long long next_internal_id(void) {
     pthread_mutex_lock(&g_idlock);
@@ -410,6 +432,7 @@ static session_t *session_new(void) {
     s->next = g_sessions;
     g_sessions = s;
     logf_("session %s spawned pid=%d cmd=%s", s->sid, (int)pid, g_cmd);
+    METRIC_ADD(sessions_created, 1);
     return s;
 }
 
@@ -417,6 +440,7 @@ static session_t *session_new(void) {
  * 进程退出时由内核回收，量级是每会话一条，不至于涨。 */
 static void session_close(session_t *s) {
     if (!s) return;
+    METRIC_ADD(sessions_closed, 1);
     session_unlink(s);   /* 调用方持有 g_slock */
     if (s->in_fd >= 0) close(s->in_fd);
     if (s->out_fd >= 0) close(s->out_fd);
@@ -489,6 +513,11 @@ static int send_all(int fd, const char *buf, size_t len) {
 
 static void respond(int fd, int status, const char *reason, const char *ctype,
                     const char *extra_headers, const char *body, size_t blen) {
+    /* 一处覆盖全部错误分支，不必在每个 4xx/5xx 返回点手工埋点。 */
+    if (status >= 500) METRIC_ADD(resp_5xx, 1);
+    else if (status >= 400) METRIC_ADD(resp_4xx, 1);
+    else METRIC_ADD(resp_2xx, 1);
+
     char head[1024];
     int n = snprintf(head, sizeof head,
                      "HTTP/1.1 %d %s\r\n"
@@ -499,6 +528,84 @@ static void respond(int fd, int status, const char *reason, const char *ctype,
                      status, reason, ctype, blen, extra_headers ? extra_headers : "");
     if (n > 0) send_all(fd, head, (size_t)n);
     if (blen) send_all(fd, body, blen);
+}
+
+/* GET /metrics —— Prometheus 0.0.4 文本格式。
+ * 只读内部计数与会话快照，不触碰子进程、不输出任何请求内容。
+ * 计数在锁内拷出后格式化，慢客户端不会长时间占住 g_slock / g_mlock。
+ * ⚠️ 不鉴权：标签只有 route / status 两个固定枚举，绝不导出 sid、
+ *    g_cmd（含宿主绝对路径）、URL、body 或错误文本。 */
+static void handle_metrics(int fd) {
+    int sessions, sessions_max, sse_active, inflight;
+    pthread_mutex_lock(&g_slock);
+    sessions = session_count();
+    sessions_max = g_max_sessions;
+    sse_active = 0;
+    inflight = 0;
+    for (session_t *s = g_sessions; s; s = s->next) {
+        if (__atomic_load_n(&s->sse_active, __ATOMIC_RELAXED)) sse_active++;
+        inflight += __atomic_load_n(&s->inflight, __ATOMIC_RELAXED);
+    }
+    pthread_mutex_unlock(&g_slock);
+
+    gw_metrics_t m;
+    pthread_mutex_lock(&g_mlock);
+    m = g_m;
+    pthread_mutex_unlock(&g_mlock);
+
+    long long uptime = (long long)(time(NULL) - m.started);
+    if (uptime < 0) uptime = 0;
+
+    char body[4096];
+    int n = snprintf(body, sizeof body,
+        "# HELP mcp_gateway_up Whether the MCP gateway process is alive (1 when scraped).\n"
+        "# TYPE mcp_gateway_up gauge\n"
+        "mcp_gateway_up 1\n"
+        "# HELP mcp_gateway_uptime_seconds Process uptime in seconds.\n"
+        "# TYPE mcp_gateway_uptime_seconds gauge\n"
+        "mcp_gateway_uptime_seconds %lld\n"
+        "# HELP mcp_gateway_sessions Active stdio child sessions.\n"
+        "# TYPE mcp_gateway_sessions gauge\n"
+        "mcp_gateway_sessions %d\n"
+        "# HELP mcp_gateway_sessions_max Configured maximum concurrent sessions.\n"
+        "# TYPE mcp_gateway_sessions_max gauge\n"
+        "mcp_gateway_sessions_max %d\n"
+        "# HELP mcp_gateway_sse_active Sessions with an active GET /mcp event stream.\n"
+        "# TYPE mcp_gateway_sse_active gauge\n"
+        "mcp_gateway_sse_active %d\n"
+        "# HELP mcp_gateway_inflight JSON-RPC calls waiting on child stdout.\n"
+        "# TYPE mcp_gateway_inflight gauge\n"
+        "mcp_gateway_inflight %d\n"
+        "# HELP mcp_gateway_http_requests_total HTTP requests by normalized route.\n"
+        "# TYPE mcp_gateway_http_requests_total counter\n"
+        "mcp_gateway_http_requests_total{route=\"health\"} %llu\n"
+        "mcp_gateway_http_requests_total{route=\"metrics\"} %llu\n"
+        "mcp_gateway_http_requests_total{route=\"rpc\"} %llu\n"
+        "mcp_gateway_http_requests_total{route=\"sse\"} %llu\n"
+        "mcp_gateway_http_requests_total{route=\"delete\"} %llu\n"
+        "mcp_gateway_http_requests_total{route=\"other\"} %llu\n"
+        "# HELP mcp_gateway_http_responses_total HTTP responses by status class.\n"
+        "# TYPE mcp_gateway_http_responses_total counter\n"
+        "mcp_gateway_http_responses_total{status=\"2xx\"} %llu\n"
+        "mcp_gateway_http_responses_total{status=\"4xx\"} %llu\n"
+        "mcp_gateway_http_responses_total{status=\"5xx\"} %llu\n"
+        "# HELP mcp_gateway_sessions_created_total Child sessions spawned since start.\n"
+        "# TYPE mcp_gateway_sessions_created_total counter\n"
+        "mcp_gateway_sessions_created_total %llu\n"
+        "# HELP mcp_gateway_sessions_closed_total Child sessions closed since start.\n"
+        "# TYPE mcp_gateway_sessions_closed_total counter\n"
+        "mcp_gateway_sessions_closed_total %llu\n",
+        uptime, sessions, sessions_max, sse_active, inflight,
+        m.route_health, m.route_metrics, m.route_rpc, m.route_sse,
+        m.route_delete, m.route_other,
+        m.resp_2xx, m.resp_4xx, m.resp_5xx,
+        m.sessions_created, m.sessions_closed);
+    if (n < 0 || (size_t)n >= sizeof body) {
+        static const char *err = "metrics buffer overflow\n";
+        respond(fd, 500, "Internal Server Error", "text/plain", NULL, err, strlen(err));
+        return;
+    }
+    respond(fd, 200, "OK", "text/plain; version=0.0.4; charset=utf-8", NULL, body, (size_t)n);
 }
 
 static int header_value(const char *req, const char *name, char *out, size_t cap) {
@@ -774,11 +881,20 @@ static void *conn_main(void *arg) {
     }
 
     if (strcmp(method, "GET") == 0 && strcmp(path, "/health") == 0) {
+        METRIC_ADD(route_health, 1);
         respond(fd, 200, "OK", "text/plain", NULL, "ok", 2);
         close(fd);
         return NULL;
     }
+    /* /metrics 与 /health 一样不占会话槽位，慢 RPC 不会影响抓取。 */
+    if (strcmp(method, "GET") == 0 && strcmp(path, "/metrics") == 0) {
+        METRIC_ADD(route_metrics, 1);
+        handle_metrics(fd);
+        close(fd);
+        return NULL;
+    }
     if (strcmp(method, "GET") == 0 && strcmp(path, "/mcp") == 0) {
+        METRIC_ADD(route_sse, 1);
         char sidbuf[128] = {0};
         if (header_value(req, "mcp-session-id", sidbuf, sizeof sidbuf) != 0) {
             respond(fd, 400, "Bad Request", "text/plain", NULL, "missing mcp-session-id", 24);
@@ -789,6 +905,7 @@ static void *conn_main(void *arg) {
         return NULL;
     }
     if (strcmp(method, "DELETE") == 0) {
+        METRIC_ADD(route_delete, 1);
         char sidbuf[128] = {0};
         if (header_value(req, "mcp-session-id", sidbuf, sizeof sidbuf) == 0) {
             pthread_mutex_lock(&g_slock);
@@ -801,10 +918,12 @@ static void *conn_main(void *arg) {
         return NULL;
     }
     if (!(strcmp(method, "POST") == 0 && strcmp(path, "/mcp") == 0)) {
+        METRIC_ADD(route_other, 1);
         respond(fd, 404, "Not Found", "text/plain", NULL, "not found", 9);
         close(fd);
         return NULL;
     }
+    METRIC_ADD(route_rpc, 1);
 
     char clen[32] = {0};
     size_t body_len = 0;
@@ -849,6 +968,7 @@ int main(int argc, char **argv) {
     snprintf(g_cmd, sizeof g_cmd, "%s", argv[2]);
     g_max_sessions = env_int("MCP_GW_MAX_SESSIONS", MAX_SESSIONS);
     g_idle_ttl = env_int("MCP_GW_IDLE_TTL_SEC", IDLE_TTL_SEC);
+    g_m.started = time(NULL);
 
     signal(SIGPIPE, SIG_IGN);
 

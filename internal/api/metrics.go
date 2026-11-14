@@ -17,6 +17,8 @@ import (
 // 指标清单：
 //   - tsm_hub_uptime_seconds           进程存活秒数（gauge）
 //   - tsm_hub_http_requests_total{status}  网关 HTTP 请求数（counter）
+//   - tsm_hub_http_request_duration_seconds  请求耗时直方图（histogram，
+//     {route,method,le}；route/method 为代码内白名单枚举，可算 p95/p99）
 //   - tsm_hub_quota_denials_total{code}    被限流/额度拒绝的请求数（counter）
 //   - tsm_hub_upstream_healthy{provider}   上游是否可用 1/0（gauge）
 //   - tsm_hub_upstream_requests_total{provider} 上游尝试次数（counter）
@@ -62,6 +64,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	for _, st := range sortedMetricKeys(statusCounts) {
 		fmt.Fprintf(&b, "tsm_hub_http_requests_total{status=%q} %d\n", st, statusCounts[st])
 	}
+	writeDurationMetrics(&b, s.durations)
 
 	fmt.Fprintf(&b, "# HELP tsm_hub_quota_denials_total Requests denied by quota or rate limit.\n")
 	fmt.Fprintf(&b, "# TYPE tsm_hub_quota_denials_total counter\n")

@@ -45,9 +45,13 @@ var extendedMetricFamilies = []string{
 var allowedMetricLabels = map[string]bool{
 	"provider": true, "status": true, "code": true, "kind": true,
 	"scene": true, "source": true, "state": true, "mode": true, "entity": true,
+	// HTTP 耗时直方图：route/method 由 metricRoute/metricMethod 白名单折叠，
+	// le 是 Prometheus histogram 的固有标签（数值或 +Inf）。
+	"route": true, "method": true, "le": true,
 }
 
 var slugLabelValue = regexp.MustCompile(`^[a-z0-9_-]+$`)
+var leLabelValue = regexp.MustCompile(`^([0-9]+(\.[0-9]+)?|\+Inf)$`)
 
 func TestMetricsExtendedFamilies(t *testing.T) {
 	e := newEnv(t, "ok")
@@ -108,7 +112,11 @@ func TestMetricsExtendedFamilies(t *testing.T) {
 					t.Errorf("label value %q is not a quoted Prometheus label: %v", rawVal, err)
 					continue
 				}
-				if !slugLabelValue.MatchString(val) {
+				if key == "le" {
+					if !leLabelValue.MatchString(val) {
+						t.Errorf("le value %q is not a numeric bucket or +Inf", val)
+					}
+				} else if !slugLabelValue.MatchString(val) {
 					t.Errorf("label value %q (key %s) is not a safe slug; possible secret/path/ID leak", val, key)
 				}
 				if key == "provider" {

@@ -53,3 +53,80 @@ scrape_configs:
   - job_name: alertmanager
     static_configs:
       - targets: ["alertmanager:9093"]
+
+  # ===== 5 个 C 版 MCP stdio→HTTP 桥（deploy/mcp_gateway.c 的 GET /metrics）=====
+  # 桥不发布宿主端口，只能走 compose 默认网络的容器 DNS。mcp_server 是配置里
+  # 写死的 5 个枚举值，不是从请求路径派生，不会造成标签基数膨胀。
+  - job_name: mcp-bridges
+    metrics_path: /metrics
+    sample_limit: 1000
+    label_limit: 16
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: "^(up|scrape_.+|mcp_gateway_.+)$"
+        action: keep
+    static_configs:
+      - targets: ["mcp-fs:8000"]
+        labels: { mcp_server: fs, service: mcp-gateway }
+      - targets: ["mcp-memory:8000"]
+        labels: { mcp_server: memory, service: mcp-gateway }
+      - targets: ["mcp-think:8000"]
+        labels: { mcp_server: think, service: mcp-gateway }
+      - targets: ["mcp-fetch:8000"]
+        labels: { mcp_server: fetch, service: mcp-gateway }
+      - targets: ["mcp-git:8000"]
+        labels: { mcp_server: git, service: mcp-gateway }
+
+  # blackbox_exporter 自监控：probe_success=0 时必须能区分「探针挂了」还是
+  # 「目标挂了」，否则告警无法定位。
+  - job_name: blackbox-exporter
+    static_configs:
+      - targets: ["blackbox-exporter:9115"]
+
+  # 黑盒探测：从 Prometheus 视角主动 GET 存活端点。__param_target 只用于内部
+  # 传参，instance 用配置里的短名，避免把完整 URL 写进时序标签。
+  - job_name: blackbox-healthz
+    metrics_path: /probe
+    params:
+      module: [http_healthz]
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: "^(up|scrape_.+|probe_.+)$"
+        action: keep
+    static_configs:
+      - targets: ["http://tsm-hub:9070/healthz"]
+        labels: { probe_name: tsm-hub-healthz, service: tsm-hub }
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [probe_name]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+
+  - job_name: blackbox-mcp
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: "^(up|scrape_.+|probe_.+)$"
+        action: keep
+    static_configs:
+      - targets: ["http://mcp-fs:8000/health"]
+        labels: { probe_name: mcp-fs, mcp_server: fs }
+      - targets: ["http://mcp-memory:8000/health"]
+        labels: { probe_name: mcp-memory, mcp_server: memory }
+      - targets: ["http://mcp-think:8000/health"]
+        labels: { probe_name: mcp-think, mcp_server: think }
+      - targets: ["http://mcp-fetch:8000/health"]
+        labels: { probe_name: mcp-fetch, mcp_server: fetch }
+      - targets: ["http://mcp-git:8000/health"]
+        labels: { probe_name: mcp-git, mcp_server: git }
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [probe_name]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115

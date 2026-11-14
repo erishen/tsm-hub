@@ -175,11 +175,11 @@ services:
       timeout: 5s
       retries: 3
 
-  # ===== 监控：Prometheus + Alertmanager + 钉钉桥 + Grafana =====
-  # 网关本身即 exporter（GET /metrics，标准 Prometheus 0.0.4 文本格式、不鉴权）。
-  # 全链路只用 compose 默认网络的容器 DNS：tsm-hub:9070 / prometheus:9090 /
-  # alertmanager:9093 / dingtalk-bridge:8060；不要写 127.0.0.1:<宿主端口>，
-  # 那是容器自己的 loopback。
+  # ===== 监控：Prometheus + Alertmanager + 钉钉桥 + Grafana + 黑盒探测 =====
+  # 网关与 5 个 MCP 桥本身就是 exporter（GET /metrics，0.0.4 文本格式、不鉴权）。
+  # 全链路只用 compose 默认网络的容器 DNS：tsm-hub:9070 / mcp-*:8000 /
+  # prometheus:9090 / alertmanager:9093 / dingtalk-bridge:8060 /
+  # blackbox-exporter:9115；不要写 127.0.0.1:<宿主端口>，那是容器自己的 loopback。
   # 也不要把 9070/19070 改绑 0.0.0.0：/metrics 不鉴权，会暴露 provider 名与请求量。
   # 钉钉 webhook URL / 加签密钥只从 .env 插值注入 bridge 容器，绝不写进本文件。
   prometheus:
@@ -260,6 +260,23 @@ services:
       - prometheus
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # 黑盒探测：从 Prometheus 视角主动 GET tsm-hub:9070/healthz 与 5 个桥的
+  # /health，判断「用户视角下是否真的能应答」，而不只是「exporter 能吐数据」。
+  # 不发布宿主端口：/probe 不鉴权，若暴露到宿主等于给了一个内网扫描器。
+  blackbox-exporter:
+    image: prom/blackbox-exporter:v0.26.0
+    container_name: tsm-hub-blackbox
+    restart: unless-stopped
+    volumes:
+      - ./deploy/blackbox.yml:/etc/blackbox_exporter/config.yml:ro
+    command:
+      - --config.file=/etc/blackbox_exporter/config.yml
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9115/-/healthy"]
       interval: 30s
       timeout: 5s
       retries: 3

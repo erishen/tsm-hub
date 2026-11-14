@@ -99,3 +99,35 @@ groups:
         annotations:
           summary: "近 10 分钟有钉钉通知投递失败"
           description: "核对 tsm-hub-dingtalk-bridge 日志（URL 已脱敏）；常见原因是加签密钥过期、群机器人被删或改了自定义关键词。"
+
+      # ===== 黑盒探测（用户视角的存活面）=====
+      # /metrics 抓取成功只说明 exporter 还能吐数据；/healthz 是绕过业务路由的
+      # 独立存活面。上游 degraded=true 仍算探测成功（provider 级问题由
+      # TSMHubProviderUnhealthy 负责），这里只判「整台网关是否应答」。
+      - alert: TSMHubHealthzProbeFailed
+        expr: probe_success{job="blackbox-healthz"} == 0 or absent(probe_success{job="blackbox-healthz"})
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "tsm-hub /healthz 黑盒探测失败"
+          description: "Prometheus 主动 GET /healthz 连续 3 分钟失败或返回非 status=ok。区别于 TSMHubDown（/metrics 抓取失败）；若同时触发，优先查容器是否存活。"
+
+      - alert: TSMHubMCPBridgeProbeFailed
+        expr: probe_success{job="blackbox-mcp"} == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "MCP 桥 {{ $labels.mcp_server }} 的 /health 探测失败"
+          description: "5 个 C 版 stdio→HTTP 桥之一无应答；该桥上的 MCP 工具会全部不可用。先核对 up{job=\"mcp-bridges\"} 与对应容器日志。"
+
+      - alert: TSMHubBlackboxExporterDown
+        # 探针自身挂掉会让上面两条同时失效，必须单独能发现。
+        expr: up{job="blackbox-exporter"} == 0 or absent(up{job="blackbox-exporter"})
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "blackbox-exporter 不可达，黑盒探测已停摆"
+          description: "此时 probe_success 全为 absent，不能据此判断目标健康。检查 tsm-hub-blackbox 容器与 deploy/blackbox.yml。"

@@ -473,7 +473,7 @@ Additional probe endpoints (no auth required):
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/healthz` | Liveness probe: `status`/`uptime_s`/`requests` + `degraded`/`providers[]` upstream health |
-| GET | `/metrics` | Prometheus text format: HTTP/quota counters, upstream health and latency, cumulative token/cost usage, health state machine, MCP/A2A/runtime snapshots |
+| GET | `/metrics` | Prometheus text format: HTTP/quota counters, **HTTP duration histogram**, upstream health and latency, cumulative token/cost usage, health state machine, MCP/A2A/runtime snapshots |
 
 CLI equivalent for issuing a key:
 
@@ -583,15 +583,17 @@ Or use a `.env` file with docker compose (already supported — just create `.en
 
 The gateway is its own exporter — `GET /metrics` returns standard Prometheus text format
 (`text/plain; version=0.0.4`, with `# HELP` / `# TYPE`), no auth and no sidecar required.
-`docker-compose.yml` ships a **Prometheus + Alertmanager + DingTalk bridge + Grafana** stack
-on the same default compose network, wired together with container DNS names.
+The five C-based MCP bridges expose their own `/metrics` (`mcp_gateway_*`) too.
+`docker-compose.yml` ships a **Prometheus + Alertmanager + DingTalk bridge + Grafana +
+blackbox-exporter** stack on the same default compose network, wired together with
+container DNS names.
 
 ```bash
 # 1) set a strong admin password and the DingTalk robot in .env (see .env.example):
 #    GRAFANA_ADMIN_PASSWORD=<strong-password>
 #    DINGTALK_WEBHOOK_URL / DINGTALK_WEBHOOK_SECRET (leave empty = log-only, no push)
 # 2) start only the monitoring services (does not touch the running tsm-hub container)
-docker compose up -d prometheus alertmanager dingtalk-bridge grafana
+docker compose up -d prometheus alertmanager dingtalk-bridge grafana blackbox-exporter
 ```
 
 | | URL | Notes |
@@ -600,6 +602,8 @@ docker compose up -d prometheus alertmanager dingtalk-bridge grafana
 | Alertmanager | <http://127.0.0.1:19093> | grouping, silences, inhibition; unauthenticated UI, loopback only |
 | Grafana | <http://127.0.0.1:19091> | datasource + "tsm-hub 网关监控" dashboard auto-provisioned |
 | DingTalk bridge | no host port | reachable only as `dingtalk-bridge:8060` inside the compose network |
+| blackbox-exporter | no host port | only `blackbox-exporter:9115` inside compose; `/probe` is unauthenticated, never publish it to the host |
+| 5 MCP bridges | no host port | `mcp-{fs,memory,think,fetch,git}:8000`, container DNS only |
 
 **Grafana login**: open <http://127.0.0.1:19091/>, user `admin`, password is
 `GRAFANA_ADMIN_PASSWORD` from `.env` (compose falls back to `admin` when unset).
@@ -613,31 +617,37 @@ docker compose exec grafana grafana cli admin reset-admin-password '<new-passwor
 
 The dashboard is the **default home dashboard** (via
 `GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH`), so logging in lands on it directly.
-It has **25 panels** (v6): the first 13 cover scrape `up`, uptime, request rate,
-overall error rate, healthy provider **ratio** (not an absolute count), firing alert
-count, then per-provider error rate / QPS / EWMA latency / health, HTTP status rate,
-quota denials and firing alerts. The next 7 add token usage, cumulative cost (own 24h
-window), cooldown remaining, half-open and consecutive failures, scene request rate and
-tool source, MCP/A2A snapshot, and Go runtime / config entities. The last 5 cover
-Alertmanager `up`, DingTalk delivery failures, active alerts, active silences, and a
-delivery-success/failure vs rule-firing trend. A shortcut to the Alertmanager UI is in
-the dashboard links. Use the `Provider` and `Scene` variables at the top to filter
-(multi-select, All by default). Quota denials uses `or vector(0)` so an empty metric
-family shows 0 instead of a blank panel.
-Edit the JSON in the repo — the file is mounted read-only and the provider reloads
-it every 30s.
+It has **35 panels** (v7):
 
-The scrape target is **`tsm-hub:9070`** (container DNS), not `127.0.0.1:19070` — inside the
-Prometheus container that address is its own loopback. All three UI ports bind to `127.0.0.1` only.
+| Panels | Coverage |
+|--------|----------|
+| 1–13 | scrape `up`, uptime, request rate, overall error rate, healthy provider **ratio**, firing alerts, per-provider error rate / QPS / EWMA latency / health, HTTP status rate, quota denials, firing alert timeline |
+| 14–20 | token usage, cumulative cost (own 24h window), cooldown remaining, half-open and consecutive failures, scene request rate and tool source, MCP/A2A snapshot, Go runtime / config entities |
+| 21–25 | Alertmanager `up`, DingTalk delivery failures, active alerts, active silences, delivery vs rule-firing trend |
+| **26–29** | **HTTP duration histogram p50/p95/p99, request rate by route/method, blackbox probe success, probe duration** |
+| **30–35** | **MCP bridge up count, probe successes, active sessions, 5xx count, plus bridge session/slot/inflight and request/error rate trends** |
+
+There are four variables at the top (`Provider`, `Scene`, `MCP 桥`, `Route`;
+multi-select, All by default), plus Prometheus / Alertmanager UI shortcuts.
+Quota denials uses `or vector(0)` so an empty metric family shows 0 instead of a
+blank panel. Edit the JSON in the repo — the file is mounted read-only and the
+provider reloads it every 30s.
+
+Every scrape target is a **container DNS name** (`tsm-hub:9070`, `mcp-*:8000`,
+`blackbox-exporter:9115`), not `127.0.0.1:19070` — inside the Prometheus container
+that address is its own loopback. The three UI ports bind to `127.0.0.1` only;
+the bridges, probe and DingTalk bridge publish no host port at all.
 
 | File | Purpose |
 |------|---------|
-| `deploy/prometheus.yml` | scrape config (15s) + `rule_files` + `alerting.alertmanagers` + an `alertmanager` self-scrape job + guards: `sample_limit: 5000`, `label_limit: 32`, `label_value_length_limit: 128`, and a metric-name allowlist keeping only `tsm_hub_*` / `up` / `scrape_*` |
-| `deploy/prometheus.rules.yml` | 7 alerts: 5 business alerts (target down, upstream error rate >30% with >=5 requests / 5m, provider removed, quota denials, EWMA latency >30s gated on fresh successes) + 2 notification-pipeline self-checks |
+| `deploy/prometheus.yml` | scrape config (15s) + `rule_files` + `alerting.alertmanagers`; 7 jobs: `tsm-hub` / `prometheus` / `alertmanager` / `mcp-bridges` / `blackbox-exporter` / `blackbox-healthz` / `blackbox-mcp`. The `tsm-hub` job has guards (`sample_limit: 5000`, `label_limit: 32`, `label_value_length_limit: 128`) and a metric-name allowlist; new jobs have their own keep rules |
+| `deploy/prometheus.rules.yml` | **10 alerts**: 5 business alerts (target down, upstream error rate >30% with >=5 requests / 5m, provider removed, quota denials, EWMA latency >30s gated on fresh successes) + 2 notification-pipeline self-checks + 3 blackbox checks (`/healthz` failure, MCP bridge `/health` failure, probe itself down) |
 | `deploy/alertmanager.yml` | grouping / dedup / inhibition / resolved notices; webhook receiver points at `dingtalk-bridge:8060` |
+| `deploy/blackbox.yml` | two probe modules: `http_healthz` (requires `status=ok` in `/healthz` JSON) and `http_2xx` (MCP bridge `/health`) |
 | `deploy/dingtalk_bridge.py` | stdlib only: Alertmanager webhook -> DingTalk markdown + HMAC signing; see below |
+| `deploy/mcp_gateway.c` | `GET /metrics` for the C bridges, emitting `mcp_gateway_*`; both bridge Dockerfiles share this source |
 | `deploy/grafana/provisioning/` | Prometheus datasource (`uid: prometheus`) + dashboard provider |
-| `deploy/grafana/dashboards/tsm-hub.json` | 25 panels (v6), `Provider` + `Scene` variables; cost panel uses its own 24h window |
+| `deploy/grafana/dashboards/tsm-hub.json` | 35 panels (v7), four variables; cost panel uses its own 24h window |
 
 **Metric groups** (all names below omit the common `tsm_hub_` prefix; every group reuses
 existing in-memory aggregates — no new state, no business-path changes):
@@ -645,9 +655,17 @@ existing in-memory aggregates — no new state, no business-path changes):
 | Group | Metrics | Source |
 |-------|---------|--------|
 | Core 7 | `uptime_seconds`, `http_requests_total{status}`, `quota_denials_total{code}`, `upstream_{healthy,requests_total,errors_total,latency_ms}{provider}` | `Server` counters + `router.Tracker.Snapshot()` |
+| HTTP duration histogram | `http_request_duration_seconds_{bucket,sum,count}{route,method,le}` | the `elapsed` value already computed in `withLogging`; 13 buckets (10ms → 120s) + `+Inf`, no new instrumentation |
 | Health state machine | `upstream_{half_open,consecutive_failures,cooldown_remaining_seconds,last_success_timestamp_seconds}{provider}` | Same `ProviderHealth` used by the admin Providers page |
 | Usage / cost | `usage_{requests_total,tokens_total,cost_usd_total,errors_total,failovers_total,avg_latency_ms}{provider}`, `usage_scene_{requests_total,tokens_total}{scene}`, `failover_candidates_total{provider}`, `tool_calls_total{source}` | `quota.Recorder`, replayed from `data/usage/*.jsonl` at startup (survives restarts) |
 | Subsystems / runtime | `mcp_servers{state}`, `mcp_tools`, `a2a_{tasks_active,capabilities,peer_mode}`, `config_entities{entity}`, `runtime_{goroutines,heap_alloc_bytes,cpu_cores}` | `Proxy.MCPStatuses()`, `A2A.AdminOverview()`, `store.List*()`, `runtime.MemStats` |
+
+Two more metric sets **do not use the `tsm_hub_` prefix**:
+
+| Source | Metrics | Notes |
+|--------|---------|-------|
+| 5 C-based MCP bridges (`GET /metrics`) | `mcp_gateway_{up,uptime_seconds,sessions,sessions_max,sse_active,inflight}`, `mcp_gateway_http_{requests_total{route},responses_total{status}}`, `mcp_gateway_sessions_{created,closed}_total` | `mcp_server` is a fixed enum from compose; `/metrics` does not consume a session slot, so a slow RPC cannot block a scrape |
+| blackbox-exporter | `probe_success`, `probe_duration_seconds`, `probe_http_status_code`, … | `instance` is a short name from config (`tsm-hub-healthz`, `mcp-fs`, …); the full URL only travels as `__param_target` and never becomes a label |
 
 Caveats:
 
@@ -655,25 +673,45 @@ Caveats:
   reset on restart; upstream counters may be restored from the SQLite health snapshot;
   `usage_*` is replayed from `data/usage/*.jsonl`, so the cost panel plots the cumulative
   value directly.
-- Latency is an **EWMA gauge**, not a histogram: no p95/p99 yet (tracked in `docs/TODO.md`).
-  It is updated **only on a successful upstream call**. `internal/router/health.go` applies a
-  **15-minute lazy TTL**: `Latency()` / `Health()` / `Snapshot()` return 0 once a provider has
-  had no success for 15m, so a stale value restored from the SQLite health snapshot can no
-  longer masquerade as current latency or skew `Router.Pick` downranking. The alert
-  `TSMHubUpstreamLatencyHigh` additionally requires fresh successes in the last 15m as a
-  defensive second guard.
+- **Two different "latency" metrics**: `upstream_latency_ms` is an **EWMA gauge** for a
+  single upstream attempt and has no p95/p99 of its own; `http_request_duration_seconds`
+  is a **histogram of whole HTTP requests**, queried with
+  `histogram_quantile(0.95, sum by (le) (rate(..._bucket[10m])))`. The histogram only
+  covers routes wrapped by `withLogging` (`/v1/*`, `/api/admin/*`, `/a2a`);
+  `/healthz`, `/metrics`, `/peer/*` and static assets are deliberately excluded so
+  a `/metrics` scrape cannot inflate its own counters. On a cold start with no business
+  traffic the family emits HELP/TYPE but no samples, so a blank panel is expected.
+  If the counters do not change at all inside the window, `rate()` is 0 everywhere and
+  `histogram_quantile()` returns **NaN** — normal Prometheus behaviour under low traffic,
+  verified to recover as soon as requests keep arriving (not a broken instrumentation).
+  Long SSE streams legitimately push p99 up.
+- The EWMA is updated **only on a successful upstream call**. `internal/router/health.go`
+  applies a **15-minute lazy TTL**: `Latency()` / `Health()` / `Snapshot()` return 0 once
+  a provider has had no success for 15m, so a stale value restored from the SQLite health
+  snapshot can no longer masquerade as current latency or skew `Router.Pick` downranking.
+  The alert `TSMHubUpstreamLatencyHigh` additionally requires fresh successes in the last
+  15m as a defensive second guard.
+- In blackbox probing, `degraded=true` **still counts as success**: an unhealthy provider
+  is a provider-level issue handled by `TSMHubProviderUnhealthy`; the probe only answers
+  "is the gateway responding at all". `TSMHubBlackboxExporterDown` watches the probe
+  itself — without it, an all-absent `probe_success` cannot be attributed.
 - Cumulative token / cost / scene / tool-source metrics exist, but there are deliberately
   **no per-key, per-model or per-tool dimensions** — those are high-cardinality. Per-key
   detail stays in `data/usage/*.jsonl` and `/api/admin/usage`.
 - `/metrics` is **unauthenticated** and exposes provider names, request/error counts,
   latency and cost magnitude. Keep it on loopback; never rebind 9070/19070 to `0.0.0.0`.
   New labels may only be IDs from the existing provider list or a finite in-code enum
-  (`scene` / `source` / `state` / `mode` / `entity` / `kind` / `status` / `code`); API keys,
-  `key_id`, raw URL paths, model/tool names, session/task IDs, upstream error text and
-  client IPs are forbidden. `internal/api/metrics_test.go` checks every label name and
-  value against that whitelist (values must match `[a-z0-9_-]+`); the `sample_limit` and
-  metric-name allowlist in `deploy/prometheus.yml` are a second guard. Verify with
-  `go test ./...` and `promtool check config`.
+  (`scene` / `source` / `state` / `mode` / `entity` / `kind` / `status` / `code` /
+  `route` / `method` / `le`); API keys, `key_id`, raw URL paths, model/tool names,
+  session/task IDs, upstream error text and client IPs are forbidden. `metricRoute()`
+  folds all admin subpaths into `admin` and all `/v1/*` into `inference`; `metricMethod()`
+  lowercases and allows only 7 standard methods, everything else becomes `other`.
+  `internal/api/metrics_test.go` checks every label name and value against that
+  whitelist (values must match `[a-z0-9_-]+`; `le` is validated separately as a number
+  or `+Inf`); the `sample_limit` and metric-name allowlist in `deploy/prometheus.yml`
+  are a second guard. Verify with `go test ./...` and `promtool check config`.
+  The C bridge `/metrics` likewise emits only fixed enums — no `g_cmd` (which contains
+  host absolute paths), session id, URL or request body.
 
 After editing rules, hot-reload without restarting:
 `curl --noproxy '*' -X POST http://127.0.0.1:19092/-/reload`;
@@ -690,10 +728,11 @@ Prometheus (rules) -> alertmanager:9093 -> dingtalk-bridge:8060 -> DingTalk grou
 Alertmanager's webhook payload is not a DingTalk message, and DingTalk's "signed"
 security mode requires a fresh `timestamp` + `HMAC-SHA256(secret, ts+"\n"+secret)`
 on every request. `deploy/dingtalk_bridge.py` (stdlib only, no published host port)
-does both. The last 2 of the 7 alerts (`TSMHubAlertmanagerDown` /
-`TSMHubDingtalkNotificationsFailing`) are **self-referential**: when the notification
-pipeline is down they cannot be delivered either — the 5 bottom dashboard panels exist
-for exactly that case.
+does both. Of the 10 alerts, `TSMHubAlertmanagerDown` and
+`TSMHubDingtalkNotificationsFailing` are **self-referential**: when the notification
+pipeline is down they cannot be delivered either — dashboard panels 21–25 exist for
+exactly that case. The 3 blackbox alerts are likewise undeliverable if the probe
+itself dies; `up{job="blackbox-exporter"}` and panels 28–31 cover that gap.
 
 **Setup**: secrets live only in `.env` (gitignored, keep mode `0600`).
 `DINGTALK_WEBHOOK_URL` / `DINGTALK_WEBHOOK_SECRET` are the same group robot as
@@ -739,6 +778,9 @@ repeats unresolved ones every 4 hours.
 | `errcode=300005` | invalid token / robot removed — copy the URL again |
 | Resolved notice is late | usually 1–2 min (grouping policy); if it never arrives, check `send_resolved` and whether Alertmanager restarted before the resolve |
 | `up{job="alertmanager"}=0` | notifications are down; alerts stay firing in Prometheus only, a resolved notice arrives after recovery |
+| `probe_success` all 0 or absent | check `up{job="blackbox-exporter"}` first: 0 means the probe died, 1 means a target is really unreachable |
+| MCP bridge panels (30–35) blank | bridge images still run the old C binary without `GET /metrics`; run `docker compose build mcp-fs mcp-git` then `docker compose up -d` (not covered by `make alert-check`) |
+| HTTP p95 panel blank | no business request has passed through `withLogging` since restart; the histogram family has HELP/TYPE but no samples. Send one `/v1/models` request |
 
 **Privacy boundary**: URL / secret are interpolated from `.env` into the bridge
 container only — never into yml, dashboards or commits. The bridge logs just
@@ -774,18 +816,18 @@ variable to the `tsm-hub` service in `docker-compose.yml`, then
 make test          # All Go packages
 make cover         # Coverage
 make privacy-check # config.json* permissions + plaintext key gate
-make alert-check   # DingTalk bridge unit tests + Alertmanager/Prometheus config (stack must be up)
+make alert-check   # DingTalk unit tests + MCP bridge /metrics smoke + dashboard structure + AM/Prometheus config (config checks need the stack up)
 ```
 
 | Package | Coverage |
 |---------|----------|
-| `internal/api` | E2E: auth, failover, SSE, rate limiting, key lifecycle, /v1/models, config persistence, provider response header, 4xx no circuit break, upstream pricing, login rate limit, 413, panic fallback, healthz health, env key, /metrics gating and label whitelist |
+| `internal/api` | E2E: auth, failover, SSE, rate limiting, key lifecycle, /v1/models, config persistence, provider response header, 4xx no circuit break, upstream pricing, login rate limit, 413, panic fallback, healthz health, env key, /metrics gating and label whitelist, histogram format / route folding / nil safety / endpoint privacy |
 | `internal/proxy` | Request body rewrite, `stream_options` injection, SSE usage parsing, URL concatenation (forwarding main chain covered by `internal/api` e2e tests) |
 | `internal/router` | Priority sorting, weight preference, latency penalty, health removal and half-open pass |
 | `internal/store` | Atomic write, update rollback, route cleanup on provider deletion, Key CRUD |
 | `internal/quota` | Aggregation and replay, RPM window, four quota rejections, TopKeys, recent logs |
 | `internal/auth` | Key format, Bearer parsing, constant-time comparison, session expiry |
-| `deploy` | 16 DingTalk bridge cases: signing vector, firing/resolved rendering, errcode handling, URL/secret redaction (`make alert-check`) |
+| `deploy` | 16 DingTalk bridge cases: signing vector, firing/resolved rendering, errcode handling, URL/secret redaction; `test_mcp_gateway_metrics.sh` compiles the C bridge locally and checks all 10 `/metrics` families, counters and privacy (`make alert-check`) |
 
 `make smoke` has an additional script-level e2e suite (real process startup + curl assertions).
 

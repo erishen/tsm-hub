@@ -62,9 +62,11 @@ test:
 privacy-check:
 	@python3 -S scripts/config-privacy-check.py --check
 
-## alert-check: 钉钉桥单测 + Alertmanager/Prometheus 配置校验（需监控栈已 up）
+## alert-check: 钉钉桥单测 + MCP 桥 /metrics 冒烟 + dashboard 结构 + AM/Prometheus 配置（后两项需监控栈已 up）
 alert-check:
 	@python3 -S -m unittest discover -s deploy -p 'test_*.py'
+	@sh deploy/test_mcp_gateway_metrics.sh
+	@python3 -S -c "import json; d=json.load(open('deploy/grafana/dashboards/tsm-hub.json')); ids=[p['id'] for p in d['panels']]; assert len(ids)==len(set(ids)), 'duplicate panel ids'; assert d['version']>=7, 'dashboard version too old'"
 	@docker compose exec -T alertmanager amtool check-config /etc/alertmanager/alertmanager.yml
 	@docker compose exec -T prometheus promtool check config /etc/prometheus/prometheus.yml
 	@docker compose exec -T prometheus promtool check rules /etc/prometheus/prometheus.rules.yml
