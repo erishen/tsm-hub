@@ -10,6 +10,13 @@ global:
 rule_files:
   - /etc/prometheus/prometheus.rules.yml
 
+# 告警只在这里汇聚，真正发通知由 Alertmanager 完成（分组/去重/抑制/恢复）。
+# 用容器 DNS，不要写 127.0.0.1:19093 —— 那是 Prometheus 容器自己的 loopback。
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
 scrape_configs:
   # 与 tsm-hub 同处 compose 默认网络，容器 DNS 名 tsm-hub 可解析（container_name 固定）。
   # 不要写 127.0.0.1:19070 —— 那是 Prometheus 容器自身的 loopback。
@@ -39,3 +46,10 @@ scrape_configs:
   - job_name: prometheus
     static_configs:
       - targets: ["localhost:9090"]
+
+  # Alertmanager 自监控：up{job="alertmanager"}、
+  # alertmanager_notifications_total / _failed_total、alertmanager_alerts。
+  # 通知链路本身故障时的自指告警只能靠 Grafana 看到（告警也发不出去），见规则文件。
+  - job_name: alertmanager
+    static_configs:
+      - targets: ["alertmanager:9093"]

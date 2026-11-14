@@ -75,3 +75,27 @@ groups:
         annotations:
           summary: "上游 {{ $labels.provider }} 近期成功请求延迟 EWMA 超过 30s"
           description: "近 15 分钟有成功样本且延迟 EWMA 持续 >30s，智能路由的延迟降权会生效。EWMA 有 15 分钟惰性 TTL，长期无成功请求的 provider 导出 0，不告警。"
+
+      # ===== 通知链路自监控 =====
+      # 自指告警的局限：Alertmanager / 钉钉桥挂掉时，这两条也送不出去。
+      # 它们的价值是让 Grafana 面板与事后复盘能看到「通知什么时候断过」，
+      # 并且在链路恢复后收到一条 resolved，确认通道重新打通。
+      - alert: TSMHubAlertmanagerDown
+        # absent() 覆盖「scrape job 被误删 / target 从未注册」的情况。
+        expr: up{job="alertmanager"} == 0 or absent(up{job="alertmanager"})
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Alertmanager 不可达，钉钉告警通知已中断"
+          description: "检查 tsm-hub-alertmanager 容器与 /-/healthy；规则仍在 Prometheus 侧 firing，但不会送达群。"
+
+      - alert: TSMHubDingtalkNotificationsFailing
+        # 桥接器返回 5xx / 网络不通 / 钉钉 errcode!=0 时，Alertmanager 会累加失败计数。
+        expr: increase(alertmanager_notifications_failed_total{integration="webhook"}[10m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "近 10 分钟有钉钉通知投递失败"
+          description: "核对 tsm-hub-dingtalk-bridge 日志（URL 已脱敏）；常见原因是加签密钥过期、群机器人被删或改了自定义关键词。"

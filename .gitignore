@@ -9,9 +9,13 @@ data/
 
 # buildx 缓存（BUILDX_CONFIG 重定向目录，构建噪音非密钥，但勿入库）
 .data/
-# 本地环境变量（含宿主工作区绝对路径 WORKSPACE，禁止入库）
+# 本地环境变量（含宿主工作区绝对路径 WORKSPACE 与钉钉 webhook，禁止入库）
 .env
 .env.local
+
+# Python 工具脚本（scripts/ 与 deploy/）的字节码缓存
+__pycache__/
+*.pyc
 
 # 前端
 web/node_modules/

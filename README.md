@@ -583,19 +583,23 @@ Or use a `.env` file with docker compose (already supported — just create `.en
 
 The gateway is its own exporter — `GET /metrics` returns standard Prometheus text format
 (`text/plain; version=0.0.4`, with `# HELP` / `# TYPE`), no auth and no sidecar required.
-`docker-compose.yml` ships a Prometheus + Grafana stack on the same default compose network.
+`docker-compose.yml` ships a **Prometheus + Alertmanager + DingTalk bridge + Grafana** stack
+on the same default compose network, wired together with container DNS names.
 
 ```bash
-# 1) set a strong admin password in .env (see .env.example):
+# 1) set a strong admin password and the DingTalk robot in .env (see .env.example):
 #    GRAFANA_ADMIN_PASSWORD=<strong-password>
+#    DINGTALK_WEBHOOK_URL / DINGTALK_WEBHOOK_SECRET (leave empty = log-only, no push)
 # 2) start only the monitoring services (does not touch the running tsm-hub container)
-docker compose up -d prometheus grafana
+docker compose up -d prometheus alertmanager dingtalk-bridge grafana
 ```
 
 | | URL | Notes |
 |---|-----|-------|
 | Prometheus | <http://127.0.0.1:19092> | `/-/healthy`, `/targets`, `/alerts`; 30d retention |
+| Alertmanager | <http://127.0.0.1:19093> | grouping, silences, inhibition; unauthenticated UI, loopback only |
 | Grafana | <http://127.0.0.1:19091> | datasource + "tsm-hub 网关监控" dashboard auto-provisioned |
+| DingTalk bridge | no host port | reachable only as `dingtalk-bridge:8060` inside the compose network |
 
 **Grafana login**: open <http://127.0.0.1:19091/>, user `admin`, password is
 `GRAFANA_ADMIN_PASSWORD` from `.env` (compose falls back to `admin` when unset).
@@ -609,26 +613,31 @@ docker compose exec grafana grafana cli admin reset-admin-password '<new-passwor
 
 The dashboard is the **default home dashboard** (via
 `GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH`), so logging in lands on it directly.
-It has **20 panels** (v5): the first 13 cover scrape `up`, uptime, request rate,
+It has **25 panels** (v6): the first 13 cover scrape `up`, uptime, request rate,
 overall error rate, healthy provider **ratio** (not an absolute count), firing alert
 count, then per-provider error rate / QPS / EWMA latency / health, HTTP status rate,
-quota denials and firing alerts. The last 7 add token usage, cumulative cost (own 24h
+quota denials and firing alerts. The next 7 add token usage, cumulative cost (own 24h
 window), cooldown remaining, half-open and consecutive failures, scene request rate and
-tool source, MCP/A2A snapshot, and Go runtime / config entities. Use the `Provider` and
-`Scene` variables at the top to filter (multi-select, All by default). Quota denials
-uses `or vector(0)` so an empty metric family shows 0 instead of a blank panel.
+tool source, MCP/A2A snapshot, and Go runtime / config entities. The last 5 cover
+Alertmanager `up`, DingTalk delivery failures, active alerts, active silences, and a
+delivery-success/failure vs rule-firing trend. A shortcut to the Alertmanager UI is in
+the dashboard links. Use the `Provider` and `Scene` variables at the top to filter
+(multi-select, All by default). Quota denials uses `or vector(0)` so an empty metric
+family shows 0 instead of a blank panel.
 Edit the JSON in the repo — the file is mounted read-only and the provider reloads
 it every 30s.
 
 The scrape target is **`tsm-hub:9070`** (container DNS), not `127.0.0.1:19070` — inside the
-Prometheus container that address is its own loopback. Both ports bind to `127.0.0.1` only.
+Prometheus container that address is its own loopback. All three UI ports bind to `127.0.0.1` only.
 
 | File | Purpose |
 |------|---------|
-| `deploy/prometheus.yml` | scrape config (15s) + `rule_files` + guards: `sample_limit: 5000`, `label_limit: 32`, `label_value_length_limit: 128`, and a metric-name allowlist keeping only `tsm_hub_*` / `up` / `scrape_*` |
-| `deploy/prometheus.rules.yml` | 5 alerts: target down, upstream error rate >30% (min 5 requests / 5m), provider removed, quota denials, EWMA latency >30s (gated on fresh successes in the last 15m) |
+| `deploy/prometheus.yml` | scrape config (15s) + `rule_files` + `alerting.alertmanagers` + an `alertmanager` self-scrape job + guards: `sample_limit: 5000`, `label_limit: 32`, `label_value_length_limit: 128`, and a metric-name allowlist keeping only `tsm_hub_*` / `up` / `scrape_*` |
+| `deploy/prometheus.rules.yml` | 7 alerts: 5 business alerts (target down, upstream error rate >30% with >=5 requests / 5m, provider removed, quota denials, EWMA latency >30s gated on fresh successes) + 2 notification-pipeline self-checks |
+| `deploy/alertmanager.yml` | grouping / dedup / inhibition / resolved notices; webhook receiver points at `dingtalk-bridge:8060` |
+| `deploy/dingtalk_bridge.py` | stdlib only: Alertmanager webhook -> DingTalk markdown + HMAC signing; see below |
 | `deploy/grafana/provisioning/` | Prometheus datasource (`uid: prometheus`) + dashboard provider |
-| `deploy/grafana/dashboards/tsm-hub.json` | 20 panels (v5), `Provider` + `Scene` variables; cost panel uses its own 24h window |
+| `deploy/grafana/dashboards/tsm-hub.json` | 25 panels (v6), `Provider` + `Scene` variables; cost panel uses its own 24h window |
 
 **Metric groups** (all names below omit the common `tsm_hub_` prefix; every group reuses
 existing in-memory aggregates — no new state, no business-path changes):
@@ -667,7 +676,78 @@ Caveats:
   `go test ./...` and `promtool check config`.
 
 After editing rules, hot-reload without restarting:
-`curl --noproxy '*' -X POST http://127.0.0.1:19092/-/reload`.
+`curl --noproxy '*' -X POST http://127.0.0.1:19092/-/reload`;
+after editing `deploy/alertmanager.yml`:
+`curl --noproxy '*' -X POST http://127.0.0.1:19093/-/reload`.
+
+### DingTalk alert notifications
+
+```
+Prometheus (rules) -> alertmanager:9093 -> dingtalk-bridge:8060 -> DingTalk group robot
+                      group/dedup/inhibit    translate + HMAC sign
+```
+
+Alertmanager's webhook payload is not a DingTalk message, and DingTalk's "signed"
+security mode requires a fresh `timestamp` + `HMAC-SHA256(secret, ts+"\n"+secret)`
+on every request. `deploy/dingtalk_bridge.py` (stdlib only, no published host port)
+does both. The last 2 of the 7 alerts (`TSMHubAlertmanagerDown` /
+`TSMHubDingtalkNotificationsFailing`) are **self-referential**: when the notification
+pipeline is down they cannot be delivered either — the 5 bottom dashboard panels exist
+for exactly that case.
+
+**Setup**: secrets live only in `.env` (gitignored, keep mode `0600`).
+`DINGTALK_WEBHOOK_URL` / `DINGTALK_WEBHOOK_SECRET` are the same group robot as
+`work/sale/daoye-engine`'s `DAOYE_WEBHOOK_*`; copy those two values. The signing
+algorithm matches `daoye_engine/notify.py`. `DINGTALK_KEYWORD=告警` covers robots using
+a custom-keyword rule (the word appears in both title and body) — change it if your
+robot uses a different keyword. `DINGTALK_DRY_RUN=1` logs only, without pushing.
+
+> `docker compose config` echoes resolved env vars (including the webhook token).
+> Always validate with `docker compose config --quiet`; never paste its output anywhere.
+
+**Dry run first**: set `DINGTALK_DRY_RUN=1` in `.env`, then
+`docker compose up -d dingtalk-bridge` (a recreate is required to inject the new value)
+before sending a test alert. Flip it back to `0` and recreate once verified.
+
+**Send a test alert** (real push; `group_wait: 30s`, so it lands within ~30s):
+
+```bash
+now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+end=$(date -u -v+2M +%Y-%m-%dT%H:%M:%SZ)   # macOS; Linux: date -u -d '+2 minutes' ...
+curl --noproxy '*' -X POST http://127.0.0.1:19093/api/v2/alerts \
+  -H 'Content-Type: application/json' \
+  -d "[{\"labels\":{\"alertname\":\"TSMHubNotificationTest\",\"severity\":\"info\"},\"annotations\":{\"summary\":\"DingTalk pipeline smoke test\",\"description\":\"Safe to ignore; the alert ends in 2 minutes\"},\"startsAt\":\"$now\",\"endsAt\":\"$end\"}]"
+```
+
+The group first receives the "firing" message, then a "resolved" message once the
+alert ends (`endsAt` expires or it is resolved explicitly) — `send_resolved: true`
+is enabled. The resolved notice is **not immediate**: Alertmanager delays it by its
+grouping policy, about 1–2 minutes end-to-end in our test. That is deliberate, so a
+flapping upstream cannot spam the group with resolve/re-fire pairs. A single request
+can also be dry-run inside the container with an `X-Dingtalk-Dry-Run: 1` header.
+
+**Day-to-day**: create silences in the Alertmanager UI
+(<http://127.0.0.1:19093/#/silences>); `TSMHubDown` inhibits all `warning|info`
+alerts so a gateway outage does not flood the group with downstream symptoms;
+`group_by: [alertname, provider]` merges related alerts and `repeat_interval: 4h`
+repeats unresolved ones every 4 hours.
+
+| Symptom | Check |
+|---------|-------|
+| No message at all | ① `curl --noproxy '*' http://127.0.0.1:19093/api/v2/alerts`; ② `docker compose logs dingtalk-bridge` for `dry-run` / `configured=false`; ③ delivery panels at the bottom of the dashboard |
+| `errcode=310000` | keyword or signature mismatch — re-check `DINGTALK_KEYWORD` and the secret against the robot settings |
+| `errcode=300005` | invalid token / robot removed — copy the URL again |
+| Resolved notice is late | usually 1–2 min (grouping policy); if it never arrives, check `send_resolved` and whether Alertmanager restarted before the resolve |
+| `up{job="alertmanager"}=0` | notifications are down; alerts stay firing in Prometheus only, a resolved notice arrives after recovery |
+
+**Privacy boundary**: URL / secret are interpolated from `.env` into the bridge
+container only — never into yml, dashboards or commits. The bridge logs just
+`scheme://host/path?...`, and `redact()` strips `access_token` / `sign` / secret
+literals from exceptions. Messages contain only `alertname / severity / provider /
+summary / description / startsAt`; high-cardinality or sensitive labels such as
+`api_key`, `session_id` and `generatorURL` are never rendered
+(`deploy/test_dingtalk_bridge.py`, run by `make alert-check`, asserts this).
+The Alertmanager UI is also unauthenticated — keep 19093 on loopback.
 
 ## Config privacy gate
 
@@ -691,8 +771,10 @@ variable to the `tsm-hub` service in `docker-compose.yml`, then
 ## Testing
 
 ```bash
-make test    # All packages
-make cover   # Coverage
+make test          # All Go packages
+make cover         # Coverage
+make privacy-check # config.json* permissions + plaintext key gate
+make alert-check   # DingTalk bridge unit tests + Alertmanager/Prometheus config (stack must be up)
 ```
 
 | Package | Coverage |
@@ -703,6 +785,7 @@ make cover   # Coverage
 | `internal/store` | Atomic write, update rollback, route cleanup on provider deletion, Key CRUD |
 | `internal/quota` | Aggregation and replay, RPM window, four quota rejections, TopKeys, recent logs |
 | `internal/auth` | Key format, Bearer parsing, constant-time comparison, session expiry |
+| `deploy` | 16 DingTalk bridge cases: signing vector, firing/resolved rendering, errcode handling, URL/secret redaction (`make alert-check`) |
 
 `make smoke` has an additional script-level e2e suite (real process startup + curl assertions).
 

@@ -1,0 +1,34 @@
+# Alertmanager 路由配置（由 docker-compose.yml 只读挂载）
+# 链路：prometheus.yml 的 alerting.alertmanagers -> alertmanager:9093
+#       -> webhook receiver -> dingtalk-bridge:8060 -> 钉钉群机器人
+# 桥接器负责协议转换与「加签」，所以这里只写容器 DNS 名，绝不能写钉钉 URL/token。
+global:
+  # Prometheus 停止推送某告警后等 5m 才判定 resolved，避免上游抖动时「恢复/又挂」
+  # 来回刷群。带明确 endsAt 的 API 告警到期即 resolved；恢复通知仍会按分组策略
+  # 稍后发出（实测约 1~2 分钟，不是立刻），send_resolved: true 已启用。
+  resolve_timeout: 5m
+
+route:
+  receiver: dingtalk
+  # 同一 alertname + provider 合并成一条群消息，避免上游抖动刷屏。
+  group_by: ["alertname", "provider"]
+  group_wait: 30s
+  group_interval: 5m
+  # 未恢复的告警 4 小时重发一次（长期故障不至于被忘掉，也不至于每分钟打扰）。
+  repeat_interval: 4h
+
+receivers:
+  - name: dingtalk
+    webhook_configs:
+      - url: "http://dingtalk-bridge:8060/"
+        send_resolved: true
+        max_alerts: 20
+        timeout: 10s
+
+inhibit_rules:
+  # 网关整体掉线时，上游错误率/延迟/健康类告警都是连带症状，只留 critical 那条。
+  # 注意：这是单实例本地栈，省略 equal 即全局抑制；多实例部署时应改为 equal: [service]。
+  - source_matchers:
+      - 'alertname = "TSMHubDown"'
+    target_matchers:
+      - 'severity =~ "warning|info"'

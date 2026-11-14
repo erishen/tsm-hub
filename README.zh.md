@@ -433,18 +433,23 @@ docker compose up -d --build          # 或 docker build -t tsm-hub . && docker 
 
 网关自身就是 exporter：`GET /metrics` 返回标准 Prometheus 文本格式
 （`text/plain; version=0.0.4`，带 `# HELP` / `# TYPE`），不鉴权、无需 sidecar。
-`docker-compose.yml` 已带一套 Prometheus + Grafana，与 tsm-hub 同处 compose 默认网络。
+`docker-compose.yml` 已带一套 **Prometheus + Alertmanager + 钉钉桥接器 + Grafana**，
+与 tsm-hub 同处 compose 默认网络，全部用容器 DNS 互联。
 
 ```bash
-# 1) 在 .env 里设强口令（见 .env.example）：GRAFANA_ADMIN_PASSWORD=<强口令>
-# 2) 只启动监控两个服务，不会动正在运行的 tsm-hub 容器
-docker compose up -d prometheus grafana
+# 1) .env 里设强口令与钉钉机器人（见 .env.example）：
+#    GRAFANA_ADMIN_PASSWORD=<强口令>
+#    DINGTALK_WEBHOOK_URL / DINGTALK_WEBHOOK_SECRET（不配则告警只记日志、不推送）
+# 2) 只启动监控服务，不会动正在运行的 tsm-hub 容器
+docker compose up -d prometheus alertmanager dingtalk-bridge grafana
 ```
 
 | | 地址 | 说明 |
 |---|------|------|
 | Prometheus | <http://127.0.0.1:19092> | `/-/healthy`、`/targets`、`/alerts`；数据保留 30 天 |
+| Alertmanager | <http://127.0.0.1:19093> | 告警分组、静默、抑制；UI 无鉴权，只绑回环 |
 | Grafana | <http://127.0.0.1:19091> | 数据源与「tsm-hub 网关监控」面板自动注册 |
+| 钉钉桥接器 | 无宿主端口 | 仅 compose 网络内 `dingtalk-bridge:8060`，外部不可达 |
 
 **Grafana 登录**：打开 <http://127.0.0.1:19091/>，用户名 `admin`，密码取 `.env` 里的
 `GRAFANA_ADMIN_PASSWORD`；未设置时回落默认口令 `admin`。
@@ -456,24 +461,28 @@ docker compose exec grafana grafana cli admin reset-admin-password '<新口令>'
 ```
 
 面板已设为**默认首页**（`GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH`），登录后直接落到
-「tsm-hub 网关监控」，不用再去 Dashboards 里找。共 **20 个面板**（v5）：前 13 个是
+「tsm-hub 网关监控」，不用再去 Dashboards 里找。共 **25 个面板**（v6）：前 13 个是
 抓取状态 `up`、进程运行时长、请求速率、整体错误率、健康 Provider **比例**、firing 告警数，
 以及各 provider 的错误率/QPS/延迟 EWMA/健康状态、HTTP 状态码速率、配额拒绝、触发中的告警；
-后 7 个是 token 消耗、累计成本（单独看 24h 窗口）、冷却剩余、半开态与连续失败、
-场景请求速率与工具来源、MCP/A2A 快照、Go 运行时与配置实体。
+中间 7 个是 token 消耗、累计成本（单独看 24h 窗口）、冷却剩余、半开态与连续失败、
+场景请求速率与工具来源、MCP/A2A 快照、Go 运行时与配置实体；
+最后 5 个是 Alertmanager 在线、钉钉投递失败数、AM 活跃告警、生效静默、投递成功/失败与规则 firing 趋势。
+顶部还有 Alertmanager UI 的快捷链接。
 顶部 `Provider`、`Scene` 两个变量可多选筛选（默认 All）。配额拒绝用 `or vector(0)` 兜底——
 `/metrics` 在无拒绝记录时不输出该 family，否则面板会长期空白。
 改面板请改仓库里的 JSON：文件是只读挂载，provider 每 30s 自动重载。
 
 抓取目标是 **`tsm-hub:9070`**（容器 DNS），不要写 `127.0.0.1:19070` —— 在 Prometheus
-容器里那是它自己的 loopback。两个端口都只绑 `127.0.0.1`。
+容器里那是它自己的 loopback。三个 UI 端口都只绑 `127.0.0.1`。
 
 | 文件 | 作用 |
 |------|------|
-| `deploy/prometheus.yml` | 抓取配置（15s）+ `rule_files` + 三条护栏：`sample_limit: 5000`、`label_limit: 32`、`label_value_length_limit: 128`，以及只保留 `tsm_hub_*` / `up` / `scrape_*` 的指标名白名单 |
-| `deploy/prometheus.rules.yml` | 5 条告警：target 掉线、上游错误率 >30%（要求 5m 内至少 5 次请求）、provider 被摘除、配额拒绝、EWMA 延迟 >30s（额外要求近 15m 有成功样本） |
+| `deploy/prometheus.yml` | 抓取配置（15s）+ `rule_files` + `alerting.alertmanagers` + `alertmanager` 自监控 job + 三条护栏：`sample_limit: 5000`、`label_limit: 32`、`label_value_length_limit: 128`，以及只保留 `tsm_hub_*` / `up` / `scrape_*` 的指标名白名单 |
+| `deploy/prometheus.rules.yml` | 7 条告警：5 条业务告警（target 掉线、上游错误率 >30% 且 5m 内至少 5 次请求、provider 被摘除、配额拒绝、EWMA 延迟 >30s 且近 15m 有成功样本）+ 2 条通知链路自监控 |
+| `deploy/alertmanager.yml` | 分组/去重/抑制/恢复通知；webhook receiver 指向 `dingtalk-bridge:8060` |
+| `deploy/dingtalk_bridge.py` | 仅标准库：Alertmanager webhook → 钉钉 markdown + 加签；见下节 |
 | `deploy/grafana/provisioning/` | Prometheus 数据源（`uid: prometheus`）+ 面板自动加载 |
-| `deploy/grafana/dashboards/tsm-hub.json` | 20 个面板（v5）、`Provider` + `Scene` 两个变量；成本面板单独看 24h |
+| `deploy/grafana/dashboards/tsm-hub.json` | 25 个面板（v6）、`Provider` + `Scene` 两个变量；成本面板单独看 24h |
 
 **指标分层**（下表指标名均省略统一前缀 `tsm_hub_`；全部复用已有内存聚合，不新增状态、不改业务路径）：
 
@@ -506,7 +515,71 @@ docker compose exec grafana grafana cli admin reset-admin-password '<新口令>'
   是第二道工程护栏；两者都在 `go test ./...` / `promtool check config` 里可验。
 
 改完告警规则可热加载，无需重启：
-`curl --noproxy '*' -X POST http://127.0.0.1:19092/-/reload`。
+`curl --noproxy '*' -X POST http://127.0.0.1:19092/-/reload`；
+改完 `deploy/alertmanager.yml` 同理：
+`curl --noproxy '*' -X POST http://127.0.0.1:19093/-/reload`。
+
+### 钉钉告警通知
+
+```
+Prometheus (rules) → alertmanager:9093 → dingtalk-bridge:8060 → 钉钉群机器人
+                     分组/去重/抑制/恢复      协议转换 + 加签
+```
+
+Alertmanager 的 webhook 协议与钉钉机器人不兼容，且钉钉「加签」要求每个请求带
+`timestamp` + `HMAC-SHA256(secret, ts+"\n"+secret)` 动态签名，
+所以加了 `deploy/dingtalk_bridge.py`（仅 Python 标准库、不发布宿主端口）。
+7 条告警里最后 2 条（`TSMHubAlertmanagerDown` / `TSMHubDingtalkNotificationsFailing`）
+是**自指告警**：通知链路本身挂掉时它们也送不出去，靠 Grafana 底部 5 个面板发现。
+
+**配置**：密钥只放 `.env`（已 gitignore，权限保持 `0600`）。
+`DINGTALK_WEBHOOK_URL` / `DINGTALK_WEBHOOK_SECRET` 与
+`work/sale/daoye-engine` 的 `DAOYE_WEBHOOK_*` 是同一个群机器人，直接复制那两个值即可；
+加签算法与那边 `daoye_engine/notify.py` 同款。
+`DINGTALK_KEYWORD=告警` 适配「自定义关键词」安全设置（标题与正文都会带上关键词），
+若群里设的是别的词要改；`DINGTALK_DRY_RUN=1` 只记日志不推送。
+
+> ⚠️ `docker compose config` 会回显解析后的环境变量（含 webhook token）。
+> 校验配置一律用 `docker compose config --quiet`，不要把输出贴到日志/issue 里。
+
+**先 dry-run**：把 `.env` 的 `DINGTALK_DRY_RUN` 改 `1`，
+`docker compose up -d dingtalk-bridge`（必须 recreate 才注入新值），
+再发测试告警；桥只写日志、不打扰群。确认后改回 `0` 再 up 一次。
+
+**发一条测试告警**（真实推送，`group_wait: 30s`，约 30 秒内到群）：
+
+```bash
+now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+end=$(date -u -v+2M +%Y-%m-%dT%H:%M:%SZ)   # macOS；Linux 用 date -u -d '+2 minutes' ...
+curl --noproxy '*' -X POST http://127.0.0.1:19093/api/v2/alerts \
+  -H 'Content-Type: application/json' \
+  -d "[{\"labels\":{\"alertname\":\"TSMHubNotificationTest\",\"severity\":\"info\"},\"annotations\":{\"summary\":\"钉钉通知链路联调测试\",\"description\":\"收到后可忽略，告警 2 分钟后结束\"},\"startsAt\":\"$now\",\"endsAt\":\"$end\"}]"
+```
+
+群里会先收到「触发」消息；`send_resolved: true` 已启用，告警结束（`endsAt` 到期或
+主动 resolve）后会再收到「已恢复」消息，但**不是立刻**——Alertmanager 按分组策略
+延迟发出，端到端实测约 1~2 分钟。这是刻意的，避免上游抖动时「恢复/又挂」来回刷群。
+单次不发群也可在容器内给桥发 `X-Dingtalk-Dry-Run: 1` 头，验证消息排版。
+
+**日常操作**：Alertmanager UI（<http://127.0.0.1:19093/#/silences>）可建静默；
+已配 `TSMHubDown` 抑制所有 `warning|info`（网关整体掉线时不再刷上游连带告警）；
+`group_by: [alertname, provider]` 合并同类，`repeat_interval: 4h` 长期故障才重发。
+
+| 现象 | 排查 |
+|------|------|
+| 群完全没消息 | ① `curl --noproxy '*' http://127.0.0.1:19093/api/v2/alerts` 看 AM 是否收到；② `docker compose logs dingtalk-bridge` 看是否 `dry-run` / `configured=false`；③ Grafana 底部「通知投递」面板 |
+| `errcode=310000` | 关键词或加签不匹配：核对 `DINGTALK_KEYWORD` 与 secret 是否与钉钉机器人当前设置一致 |
+| `errcode=300005` | token 无效 / 机器人被删，重新复制 URL |
+| 恢复消息迟迟不来 | 通常要等 1~2 分钟（分组策略）；若一直不来，查 `send_resolved` 是否被关、AM 是否在 resolve 前重启 |
+| `up{job="alertmanager"}=0` | 通知已中断；此时告警只在 Prometheus 侧 firing，恢复后会收到 resolved |
+
+**隐私边界**：URL / secret 只经 `.env` 插值注入桥接器容器，不写任何 yml、面板或提交；
+桥接器日志只打 `scheme://host/path?...`，异常文本经 `redact()` 去掉
+`access_token` / `sign` / secret 字面量；消息内容只取
+`alertname / severity / provider / summary / description / 开始时间`，
+告警 labels 里的 `api_key`、`session_id`、`generatorURL` 等一律不输出
+（`make alert-check` 里的 `deploy/test_dingtalk_bridge.py` 有门禁断言）。
+Alertmanager UI 同样无鉴权，19093 只绑回环。
 
 ## 配置隐私门禁
 
@@ -529,8 +602,10 @@ python3 -S scripts/config-privacy-check.py --redact   # 只脱敏 *.bak-*，绝�
 ## 测试
 
 ```bash
-make test    # 全部包
-make cover   # 覆盖率
+make test         # 全部 Go 包
+make cover        # 覆盖率
+make privacy-check # config.json* 权限与明文 key 门禁
+make alert-check  # 钉钉桥单测 + Alertmanager/Prometheus 配置（需监控栈已 up）
 ```
 
 | 包 | 覆盖内容 |
@@ -541,6 +616,7 @@ make cover   # 覆盖率
 | `internal/store` | 原子写、更新回滚、删除 provider 时清理路由、Key CRUD |
 | `internal/quota` | 聚合与回放、RPM 窗口、四类额度拒绝、TopKeys、最近流水 |
 | `internal/auth` | Key 格式、Bearer 解析、常量时间比较、会话过期 |
+| `deploy` | 钉钉桥接器 16 例：加签向量、告警/恢复消息排版、errcode 判定、URL 与 secret 脱敏（`make alert-check`）|
 
 `make smoke` 另有一套脚本级端到端（真实起进程 + curl 断言）。
 

@@ -1,17 +1,18 @@
 {
   "uid": "tsm-hub-overview",
   "title": "tsm-hub 网关监控",
-  "description": "LLM 网关 /metrics 总览。除原有 7 个指标外，复用 quota.Recorder / Tracker.Snapshot() / MCPStatuses() / AdminOverview() 等已有内存聚合，新增用量成本、健康状态机、MCP/A2A、配置与运行时面板。延迟仍是 EWMA gauge（无 p95/p99）。所有标签均为代码内有限枚举或已配置的 provider ID，不含任何密钥、URL、ID。数据源由 provisioning 自动注册。",
-  "tags": ["tsm-hub", "llm-gateway", "monitoring"],
+  "description": "LLM 网关 /metrics 总览。除原有 7 个指标外，复用 quota.Recorder / Tracker.Snapshot() / MCPStatuses() / AdminOverview() 等已有内存聚合，新增用量成本、健康状态机、MCP/A2A、配置与运行时面板；底部另有 Alertmanager 与钉钉通知链路自监控。延迟仍是 EWMA gauge（无 p95/p99）。所有标签均为代码内有限枚举或已配置的 provider ID，不含任何密钥、URL、ID。数据源由 provisioning 自动注册。",
+  "tags": ["tsm-hub", "llm-gateway", "monitoring", "alerting"],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 5,
+  "version": 6,
   "editable": true,
   "refresh": "30s",
   "time": { "from": "now-3h", "to": "now" },
   "links": [
     { "title": "Prometheus 告警", "url": "http://127.0.0.1:19092/alerts", "type": "link", "icon": "external link", "targetBlank": true },
-    { "title": "Prometheus Targets", "url": "http://127.0.0.1:19092/targets", "type": "link", "icon": "external link", "targetBlank": true }
+    { "title": "Prometheus Targets", "url": "http://127.0.0.1:19092/targets", "type": "link", "icon": "external link", "targetBlank": true },
+    { "title": "Alertmanager（告警/静默）", "url": "http://127.0.0.1:19093", "type": "link", "icon": "external link", "targetBlank": true }
   ],
   "templating": {
     "list": [
@@ -337,6 +338,68 @@
         { "refId": "A", "expr": "tsm_hub_runtime_goroutines", "legendFormat": "goroutines" },
         { "refId": "B", "expr": "tsm_hub_runtime_heap_alloc_bytes", "legendFormat": "heap alloc (bytes)" },
         { "refId": "C", "expr": "tsm_hub_config_entities", "legendFormat": "配置 {{entity}}" }
+      ]
+    },
+    {
+      "id": 21,
+      "type": "stat",
+      "title": "Alertmanager 在线 (up)",
+      "description": "来自 prometheus.yml 的 alertmanager 自监控 job。or vector(0) 让 target 未注册时显示 0 而不是空白；为 0 时告警规则仍在 Prometheus 侧 firing，但通知送不出去。",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 66 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "none", "decimals": 0, "min": 0, "max": 1, "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "green", "value": 1 } ] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "textMode": "auto" },
+      "targets": [{ "refId": "A", "expr": "sum(up{job=\"alertmanager\"} or vector(0))", "legendFormat": "up" }]
+    },
+    {
+      "id": 22,
+      "type": "stat",
+      "title": "钉钉通知投递失败 (10m)",
+      "description": "Alertmanager 的 webhook 集成失败计数。非 0 通常是加签密钥过期、群机器人被删、关键词不匹配或桥接器返回 5xx；查 tsm-hub-dingtalk-bridge 日志（URL 已脱敏）。",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 66 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "none", "decimals": 0, "min": 0, "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 1 } ] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "textMode": "auto" },
+      "targets": [{ "refId": "A", "expr": "sum(increase(alertmanager_notifications_failed_total[10m]) or vector(0))", "legendFormat": "failed" }]
+    },
+    {
+      "id": 23,
+      "type": "stat",
+      "title": "Alertmanager 活跃告警",
+      "description": "alertmanager_alerts 是 AM 当前持有的告警数（含已被 group_by 合并/抑制的）。配合顶部「触发中的告警数」可看出抑制是否生效。",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 66 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "none", "decimals": 0, "min": 0, "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "orange", "value": 1 }, { "color": "red", "value": 5 } ] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "textMode": "auto" },
+      "targets": [{ "refId": "A", "expr": "sum(alertmanager_alerts or vector(0))", "legendFormat": "alerts" }]
+    },
+    {
+      "id": 24,
+      "type": "stat",
+      "title": "生效中的静默",
+      "description": "Alertmanager UI 里创建的静默数量。维护窗口期间把数值调大属预期；排查「告警没发」时先看这里。",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 66 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "none", "decimals": 0, "min": 0, "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "orange", "value": 1 } ] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "auto", "textMode": "auto" },
+      "targets": [{ "refId": "A", "expr": "sum(alertmanager_silences{state=\"active\"} or vector(0))", "legendFormat": "silences" }]
+    },
+    {
+      "id": 25,
+      "type": "timeseries",
+      "title": "通知投递与规则 firing (10m 增量)",
+      "description": "成功/失败是 Alertmanager webhook 集成计数，firing 是 Prometheus 规则数。三条线背离（firing 上升但成功线不动）说明通知链路断了；自指告警此时也送不出去，只能靠本面板发现。",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 70 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "min": 0, "decimals": 0, "custom": { "drawStyle": "line", "lineWidth": 2, "lineInterpolation": "stepAfter", "fillOpacity": 5, "showPoints": "never", "spanNulls": true } },
+        "overrides": []
+      },
+      "options": { "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "refId": "A", "expr": "sum(increase(alertmanager_notifications_total[10m]) or vector(0))", "legendFormat": "投递成功" },
+        { "refId": "B", "expr": "sum(increase(alertmanager_notifications_failed_total[10m]) or vector(0))", "legendFormat": "投递失败" },
+        { "refId": "C", "expr": "sum(count(ALERTS{alertstate=\"firing\"}) or vector(0))", "legendFormat": "规则 firing" }
       ]
     }
   ]

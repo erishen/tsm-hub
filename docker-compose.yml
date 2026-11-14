@@ -175,11 +175,13 @@ services:
       timeout: 5s
       retries: 3
 
-  # ===== 监控：Prometheus + Grafana =====
+  # ===== 监控：Prometheus + Alertmanager + 钉钉桥 + Grafana =====
   # 网关本身即 exporter（GET /metrics，标准 Prometheus 0.0.4 文本格式、不鉴权）。
-  # 三者同处 compose 默认网络，用容器 DNS 名 tsm-hub:9070 抓取；
-  # 不要写 127.0.0.1:19070 —— 那是 Prometheus 容器自己的 loopback。
+  # 全链路只用 compose 默认网络的容器 DNS：tsm-hub:9070 / prometheus:9090 /
+  # alertmanager:9093 / dingtalk-bridge:8060；不要写 127.0.0.1:<宿主端口>，
+  # 那是容器自己的 loopback。
   # 也不要把 9070/19070 改绑 0.0.0.0：/metrics 不鉴权，会暴露 provider 名与请求量。
+  # 钉钉 webhook URL / 加签密钥只从 .env 插值注入 bridge 容器，绝不写进本文件。
   prometheus:
     image: prom/prometheus:v3.1.0
     container_name: tsm-hub-prometheus
@@ -200,6 +202,32 @@ services:
       - --web.enable-lifecycle
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9090/-/healthy"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # 告警路由（去重/分组/抑制/恢复通知）→ webhook 打到桥接器。
+  # UI 只绑回环 19093；规则、静默都可在 UI 操作，配置以仓库 yml 为准。
+  alertmanager:
+    image: prom/alertmanager:v0.28.1
+    container_name: tsm-hub-alertmanager
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:19093:9093"
+    volumes:
+      - ./deploy/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+      - --web.external-url=http://127.0.0.1:19093
+      # 本地单实例，关掉 cluster 端口（默认 9094）减少暴露面。
+      # Alertmanager 的 /-/reload 默认开启，没有 Prometheus 的 --web.enable-lifecycle flag。
+      - --cluster.listen-address=
+    depends_on:
+      - dingtalk-bridge
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9093/-/healthy"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -236,7 +264,33 @@ services:
       timeout: 5s
       retries: 3
 
+  # Alertmanager 的 webhook 协议 ≠ 钉钉机器人协议，且「加签」需要每次动态
+  # HMAC-SHA256，故用这个仅标准库的小桥做协议转换 + 加签。不发布宿主端口，
+  # 只有 compose 网络内 alertmanager 能访问；密钥由 .env 插值注入环境变量。
+  dingtalk-bridge:
+    image: python:3.11-slim
+    container_name: tsm-hub-dingtalk-bridge
+    restart: unless-stopped
+    volumes:
+      - ./deploy/dingtalk_bridge.py:/app/dingtalk_bridge.py:ro
+    environment:
+      DINGTALK_WEBHOOK_URL: ${DINGTALK_WEBHOOK_URL:-}
+      DINGTALK_WEBHOOK_SECRET: ${DINGTALK_WEBHOOK_SECRET:-}
+      DINGTALK_KEYWORD: ${DINGTALK_KEYWORD:-告警}
+      DINGTALK_DRY_RUN: ${DINGTALK_DRY_RUN:-0}
+      DINGTALK_HTTP_TIMEOUT: "10"
+      # 消息里的跳转链接；手机要能打开时改成宿主局域网地址。
+      PROMETHEUS_EXTERNAL_URL: "http://127.0.0.1:19092"
+      GRAFANA_EXTERNAL_URL: "http://127.0.0.1:19091"
+    command: ["python", "-u", "/app/dingtalk_bridge.py"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8060/healthz', timeout=3).read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
 volumes:
   mcp-memory-data:
   prometheus-data:
+  alertmanager-data:
   grafana-data:
