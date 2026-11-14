@@ -4,6 +4,9 @@
 # gauge 同理：latency_ms 是 EWMA，只在成功上报时更新、随 SQLite 快照恢复。
 # health.go 已给 Latency()/Health()/Snapshot() 加 15 分钟惰性 TTL（过期导出 0），
 # 判阈值前仍先用 increase() 确认近期确有成功样本，作为 TTL 之外的双保险。
+# 2026-11-14 补充：upstream_error_classes_total 与两个 HTTP 直方图是纯内存
+# counter，重启归零且不进 SQLite 快照，一律只用 increase()/rate()；
+# 分类指标与 upstream_errors_total 同源（同一处 ++），只是多一个 class 维度。
 groups:
   - name: tsm-hub
     rules:
@@ -75,6 +78,36 @@ groups:
         annotations:
           summary: "上游 {{ $labels.provider }} 近期成功请求延迟 EWMA 超过 30s"
           description: "近 15 分钟有成功样本且延迟 EWMA 持续 >30s，智能路由的延迟降权会生效。EWMA 有 15 分钟惰性 TTL，长期无成功请求的 provider 导出 0，不告警。"
+
+      # 401/403 通常意味着 Key 失效、权限变更或被上游 WAF 拒绝，需要人去改配置。
+      # 刻意不给 402（额度耗尽）/ 429（限流）设告警：免费池里这两种是常态，
+      # 每天重复推群只会稀释真正要处理的告警；趋势看面板「上游失败类别」。
+      - alert: TSMHubUpstreamAuthFailures
+        expr: sum by (provider) (increase(tsm_hub_upstream_error_classes_total{class="auth"}[10m])) >= 2
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "上游 {{ $labels.provider }} 出现认证/权限失败"
+          description: "近 10 分钟至少 2 次 401/403。核对 .env 里的 Key 是否过期或被改、provider 是否被 WAF 拦；402/429/5xx 请用 Grafana「上游失败类别」面板区分。"
+
+      # 首字节（首次 Flush）才是流式请求用户真正感知的等待；总耗时直方图会把
+      # 整个 SSE 生成过程算进去（可能几分钟），两者必须分开看。门控要求窗口内
+      # 至少 5 次流式请求，避免低流量下 rate() 全 0 或单点慢请求造成假告警。
+      - alert: TSMHubFirstByteSlow
+        expr: |
+          (
+            histogram_quantile(0.95,
+              sum by (le) (rate(tsm_hub_http_first_byte_seconds_bucket[10m]))) > 10
+          )
+          and
+          (sum(increase(tsm_hub_http_first_byte_seconds_count[10m])) >= 5)
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "流式请求首字节 p95 超过 10s"
+          description: "近 10 分钟至少 5 次流式请求，首字节（首次 Flush）p95 >10s，多为上游排队或首 token 前等待。用 Grafana「首字节延迟」面板按 route 定位，别与总耗时 p95 混淆。"
 
       # ===== 通知链路自监控 =====
       # 自指告警的局限：Alertmanager / 钉钉桥挂掉时，这两条也送不出去。

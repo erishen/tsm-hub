@@ -66,7 +66,7 @@ privacy-check:
 alert-check:
 	@python3 -S -m unittest discover -s deploy -p 'test_*.py'
 	@sh deploy/test_mcp_gateway_metrics.sh
-	@python3 -S -c "import json; d=json.load(open('deploy/grafana/dashboards/tsm-hub.json')); ids=[p['id'] for p in d['panels']]; assert len(ids)==len(set(ids)), 'duplicate panel ids'; assert d['version']>=7, 'dashboard version too old'"
+	@python3 -S -c "import json; d=json.load(open('deploy/grafana/dashboards/tsm-hub.json')); ids=[p['id'] for p in d['panels']]; assert len(ids)==len(set(ids)), 'duplicate panel ids'; assert d['version']>=8, 'dashboard version too old'; assert len(ids)>=39, 'missing v8 panels'; exprs=' '.join(t['expr'] for p in d['panels'] for t in p.get('targets',[])); assert all(m in exprs for m in ('tsm_hub_upstream_error_classes_total','tsm_hub_http_first_byte_seconds_bucket','flow=')), 'v8 metrics not wired into panels'"
 	@docker compose exec -T alertmanager amtool check-config /etc/alertmanager/alertmanager.yml
 	@docker compose exec -T prometheus promtool check config /etc/prometheus/prometheus.yml
 	@docker compose exec -T prometheus promtool check rules /etc/prometheus/prometheus.rules.yml

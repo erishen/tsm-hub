@@ -1,6 +1,8 @@
 package api
 
 import (
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -21,9 +23,10 @@ type parsedHistogram struct {
 // 桶单调不减、le=+Inf 等于 _count、每个组合的 HELP/TYPE 只有一份。
 func TestHTTPDurationHistogramFormat(t *testing.T) {
 	d := newRequestDurations()
-	d.observe("inference", "post", 30*time.Millisecond)
-	d.observe("inference", "post", 3*time.Second)
-	d.observe("admin", "get", 250*time.Millisecond)
+	d.observe("inference", "post", flowBuffered, 30*time.Millisecond)
+	d.observe("inference", "post", flowBuffered, 3*time.Second)
+	d.observe("inference", "post", flowStream, 45*time.Second)
+	d.observe("admin", "get", flowBuffered, 250*time.Millisecond)
 
 	var sb strings.Builder
 	writeDurationMetrics(&sb, d)
@@ -65,7 +68,7 @@ func TestHTTPDurationHistogramFormat(t *testing.T) {
 			}
 			labels[k] = v
 		}
-		key := labels["route"] + "/" + labels["method"]
+		key := labels["route"] + "/" + labels["method"] + "/" + labels["flow"]
 		g := groups[key]
 		if g == nil {
 			g = &parsedHistogram{seen: map[string]bool{}}
@@ -91,8 +94,8 @@ func TestHTTPDurationHistogramFormat(t *testing.T) {
 		}
 	}
 
-	if len(groups) != 2 {
-		t.Errorf("groups = %d, want 2", len(groups))
+	if len(groups) != 3 {
+		t.Errorf("groups = %d, want 3 (stream/buffered must be separate series)", len(groups))
 	}
 	for key, g := range groups {
 		if !g.seen["bucket"] || !g.seen["inf"] || !g.seen["sum"] || !g.seen["count"] {
@@ -113,12 +116,18 @@ func TestHTTPDurationHistogramFormat(t *testing.T) {
 			t.Errorf("%s largest finite bucket exceeds count", key)
 		}
 	}
-	if got := groups["inference/post"].count; got != 2 {
-		t.Errorf("inference/post count = %v, want 2", got)
+	if got := groups["inference/post/buffered"].count; got != 2 {
+		t.Errorf("inference/post/buffered count = %v, want 2", got)
 	}
 	// 30ms + 3s = 3.03s（含微小误差）
-	if got := groups["inference/post"].sum; got < 3.02 || got > 3.04 {
-		t.Errorf("inference/post sum = %v, want ~3.03", got)
+	if got := groups["inference/post/buffered"].sum; got < 3.02 || got > 3.04 {
+		t.Errorf("inference/post/buffered sum = %v, want ~3.03", got)
+	}
+	if got := groups["inference/post/stream"].count; got != 1 {
+		t.Errorf("inference/post/stream count = %v, want 1", got)
+	}
+	if got := groups["inference/post/stream"].sum; got < 44.9 || got > 45.1 {
+		t.Errorf("inference/post/stream sum = %v, want ~45", got)
 	}
 }
 
@@ -166,7 +175,7 @@ func TestHTTPDurationClassification(t *testing.T) {
 // TestHTTPDurationNilSafe 覆盖最小 Server（&Server{}）与空观测两种情况。
 func TestHTTPDurationNilSafe(t *testing.T) {
 	var nilD *requestDurations
-	nilD.observe("other", "other", time.Second)
+	nilD.observe("other", "other", flowStream, time.Second)
 	if got := nilD.snapshot(); len(got) != 0 {
 		t.Errorf("nil snapshot length = %d, want 0", len(got))
 	}
@@ -180,6 +189,86 @@ func TestHTTPDurationNilSafe(t *testing.T) {
 	}
 }
 
+// 首字节直方图是独立 family：只有流式样本，且不带 flow 标签（避免无意义分裂）。
+func TestFirstByteHistogramSeparateFamily(t *testing.T) {
+	d := newFirstByteDurations()
+	d.observe("inference", "post", flowStream, 120*time.Millisecond)
+	d.observe("inference", "post", flowStream, 900*time.Millisecond)
+
+	var sb strings.Builder
+	writeDurationMetrics(&sb, d)
+	body := sb.String()
+	if strings.Contains(body, httpDurationMetric) {
+		t.Error("first-byte histogram must not emit the total-duration metric name")
+	}
+	if got := strings.Count(body, "# TYPE "+firstByteMetric+" histogram"); got != 1 {
+		t.Errorf("TYPE count = %d, want 1", got)
+	}
+	if strings.Contains(body, "flow=") {
+		t.Error("first-byte histogram must not carry a flow label")
+	}
+	if got := strings.Count(body, firstByteMetric+"_count{"); got != 1 {
+		t.Errorf("count series = %d, want 1 (flow must not split the sample)", got)
+	}
+	if !strings.Contains(body, firstByteMetric+`_count{route="inference",method="post"} 2`) {
+		t.Error("missing expected first-byte count sample")
+	}
+	if !strings.Contains(body, firstByteMetric+`_bucket{route="inference",method="post",le="+Inf"} 2`) {
+		t.Error("le=+Inf bucket must equal count")
+	}
+}
+
+// 走完整 withLogging：SSE 请求应同时产出 flow=stream 的总耗时样本和一条
+// 首字节样本；普通请求只产出 flow=buffered，且不污染首字节直方图。
+func TestWithLoggingFlowAndFirstByte(t *testing.T) {
+	s := &Server{
+		startAt:      time.Now(),
+		statusCounts: map[string]int64{},
+		denyCounts:   map[string]int64{},
+		durations:    newRequestDurations(),
+		firstBytes:   newFirstByteDurations(),
+		logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+	streamHandler := s.withLogging(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		time.Sleep(5 * time.Millisecond)
+		flusher := w.(http.Flusher)
+		_, _ = w.Write([]byte("data: first\n\n"))
+		flusher.Flush()
+		flusher.Flush() // 多次 Flush 只算一次首字节
+	})
+	bufferedHandler := s.withLogging(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	})
+	req := func() *http.Request { return httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil) }
+	streamHandler(httptest.NewRecorder(), req())
+	bufferedHandler(httptest.NewRecorder(), req())
+
+	dSnap := s.durations.snapshot()
+	if len(dSnap) != 2 {
+		t.Fatalf("duration series = %d, want 2 (stream + buffered)", len(dSnap))
+	}
+	streamKey := durationKey{route: "inference", method: "post", flow: flowStream}
+	bufferedKey := durationKey{route: "inference", method: "post", flow: flowBuffered}
+	if dSnap[streamKey].count != 1 || dSnap[bufferedKey].count != 1 {
+		t.Errorf("flow split wrong: stream=%d buffered=%d", dSnap[streamKey].count, dSnap[bufferedKey].count)
+	}
+
+	fSnap := s.firstBytes.snapshot()
+	if len(fSnap) != 1 {
+		t.Fatalf("first-byte series = %d, want 1", len(fSnap))
+	}
+	fb := fSnap[durationKey{route: "inference", method: "post"}]
+	if fb.count != 1 {
+		t.Errorf("first-byte count = %d, want 1", fb.count)
+	}
+	if fb.sum < 0 || fb.sum > float64(dSnap[streamKey].sum) {
+		t.Errorf("first-byte sum %v out of [0, total %v]", fb.sum, dSnap[streamKey].sum)
+	}
+}
+
 // TestMetricsHistogramEndpointPrivacy 走完整 /metrics，确认真实端点里
 // 不出现原始路径、密钥样式片段或客户端自定义方法。
 func TestMetricsHistogramEndpointPrivacy(t *testing.T) {
@@ -187,7 +276,7 @@ func TestMetricsHistogramEndpointPrivacy(t *testing.T) {
 	defer e.server.Close()
 
 	d := newRequestDurations()
-	d.observe(metricRoute("/api/admin/providers/sk-secret/reveal"), metricMethod("PROPFIND"), time.Second)
+	d.observe(metricRoute("/api/admin/providers/sk-secret/reveal"), metricMethod("PROPFIND"), flowBuffered, time.Second)
 	s := &Server{
 		store:        e.store,
 		startAt:      time.Now(),

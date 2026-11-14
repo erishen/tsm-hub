@@ -18,12 +18,15 @@ import (
 //   - tsm_hub_uptime_seconds           进程存活秒数（gauge）
 //   - tsm_hub_http_requests_total{status}  网关 HTTP 请求数（counter）
 //   - tsm_hub_http_request_duration_seconds  请求耗时直方图（histogram，
-//     {route,method,le}；route/method 为代码内白名单枚举，可算 p95/p99）
+//     {route,method,flow,le}；route/method/flow 为代码内白名单枚举，
+//     flow=stream|buffered 可把 SSE 长连接从 p95 里剔出去）
 //   - tsm_hub_quota_denials_total{code}    被限流/额度拒绝的请求数（counter）
 //   - tsm_hub_upstream_healthy{provider}   上游是否可用 1/0（gauge）
 //   - tsm_hub_upstream_requests_total{provider} 上游尝试次数（counter）
 //   - tsm_hub_upstream_errors_total{provider}   上游失败计数（counter）
+//   - tsm_hub_upstream_error_classes_total{provider,class} 计入健康的失败按类别拆分（counter）
 //   - tsm_hub_upstream_latency_ms{provider}     上游延迟 EWMA（gauge）
+//   - tsm_hub_http_first_byte_seconds  首字节（首次 Flush）耗时直方图（histogram）
 //
 // 扩展指标（全部复用已有内存聚合，不新增状态）：
 //   - tsm_hub_upstream_half_open / consecutive_failures /
@@ -65,6 +68,13 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(&b, "tsm_hub_http_requests_total{status=%q} %d\n", st, statusCounts[st])
 	}
 	writeDurationMetrics(&b, s.durations)
+	// 最小 Server（单测 / 冷启动）没有初始化 firstBytes：补一个空直方图，
+	// 保证 family 声明仍然只有一份，且不会把总耗时 HELP/TYPE 重复输出。
+	firstBytes := s.firstBytes
+	if firstBytes == nil {
+		firstBytes = newFirstByteDurations()
+	}
+	writeDurationMetrics(&b, firstBytes)
 
 	fmt.Fprintf(&b, "# HELP tsm_hub_quota_denials_total Requests denied by quota or rate limit.\n")
 	fmt.Fprintf(&b, "# TYPE tsm_hub_quota_denials_total counter\n")
@@ -105,6 +115,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now()
 	s.writeHealthDetailMetrics(&b, providerIDs, healthByID, now)
+	s.writeErrorClassMetrics(&b, providerIDs)
 	s.writeUsageMetrics(&b, providerIDs)
 	s.writeSubsystemMetrics(&b, providerIDs)
 
@@ -186,6 +197,29 @@ func (s *Server) writeHealthDetailMetrics(b *strings.Builder, ids []string, heal
 	writeFamily(b, "tsm_hub_upstream_consecutive_failures", "Effective consecutive failures (decays after the failure TTL).", "gauge", failures)
 	writeFamily(b, "tsm_hub_upstream_cooldown_remaining_seconds", "Seconds until breaker or throttle cooldown expires (0 when idle).", "gauge", cooldown)
 	writeFamily(b, "tsm_hub_upstream_last_success_timestamp_seconds", "Unix seconds of last successful upstream call (0 when none).", "gauge", lastOK)
+}
+
+// writeErrorClassMetrics 把「计入健康状态机的失败」按固定类别拆分。
+// 数据源与 tsm_hub_upstream_errors_total 完全同源（同一处 ++），只是多一个
+// class 维度；errMsg 正文、URL、Key 片段一律不进标签。
+// 每个 provider × 每个类别都补 0 值序列，让 increase() 在冷启动/类别未出现时
+// 也能得到干净的 0 而不是 absent（标签基数 = provider 数 × 8，严格有上界）。
+func (s *Server) writeErrorClassMetrics(b *strings.Builder, ids []string) {
+	var classes map[string]map[string]uint64
+	if s.health != nil {
+		classes = s.health.ErrorClasses()
+	}
+	enums := router.UpstreamErrorClasses()
+	lines := make([]string, 0, len(ids)*len(enums))
+	for _, id := range ids {
+		for _, class := range enums {
+			lines = append(lines, metricLine("tsm_hub_upstream_error_classes_total",
+				providerLabel(id)+fmt.Sprintf(",class=%q", class), classes[id][class]))
+		}
+	}
+	writeFamily(b, "tsm_hub_upstream_error_classes_total",
+		"Upstream failures counted in the health tracker by fixed reason class (quota/auth/rate_limit/model_not_found/bad_request/server_error/network/other).",
+		"counter", lines)
 }
 
 // 代码内有限枚举：任何不在表内的动态值都折叠成 other，防止高基数/注入。

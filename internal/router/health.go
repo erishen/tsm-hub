@@ -64,6 +64,10 @@ type Tracker struct {
 	failureTTL time.Duration // 连续失败计数有效期，过期后惰性归零
 	latencyTTL time.Duration // 延迟 EWMA 有效期，过期后惰性导出 0
 	persistFn  func()        // 状态变更后的持久化回调（由调用方注入）
+	// classes 是「每次计入健康的失败」按类别的累计计数。只在进程内存里维护，
+	// 不进 SQLite 快照：counter 重启归零由 Prometheus 的 rate()/increase() 处理，
+	// 与 tsm_hub_http_requests_total 口径一致。键为 provider ID，值是类别枚举。
+	classes map[string]map[string]uint64
 }
 
 // NewTracker 创建健康跟踪器。
@@ -81,6 +85,7 @@ func NewTracker(failThreshold int, cooldownSec int) *Tracker {
 		deadMin:    3 * failThreshold,
 		failureTTL: defaultFailureTTL,
 		latencyTTL: defaultLatencyTTL,
+		classes:    map[string]map[string]uint64{},
 	}
 }
 
@@ -217,6 +222,9 @@ func (t *Tracker) ReportFailure(id, errMsg string) {
 	s.lastFail = now
 	s.requests++
 	s.errors++
+	// 与 errors 同源计数：每次计入健康的失败，按其类别 +1。
+	// errMsg 只用于分类，绝不进入指标标签（/metrics 未鉴权）。
+	t.addClassLocked(id, classifyUpstreamError(errMsg))
 	if s.failures >= t.failMax {
 		cool := t.cool
 		if s.lastOK.IsZero() && s.failures >= t.deadMin {
@@ -249,6 +257,8 @@ func (t *Tracker) ReportThrottle(id, errMsg string, cool time.Duration) {
 	s.lastFail = now
 	s.requests++
 	s.errors++
+	// ReportThrottle 专用于上游 429，直接归到 rate_limit，不依赖错误文本解析。
+	t.addClassLocked(id, errClassRateLimit)
 	until := now.Add(cool)
 	if until.After(s.downUntil) {
 		s.downUntil = until
@@ -267,6 +277,37 @@ func (t *Tracker) Throttled(id string) bool {
 		return false
 	}
 	return time.Now().Before(s.throttleUntil)
+}
+
+// addClassLocked 累加一次失败类别计数。调用方必须已持有 t.mu 写锁。
+// 只接受 classifyUpstreamError / 固定常量返回的枚举，不接收外部字符串。
+func (t *Tracker) addClassLocked(id, class string) {
+	if t.classes == nil {
+		t.classes = map[string]map[string]uint64{}
+	}
+	m := t.classes[id]
+	if m == nil {
+		m = map[string]uint64{}
+		t.classes[id] = m
+	}
+	m[class]++
+}
+
+// ErrorClasses 返回 provider -> 失败类别 -> 累计次数的深拷贝。
+// 供 /metrics 导出；读取方必须自行按「当前已配置 provider」白名单过滤，
+// 不要把历史/已删除的 provider 名写进未鉴权端点的标签。
+func (t *Tracker) ErrorClasses() map[string]map[string]uint64 {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	out := make(map[string]map[string]uint64, len(t.classes))
+	for id, m := range t.classes {
+		cp := make(map[string]uint64, len(m))
+		for class, n := range m {
+			cp[class] = n
+		}
+		out[id] = cp
+	}
+	return out
 }
 
 // Snapshot 导出全部健康状态，供管理台展示。

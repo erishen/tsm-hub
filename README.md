@@ -473,7 +473,7 @@ Additional probe endpoints (no auth required):
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/healthz` | Liveness probe: `status`/`uptime_s`/`requests` + `degraded`/`providers[]` upstream health |
-| GET | `/metrics` | Prometheus text format: HTTP/quota counters, **HTTP duration histogram**, upstream health and latency, cumulative token/cost usage, health state machine, MCP/A2A/runtime snapshots |
+| GET | `/metrics` | Prometheus text format: HTTP/quota counters, **HTTP total-duration (split by flow) and streaming first-byte histograms**, upstream health/latency/**failure classes**, cumulative token/cost usage, health state machine, MCP/A2A/runtime snapshots |
 
 CLI equivalent for issuing a key:
 
@@ -617,7 +617,7 @@ docker compose exec grafana grafana cli admin reset-admin-password '<new-passwor
 
 The dashboard is the **default home dashboard** (via
 `GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH`), so logging in lands on it directly.
-It has **35 panels** (v7):
+It has **39 panels** (v8):
 
 | Panels | Coverage |
 |--------|----------|
@@ -626,6 +626,7 @@ It has **35 panels** (v7):
 | 21–25 | Alertmanager `up`, DingTalk delivery failures, active alerts, active silences, delivery vs rule-firing trend |
 | **26–29** | **HTTP duration histogram p50/p95/p99, request rate by route/method, blackbox probe success, probe duration** |
 | **30–35** | **MCP bridge up count, probe successes, active sessions, 5xx count, plus bridge session/slot/inflight and request/error rate trends** |
+| **36–39** | **Upstream failure classes (quota / auth / rate_limit / …), streaming vs buffered request rate, first-byte p50/p95/p99, and HTTP total-duration p95 split by flow** |
 
 There are four variables at the top (`Provider`, `Scene`, `MCP 桥`, `Route`;
 multi-select, All by default), plus Prometheus / Alertmanager UI shortcuts.
@@ -641,13 +642,13 @@ the bridges, probe and DingTalk bridge publish no host port at all.
 | File | Purpose |
 |------|---------|
 | `deploy/prometheus.yml` | scrape config (15s) + `rule_files` + `alerting.alertmanagers`; 7 jobs: `tsm-hub` / `prometheus` / `alertmanager` / `mcp-bridges` / `blackbox-exporter` / `blackbox-healthz` / `blackbox-mcp`. The `tsm-hub` job has guards (`sample_limit: 5000`, `label_limit: 32`, `label_value_length_limit: 128`) and a metric-name allowlist; new jobs have their own keep rules |
-| `deploy/prometheus.rules.yml` | **10 alerts**: 5 business alerts (target down, upstream error rate >30% with >=5 requests / 5m, provider removed, quota denials, EWMA latency >30s gated on fresh successes) + 2 notification-pipeline self-checks + 3 blackbox checks (`/healthz` failure, MCP bridge `/health` failure, probe itself down) |
+| `deploy/prometheus.rules.yml` | **12 alerts**: 7 business alerts (target down, upstream error rate >30% with >=5 requests / 5m, provider removed, quota denials, EWMA latency >30s gated on fresh successes, **401/403 auth failures**, **streaming first-byte p95 >10s**) + 2 notification-pipeline self-checks + 3 blackbox checks (`/healthz` failure, MCP bridge `/health` failure, probe itself down). 402 quota exhaustion / 429 throttling are routine on free tiers, so they are dashboard-only, deliberately not alerts |
 | `deploy/alertmanager.yml` | grouping / dedup / inhibition / resolved notices; webhook receiver points at `dingtalk-bridge:8060` |
 | `deploy/blackbox.yml` | two probe modules: `http_healthz` (requires `status=ok` in `/healthz` JSON) and `http_2xx` (MCP bridge `/health`) |
 | `deploy/dingtalk_bridge.py` | stdlib only: Alertmanager webhook -> DingTalk markdown + HMAC signing; see below |
 | `deploy/mcp_gateway.c` | `GET /metrics` for the C bridges, emitting `mcp_gateway_*`; both bridge Dockerfiles share this source |
 | `deploy/grafana/provisioning/` | Prometheus datasource (`uid: prometheus`) + dashboard provider |
-| `deploy/grafana/dashboards/tsm-hub.json` | 35 panels (v7), four variables; cost panel uses its own 24h window |
+| `deploy/grafana/dashboards/tsm-hub.json` | 39 panels (v8), four variables; cost panel uses its own 24h window |
 
 **Metric groups** (all names below omit the common `tsm_hub_` prefix; every group reuses
 existing in-memory aggregates — no new state, no business-path changes):
@@ -655,7 +656,8 @@ existing in-memory aggregates — no new state, no business-path changes):
 | Group | Metrics | Source |
 |-------|---------|--------|
 | Core 7 | `uptime_seconds`, `http_requests_total{status}`, `quota_denials_total{code}`, `upstream_{healthy,requests_total,errors_total,latency_ms}{provider}` | `Server` counters + `router.Tracker.Snapshot()` |
-| HTTP duration histogram | `http_request_duration_seconds_{bucket,sum,count}{route,method,le}` | the `elapsed` value already computed in `withLogging`; 13 buckets (10ms → 120s) + `+Inf`, no new instrumentation |
+| HTTP duration histograms | `http_request_duration_seconds_{bucket,sum,count}{route,method,flow,le}`, `http_first_byte_seconds_{bucket,sum,count}{route,method,le}` | the `elapsed` value already computed in `withLogging` plus `statusRecorder`'s first `Flush()` timestamp; 13 buckets (10ms → 120s) + `+Inf`, no new instrumentation. `flow=stream\|buffered` separates SSE long-lived connections from one-shot responses; the first-byte histogram only has streaming samples |
+| Upstream failure classes | `upstream_error_classes_total{provider,class}` | `router.Tracker` increments this at the same place as `errors_total`; `class` is one of 8 fixed enums (quota / auth / rate_limit / model_not_found / bad_request / server_error / network / other), error bodies never become labels |
 | Health state machine | `upstream_{half_open,consecutive_failures,cooldown_remaining_seconds,last_success_timestamp_seconds}{provider}` | Same `ProviderHealth` used by the admin Providers page |
 | Usage / cost | `usage_{requests_total,tokens_total,cost_usd_total,errors_total,failovers_total,avg_latency_ms}{provider}`, `usage_scene_{requests_total,tokens_total}{scene}`, `failover_candidates_total{provider}`, `tool_calls_total{source}` | `quota.Recorder`, replayed from `data/usage/*.jsonl` at startup (survives restarts) |
 | Subsystems / runtime | `mcp_servers{state}`, `mcp_tools`, `a2a_{tasks_active,capabilities,peer_mode}`, `config_entities{entity}`, `runtime_{goroutines,heap_alloc_bytes,cpu_cores}` | `Proxy.MCPStatuses()`, `A2A.AdminOverview()`, `store.List*()`, `runtime.MemStats` |
@@ -669,22 +671,30 @@ Two more metric sets **do not use the `tsm_hub_` prefix**:
 
 Caveats:
 
-- Always query counters with `rate()` / `increase()`, not raw values. HTTP/quota counters
-  reset on restart; upstream counters may be restored from the SQLite health snapshot;
-  `usage_*` is replayed from `data/usage/*.jsonl`, so the cost panel plots the cumulative
-  value directly.
-- **Two different "latency" metrics**: `upstream_latency_ms` is an **EWMA gauge** for a
-  single upstream attempt and has no p95/p99 of its own; `http_request_duration_seconds`
-  is a **histogram of whole HTTP requests**, queried with
-  `histogram_quantile(0.95, sum by (le) (rate(..._bucket[10m])))`. The histogram only
-  covers routes wrapped by `withLogging` (`/v1/*`, `/api/admin/*`, `/a2a`);
-  `/healthz`, `/metrics`, `/peer/*` and static assets are deliberately excluded so
-  a `/metrics` scrape cannot inflate its own counters. On a cold start with no business
-  traffic the family emits HELP/TYPE but no samples, so a blank panel is expected.
-  If the counters do not change at all inside the window, `rate()` is 0 everywhere and
-  `histogram_quantile()` returns **NaN** — normal Prometheus behaviour under low traffic,
-  verified to recover as soon as requests keep arriving (not a broken instrumentation).
-  Long SSE streams legitimately push p99 up.
+- Always query counters with `rate()` / `increase()`, not raw values. HTTP/quota counters,
+  **both histograms and `upstream_error_classes_total`** are in-memory and reset on restart
+  (not part of the SQLite health snapshot); `upstream_requests_total` / `errors_total` may
+  be restored from that snapshot; `usage_*` is replayed from `data/usage/*.jsonl`, so the
+  cost panel plots the cumulative value directly. Failure classes share the exact `++` site
+  with `errors_total`, so every failure counted in the health tracker lands in exactly one
+  class; model-404 (`ModelFault`) and client aborts are excluded from health tracking by
+  design and therefore do not appear here either.
+- **Three different "latency" metrics**: `upstream_latency_ms` is an **EWMA gauge** for a
+  single upstream attempt (no p95/p99 of its own); `http_request_duration_seconds` is a
+  **histogram of whole HTTP requests**; `http_first_byte_seconds` is the histogram up to
+  the **first `Flush()` (first byte)** of a streaming response — what users actually wait
+  for before the first token. All histograms are queried with
+  `histogram_quantile(0.95, sum by (le) (rate(..._bucket[10m])))`. They only cover routes
+  wrapped by `withLogging` (`/v1/*`, `/api/admin/*`, `/a2a`); `/healthz`, `/metrics`,
+  `/peer/*` and static assets are deliberately excluded so a `/metrics` scrape cannot
+  inflate its own counters. Total duration carries a `flow` label: SSE includes the whole
+  stream generation (minutes), so filter on `flow="buffered"` for ordinary-request p95;
+  panel 39 draws both lines. The first-byte histogram has streaming samples only, because
+  buffered responses never call `Flush()`. On a cold start with no business traffic the
+  families emit HELP/TYPE but no samples, so a blank panel is expected. If counters do not
+  change at all inside the window, `rate()` is 0 everywhere and `histogram_quantile()`
+  returns **NaN** — normal Prometheus behaviour under low traffic, verified to recover as
+  soon as requests keep arriving (not a broken instrumentation).
 - The EWMA is updated **only on a successful upstream call**. `internal/router/health.go`
   applies a **15-minute lazy TTL**: `Latency()` / `Health()` / `Snapshot()` return 0 once
   a provider has had no success for 15m, so a stale value restored from the SQLite health
@@ -702,8 +712,11 @@ Caveats:
   latency and cost magnitude. Keep it on loopback; never rebind 9070/19070 to `0.0.0.0`.
   New labels may only be IDs from the existing provider list or a finite in-code enum
   (`scene` / `source` / `state` / `mode` / `entity` / `kind` / `status` / `code` /
-  `route` / `method` / `le`); API keys, `key_id`, raw URL paths, model/tool names,
-  session/task IDs, upstream error text and client IPs are forbidden. `metricRoute()`
+  `route` / `method` / `flow` / `class` / `le`); API keys, `key_id`, raw URL paths,
+  model/tool names, session/task IDs, upstream error text and client IPs are forbidden.
+  `class` comes only from `classifyUpstreamError()` parsing the fixed `upstream <3-digit
+  status>` prefix — the error body (which may contain URLs or key fragments) is never
+  exported; `flow` is only ever `stream` or `buffered`. `metricRoute()`
   folds all admin subpaths into `admin` and all `/v1/*` into `inference`; `metricMethod()`
   lowercases and allows only 7 standard methods, everything else becomes `other`.
   `internal/api/metrics_test.go` checks every label name and value against that
@@ -728,7 +741,7 @@ Prometheus (rules) -> alertmanager:9093 -> dingtalk-bridge:8060 -> DingTalk grou
 Alertmanager's webhook payload is not a DingTalk message, and DingTalk's "signed"
 security mode requires a fresh `timestamp` + `HMAC-SHA256(secret, ts+"\n"+secret)`
 on every request. `deploy/dingtalk_bridge.py` (stdlib only, no published host port)
-does both. Of the 10 alerts, `TSMHubAlertmanagerDown` and
+does both. Of the 12 alerts, `TSMHubAlertmanagerDown` and
 `TSMHubDingtalkNotificationsFailing` are **self-referential**: when the notification
 pipeline is down they cannot be delivered either — dashboard panels 21–25 exist for
 exactly that case. The 3 blackbox alerts are likewise undeliverable if the probe
@@ -781,6 +794,8 @@ repeats unresolved ones every 4 hours.
 | `probe_success` all 0 or absent | check `up{job="blackbox-exporter"}` first: 0 means the probe died, 1 means a target is really unreachable |
 | MCP bridge panels (30–35) blank | bridge images still run the old C binary without `GET /metrics`; run `docker compose build mcp-fs mcp-git` then `docker compose up -d` (not covered by `make alert-check`) |
 | HTTP p95 panel blank | no business request has passed through `withLogging` since restart; the histogram family has HELP/TYPE but no samples. Send one `/v1/models` request |
+| First-byte / `flow=stream` panels blank | only responses that called `Flush()` produce first-byte samples and `flow="stream"` series; send a `/v1/chat/completions` with `"stream":true`, or check that the client did not downgrade to buffered mode |
+| All failure classes are 0 | `upstream_error_classes_total` only counts failures tracked by the health state machine; model-404 (`ModelFault`) and client aborts (`ClientAbort`) are excluded by design — check quota denials / usage errors instead |
 
 **Privacy boundary**: URL / secret are interpolated from `.env` into the bridge
 container only — never into yml, dashboards or commits. The bridge logs just

@@ -26,7 +26,8 @@ scrape_configs:
     scheme: http
     # /metrics 不鉴权。扩指标时先守住三条工程护栏，避免误把 key/URL/ID
     # 或高基数值写进标签，把未鉴权端点的暴露面连带放大。
-    # 实测约 200 条序列；5000 留足余量，超限时整个 scrape 失败而不是静默截断。
+    # 实测约 500 条序列（含 provider×8 个失败类别、按 flow 拆分的直方图）；
+    # 5000 留足余量，超限时整个 scrape 失败而不是静默截断。
     sample_limit: 5000
     label_limit: 32
     label_value_length_limit: 128

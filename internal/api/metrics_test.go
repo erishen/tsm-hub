@@ -19,6 +19,7 @@ var extendedMetricFamilies = []string{
 	"tsm_hub_upstream_consecutive_failures",
 	"tsm_hub_upstream_cooldown_remaining_seconds",
 	"tsm_hub_upstream_last_success_timestamp_seconds",
+	"tsm_hub_upstream_error_classes_total",
 	"tsm_hub_usage_requests_total",
 	"tsm_hub_usage_tokens_total",
 	"tsm_hub_usage_cost_usd_total",
@@ -45,8 +46,9 @@ var extendedMetricFamilies = []string{
 var allowedMetricLabels = map[string]bool{
 	"provider": true, "status": true, "code": true, "kind": true,
 	"scene": true, "source": true, "state": true, "mode": true, "entity": true,
-	// HTTP 耗时直方图：route/method 由 metricRoute/metricMethod 白名单折叠，
-	// le 是 Prometheus histogram 的固有标签（数值或 +Inf）。
+	// class 是 router.UpstreamErrorClasses() 的固定枚举；flow 是
+	// stream/buffered 二值；route/method 由白名单折叠；le 是直方图固有标签。
+	"class": true, "flow": true,
 	"route": true, "method": true, "le": true,
 }
 
@@ -79,6 +81,17 @@ func TestMetricsExtendedFamilies(t *testing.T) {
 		}
 		if !found {
 			t.Errorf("family %q has no sample", name)
+		}
+	}
+
+	// 两个直方图必须是各自独立的 family，HELP/TYPE 各一份；最小 Server
+	// 没初始化 firstBytes 时也不能重复输出总耗时 family（见 handleMetrics 兜底）。
+	for _, name := range []string{httpDurationMetric, firstByteMetric} {
+		if got := strings.Count(body, "# TYPE "+name+" histogram"); got != 1 {
+			t.Errorf("histogram %q TYPE count = %d, want 1", name, got)
+		}
+		if got := strings.Count(body, "# HELP "+name+" "); got != 1 {
+			t.Errorf("histogram %q HELP count = %d, want 1", name, got)
 		}
 	}
 
@@ -209,6 +222,54 @@ func TestMetricsHelperClassification(t *testing.T) {
 		if got := toolSource(in); got != want {
 			t.Errorf("toolSource(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// 错误分类必须是「固定枚举 × 当前配置 provider」，且绝不能把错误正文带出来。
+func TestMetricsErrorClasses(t *testing.T) {
+	tr := router.NewTracker(3, 60)
+	tr.ReportFailure("alpha", "upstream 402: sk-live-secret https://upstream.example.com/v1")
+	tr.ReportThrottle("alpha", "upstream 429: throttled", time.Second)
+	tr.ReportFailure("deleted-provider", "upstream 500: boom")
+
+	s := &Server{health: tr}
+	var sb strings.Builder
+	// 白名单只有 alpha：deleted-provider 的计数不得出现。
+	s.writeErrorClassMetrics(&sb, []string{"alpha"})
+	body := sb.String()
+
+	enums := router.UpstreamErrorClasses()
+	if got := strings.Count(body, "tsm_hub_upstream_error_classes_total{"); got != len(enums) {
+		t.Errorf("samples = %d, want %d (one per fixed class)", got, len(enums))
+	}
+	for _, c := range enums {
+		if !strings.Contains(body, `class="`+c+`"`) {
+			t.Errorf("missing zero/complete series for class %q", c)
+		}
+	}
+	for _, want := range []string{
+		`tsm_hub_upstream_error_classes_total{provider="alpha",class="quota"} 1`,
+		`tsm_hub_upstream_error_classes_total{provider="alpha",class="rate_limit"} 1`,
+		`tsm_hub_upstream_error_classes_total{provider="alpha",class="server_error"} 0`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("missing expected sample %q", want)
+		}
+	}
+	for _, forbidden := range []string{"sk-live-secret", "https://", "deleted-provider", "boom", "throttled"} {
+		if strings.Contains(body, forbidden) {
+			t.Errorf("error class metrics leaked %q", forbidden)
+		}
+	}
+	if got := strings.Count(body, "# TYPE tsm_hub_upstream_error_classes_total counter"); got != 1 {
+		t.Errorf("TYPE count = %d, want 1", got)
+	}
+
+	// health 为 nil 时仍要输出完整 0 值矩阵，不能 panic 或整族消失。
+	var empty strings.Builder
+	(&Server{}).writeErrorClassMetrics(&empty, []string{"alpha"})
+	if got := strings.Count(empty.String(), "tsm_hub_upstream_error_classes_total{"); got != len(enums) {
+		t.Errorf("nil tracker samples = %d, want %d", got, len(enums))
 	}
 }
 

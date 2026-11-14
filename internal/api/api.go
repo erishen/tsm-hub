@@ -51,7 +51,9 @@ type Server struct {
 	adminHandler http.Handler
 
 	// HTTP 耗时直方图（独立锁，避免与 mu 竞争）；route/method 标签白名单见 http_duration.go。
-	durations *requestDurations
+	// durations 带 flow=stream|buffered 维度，firstBytes 只记流式请求的首次 Flush 耗时。
+	durations  *requestDurations
+	firstBytes *requestDurations
 
 	// a2a 是可选的 A2A/peer 面（未配凭据时为 nil，整面不挂载）。
 	a2a *a2a.Server
@@ -94,6 +96,7 @@ func New(o Options) *Server {
 		statusCounts: map[string]int64{},
 		denyCounts:   map[string]int64{},
 		durations:    newRequestDurations(),
+		firstBytes:   newFirstByteDurations(),
 
 		loginFails: map[string]loginFail{},
 		revealMap:  map[string]keyReveal{},
@@ -322,9 +325,18 @@ func (s *Server) withLogging(next http.HandlerFunc) http.HandlerFunc {
 		s.requests++
 		s.statusCounts[fmt.Sprintf("%d", rec.code)]++
 		s.mu.Unlock()
-		// 复用同一次 elapsed：直方图只按白名单枚举的 route/method 聚合，
+		route, method := metricRoute(r.URL.Path), metricMethod(r.Method)
+		// 复用同一次 elapsed：直方图只按白名单枚举的 route/method/flow 聚合，
 		// 原始 URL（含 query / 技能名 / session id）绝不进标签。
-		s.durations.observe(metricRoute(r.URL.Path), metricMethod(r.Method), elapsed)
+		// SSE 会在 WriteHeader 后立刻 Flush，长连接耗时可能达数分钟；
+		// 用 flow 把它们与一次性响应分开，p95 才不会被流式请求整体拉高。
+		flow := flowBuffered
+		if !rec.firstByteAt.IsZero() {
+			flow = flowStream
+			// 首次 Flush 的时间点在 next() 内部记录，相对 start 即首字节耗时。
+			s.firstBytes.observe(route, method, flow, rec.firstByteAt.Sub(start))
+		}
+		s.durations.observe(route, method, flow, elapsed)
 		id, _ := r.Context().Value(reqIDKey).(string)
 		s.logger.Info("request",
 			"request_id", id,
@@ -339,12 +351,20 @@ func (s *Server) withLogging(next http.HandlerFunc) http.HandlerFunc {
 type statusRecorder struct {
 	http.ResponseWriter
 	code int
+	// firstByteAt 是首次 Flush 的时间；零值表示本请求从未 Flush（非流式）。
+	// 只在 withLogging 这一个 goroutine 里读写，无需加锁。
+	firstByteAt time.Time
 }
 
 func (sr *statusRecorder) WriteHeader(code int) { sr.code = code; sr.ResponseWriter.WriteHeader(code) }
 
-// Flush 透传给底层，保证 SSE 不被中间件缓冲。
+// Flush 透传给底层，保证 SSE 不被中间件缓冲；顺带记下首次刷出字节的时刻。
+// 流式代理（proxy.streamResponse / agent 循环）都经 w.(http.Flusher) 调到这里，
+// 因此不需要在业务代码里新增任何埋点。
 func (sr *statusRecorder) Flush() {
+	if sr.firstByteAt.IsZero() {
+		sr.firstByteAt = time.Now()
+	}
 	if f, ok := sr.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
 	}

@@ -1,6 +1,6 @@
 # tsm-hub TODO
 
-> 最后更新：2026-10-18
+> 最后更新：2026-11-14
 > 项目状态：v1.0 稳定版，核心功能全部完成
 
 ## v1.0 已完成 ✅
@@ -67,7 +67,8 @@
 - [x] 审计日志 SQLite（操作记录）
 - [x] 请求体超限保护（413）、panic 兜底（500 + Request ID）
 - [x] 4xx 不误熔断、上游错误响应 gzip 解压、JSON 错误格式化
-- [x] Prometheus `/metrics`：HTTP 状态、配额拒绝、上游健康/请求/错误/延迟 EWMA
+- [x] Prometheus `/metrics`：HTTP 状态、配额拒绝、上游健康/请求/错误/延迟 EWMA、
+      按固定枚举分类的上游失败、HTTP 总耗时（按 flow 拆分）与流式首字节直方图
 
 ### 工程质量
 
@@ -112,7 +113,10 @@
 - [ ] 按 Key 设置允许的时间窗（如仅工作日 9:00–18:00）
 - [ ] 缓存相同 prompt 的响应（按 Key 可选开启，注意隐私）
 - [ ] 管理台支持多语言（当前中文）
-- [ ] `/metrics` 补充延迟分位直方图（当前 EWMA gauge）
+- [x] `/metrics` 补充延迟分位直方图（2026-11-14 完成）：HTTP 总耗时直方图带
+      `flow=stream|buffered`（SSE 长连接不再污染普通请求 p95），另有
+      `http_first_byte_seconds` 首字节（TTFB）直方图；上游失败也补了
+      `upstream_error_classes_total{provider,class}` 固定枚举分类
 - [ ] Docker 镜像换 `scratch` + 静态链接（需验证 musl 下 SSE 与 DNS）
 - [ ] Key 维度模型白名单校验错误信息更具体
 

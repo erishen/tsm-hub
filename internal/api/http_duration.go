@@ -20,11 +20,27 @@ var httpDurationBuckets = []float64{
 	0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120,
 }
 
-const httpDurationMetric = "tsm_hub_http_request_duration_seconds"
+const (
+	httpDurationMetric = "tsm_hub_http_request_duration_seconds"
+	httpDurationHelp   = "HTTP request duration in seconds (normalized route, method and flow)."
+	// firstByteMetric 只统计「首次 Flush」的耗时：SSE 流式响应在写出响应头后
+	// 立刻 Flush，此值即用户感知的首字节时间（含上游排队 + 首 token 前等待）。
+	// 非流式请求不产生样本，所以它天然就是流式请求的计数器。
+	firstByteMetric = "tsm_hub_http_first_byte_seconds"
+	firstByteHelp   = "Time to the first flushed response byte in seconds (streaming requests only)."
+)
+
+// flow 是代码内二值枚举：stream=响应过程中调用过 Flush（SSE/长连接），
+// buffered=一次性返回。绝不把 Content-Type、模型名或客户端标记写进标签。
+const (
+	flowStream   = "stream"
+	flowBuffered = "buffered"
+)
 
 type durationKey struct {
 	route  string
 	method string
+	flow   string
 }
 
 type durationSample struct {
@@ -34,23 +50,43 @@ type durationSample struct {
 }
 
 // requestDurations 用独立锁，避免与 Server.mu（status/deny 计数）互相竞争。
-// 每个 (route, method) 组合一行状态；由于标签是白名单枚举，map 规模有上界。
+// 每个 (route, method, flow) 组合一行状态；由于标签是白名单枚举，map 规模有上界。
 type requestDurations struct {
-	mu      sync.Mutex
-	samples map[durationKey]*durationSample
+	mu       sync.Mutex
+	samples  map[durationKey]*durationSample
+	metric   string // 导出的 family 名
+	help     string // # HELP 文本
+	withFlow bool   // 是否输出 flow 标签（首字节直方图不需要，它只有流式样本）
+}
+
+func newHistogram(metric, help string, withFlow bool) *requestDurations {
+	return &requestDurations{
+		samples:  make(map[durationKey]*durationSample),
+		metric:   metric,
+		help:     help,
+		withFlow: withFlow,
+	}
 }
 
 func newRequestDurations() *requestDurations {
-	return &requestDurations{samples: make(map[durationKey]*durationSample)}
+	return newHistogram(httpDurationMetric, httpDurationHelp, true)
+}
+
+func newFirstByteDurations() *requestDurations {
+	return newHistogram(firstByteMetric, firstByteHelp, false)
 }
 
 // observe 记录一次请求耗时。nil receiver 安全（最小 Server / 单测可直接用 &Server{}）。
-func (d *requestDurations) observe(route, method string, elapsed time.Duration) {
+// flow 只在 withFlow 的直方图里生效，避免首字节直方图被拆成无意义的子序列。
+func (d *requestDurations) observe(route, method, flow string, elapsed time.Duration) {
 	if d == nil {
 		return
 	}
 	sec := elapsed.Seconds()
-	k := durationKey{route: route, method: method}
+	if !d.withFlow {
+		flow = ""
+	}
+	k := durationKey{route: route, method: method, flow: flow}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	s := d.samples[k]
@@ -141,9 +177,14 @@ func metricMethod(method string) string {
 // 共用一份 HELP/TYPE）。没有观测值时仍输出 family 声明，与 http_requests_total
 // 在冷启动时的行为保持一致。
 func writeDurationMetrics(b *strings.Builder, d *requestDurations) {
+	// nil / 零值 receiver 仍按「总耗时直方图」输出 HELP/TYPE，保持冷启动行为不变。
+	metric, help, withFlow := httpDurationMetric, httpDurationHelp, true
+	if d != nil && d.metric != "" {
+		metric, help, withFlow = d.metric, d.help, d.withFlow
+	}
 	snap := d.snapshot()
-	fmt.Fprintf(b, "# HELP %s HTTP request duration in seconds (normalized route + method).\n", httpDurationMetric)
-	fmt.Fprintf(b, "# TYPE %s histogram\n", httpDurationMetric)
+	fmt.Fprintf(b, "# HELP %s %s\n", metric, help)
+	fmt.Fprintf(b, "# TYPE %s histogram\n", metric)
 
 	keys := make([]durationKey, 0, len(snap))
 	for k := range snap {
@@ -153,20 +194,25 @@ func writeDurationMetrics(b *strings.Builder, d *requestDurations) {
 		if keys[i].route != keys[j].route {
 			return keys[i].route < keys[j].route
 		}
-		return keys[i].method < keys[j].method
+		if keys[i].method != keys[j].method {
+			return keys[i].method < keys[j].method
+		}
+		return keys[i].flow < keys[j].flow
 	})
 
 	for _, k := range keys {
 		s := snap[k]
-		prefix := fmt.Sprintf("route=%q,method=%q,", k.route, k.method)
+		labels := fmt.Sprintf("route=%q,method=%q,", k.route, k.method)
+		if withFlow {
+			labels += fmt.Sprintf("flow=%q,", k.flow)
+		}
+		sumLabels := strings.TrimSuffix(labels, ",")
 		for i, upper := range httpDurationBuckets {
 			fmt.Fprintf(b, "%s_bucket{%sle=%q} %d\n",
-				httpDurationMetric, prefix, strconv.FormatFloat(upper, 'g', -1, 64), s.buckets[i])
+				metric, labels, strconv.FormatFloat(upper, 'g', -1, 64), s.buckets[i])
 		}
-		fmt.Fprintf(b, "%s_bucket{%sle=\"+Inf\"} %d\n", httpDurationMetric, prefix, s.count)
-		fmt.Fprintf(b, "%s_sum{route=%q,method=%q} %s\n",
-			httpDurationMetric, k.route, k.method, strconv.FormatFloat(s.sum, 'g', -1, 64))
-		fmt.Fprintf(b, "%s_count{route=%q,method=%q} %d\n",
-			httpDurationMetric, k.route, k.method, s.count)
+		fmt.Fprintf(b, "%s_bucket{%sle=\"+Inf\"} %d\n", metric, labels, s.count)
+		fmt.Fprintf(b, "%s_sum{%s} %s\n", metric, sumLabels, strconv.FormatFloat(s.sum, 'g', -1, 64))
+		fmt.Fprintf(b, "%s_count{%s} %d\n", metric, sumLabels, s.count)
 	}
 }

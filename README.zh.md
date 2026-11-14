@@ -371,7 +371,7 @@ curl http://localhost:9070/v1/skills -H "Authorization: Bearer <你的Key>"
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/healthz` | 存活探针：`status`/`uptime_s`/`requests` + `degraded`/`providers[]` 上游健康 |
-| GET | `/metrics` | Prometheus 文本格式：HTTP/配额计数、**HTTP 耗时直方图**、上游健康与延迟、累计 token/成本用量、健康状态机、MCP/A2A/运行时快照 |
+| GET | `/metrics` | Prometheus 文本格式：HTTP/配额计数、**HTTP 总耗时（按 flow 拆分）与流式首字节耗时直方图**、上游健康/延迟/**失败类别**、累计 token/成本用量、健康状态机、MCP/A2A/运行时快照 |
 
 CLI 签发 Key 的等价操作：
 
@@ -464,7 +464,7 @@ docker compose exec grafana grafana cli admin reset-admin-password '<新口令>'
 ```
 
 面板已设为**默认首页**（`GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH`），登录后直接落到
-「tsm-hub 网关监控」，不用再去 Dashboards 里找。共 **35 个面板**（v7）：
+「tsm-hub 网关监控」，不用再去 Dashboards 里找。共 **39 个面板**（v8）：
 
 | 区间 | 面板 |
 |---|---|
@@ -473,6 +473,7 @@ docker compose exec grafana grafana cli admin reset-admin-password '<新口令>'
 | 21–25 | Alertmanager 在线、钉钉投递失败数、AM 活跃告警、生效静默、投递成功/失败与规则 firing 趋势 |
 | **26–29** | **HTTP 耗时直方图 p50/p95/p99、请求速率 by route/method、黑盒探测成功率、黑盒探测耗时** |
 | **30–35** | **MCP 桥在线数、探测成功数、活跃会话、5xx 计数，以及桥的会话/槽位/在飞 RPC 与请求/错误速率趋势** |
+| **36–39** | **上游失败类别（quota / auth / rate_limit / …）、流式与非流式请求速率、首字节延迟 p50/p95/p99、按 flow 拆分的 HTTP 总耗时 p95** |
 
 顶部有 `Provider`、`Scene`、`MCP 桥`、`Route` 四个变量（多选，默认 All），
 以及 Prometheus / Alertmanager UI 的快捷链接。配额拒绝用 `or vector(0)` 兜底——
@@ -486,20 +487,21 @@ docker compose exec grafana grafana cli admin reset-admin-password '<新口令>'
 | 文件 | 作用 |
 |------|------|
 | `deploy/prometheus.yml` | 抓取配置（15s）+ `rule_files` + `alerting.alertmanagers`；7 个 job：`tsm-hub` / `prometheus` / `alertmanager` / `mcp-bridges` / `blackbox-exporter` / `blackbox-healthz` / `blackbox-mcp`。`tsm-hub` job 有三条护栏（`sample_limit: 5000`、`label_limit: 32`、`label_value_length_limit: 128`）与指标名白名单；新 job 各有自己的 keep 规则 |
-| `deploy/prometheus.rules.yml` | **10 条告警**：5 条业务告警（target 掉线、上游错误率 >30% 且 5m 内至少 5 次请求、provider 被摘除、配额拒绝、EWMA 延迟 >30s 且近 15m 有成功样本）+ 2 条通知链路自监控 + 3 条黑盒探测（`/healthz` 失败、MCP 桥 `/health` 失败、探针自身掉线） |
+| `deploy/prometheus.rules.yml` | **12 条告警**：7 条业务告警（target 掉线、上游错误率 >30% 且 5m 内至少 5 次请求、provider 被摘除、配额拒绝、EWMA 延迟 >30s 且近 15m 有成功样本、**401/403 认证失败**、**流式首字节 p95 >10s**）+ 2 条通知链路自监控 + 3 条黑盒探测（`/healthz` 失败、MCP 桥 `/health` 失败、探针自身掉线）。402 额度耗尽 / 429 限流是免费池常态，刻意只做面板不告警 |
 | `deploy/alertmanager.yml` | 分组/去重/抑制/恢复通知；webhook receiver 指向 `dingtalk-bridge:8060` |
 | `deploy/blackbox.yml` | 两个 probe module：`http_healthz`（校验 `/healthz` 的 JSON 含 `status=ok`）、`http_2xx`（MCP 桥 `/health`） |
 | `deploy/dingtalk_bridge.py` | 仅标准库：Alertmanager webhook → 钉钉 markdown + 加签；见下节 |
 | `deploy/mcp_gateway.c` | C 版桥的 `GET /metrics`，输出 `mcp_gateway_*`；两个桥 Dockerfile 共用这份源码 |
 | `deploy/grafana/provisioning/` | Prometheus 数据源（`uid: prometheus`）+ 面板自动加载 |
-| `deploy/grafana/dashboards/tsm-hub.json` | 35 个面板（v7）、4 个变量；成本面板单独看 24h |
+| `deploy/grafana/dashboards/tsm-hub.json` | 39 个面板（v8）、4 个变量；成本面板单独看 24h |
 
 **指标分层**（下表指标名均省略统一前缀 `tsm_hub_`；全部复用已有内存聚合，不新增状态、不改业务路径）：
 
 | 组 | 指标 | 数据源 |
 |---|---|---|
 | 核心 7 个 | `tsm_hub_uptime_seconds`、`http_requests_total{status}`、`quota_denials_total{code}`、`upstream_{healthy,requests_total,errors_total,latency_ms}{provider}` | `Server` 计数 + `router.Tracker.Snapshot()` |
-| HTTP 耗时直方图 | `http_request_duration_seconds_{bucket,sum,count}{route,method,le}` | `withLogging` 里已算好的 `elapsed`，无新增业务埋点；13 个桶（10ms → 120s）+ `+Inf` |
+| HTTP 耗时直方图 | `http_request_duration_seconds_{bucket,sum,count}{route,method,flow,le}`、`http_first_byte_seconds_{bucket,sum,count}{route,method,le}` | `withLogging` 里已算好的 `elapsed` + `statusRecorder` 首次 `Flush()` 时刻，无新增业务埋点；13 个桶（10ms → 120s）+ `+Inf`。`flow=stream\|buffered` 把 SSE 长连接与一次性响应分开，首字节直方图只收流式样本 |
+| 上游失败类别 | `upstream_error_classes_total{provider,class}` | `router.Tracker` 在 `ReportFailure` / `ReportThrottle` 里与 `errors_total` **同源累加**；`class` 是 8 个固定枚举（quota / auth / rate_limit / model_not_found / bad_request / server_error / network / other），错误正文绝不入标签 |
 | 健康状态机 | `upstream_{half_open,consecutive_failures,cooldown_remaining_seconds,last_success_timestamp_seconds}{provider}` | 同上 `ProviderHealth`（管理台 Providers 页同款字段） |
 | 用量 / 成本 | `usage_{requests_total,tokens_total,cost_usd_total,errors_total,failovers_total,avg_latency_ms}{provider}`、`usage_scene_{requests_total,tokens_total}{scene}`、`failover_candidates_total{provider}`、`tool_calls_total{source}` | `quota.Recorder`，启动时从 `data/usage/*.jsonl` 回放，重启不清零 |
 | 子系统 / 运行时 | `mcp_servers{state}`、`mcp_tools`、`a2a_{tasks_active,capabilities,peer_mode}`、`config_entities{entity}`、`runtime_{goroutines,heap_alloc_bytes,cpu_cores}` | `Proxy.MCPStatuses()`、`A2A.AdminOverview()`、`store.List*()`、`runtime.MemStats` |
@@ -513,18 +515,25 @@ docker compose exec grafana grafana cli admin reset-admin-password '<新口令>'
 
 注意事项：
 
-- counter 一律用 `rate()` / `increase()` 查询，别用裸值。HTTP/配额计数重启归零；
-  上游计数可能从 SQLite 健康快照恢复；`usage_*` 由 `data/usage/*.jsonl` 回放，
-  进程重启不清零，所以成本面板直接画累计值。
-- **两个「延迟」别混淆**：`upstream_latency_ms` 是上游单次尝试的 **EWMA gauge**，
-  本身没有 p95/p99；`http_request_duration_seconds` 是网关整个 HTTP 请求的
-  **直方图**，用 `histogram_quantile(0.95, sum by (le) (rate(..._bucket[10m])))`
-  算 p95/p99。直方图只覆盖 `withLogging` 包裹的路由（`/v1/*`、`/api/admin/*`、
-  `/a2a`）；`/healthz`、`/metrics`、`/peer/*` 与前端静态资源不包裹，避免 Prometheus
-  每次抓 `/metrics` 都自指放大计数。冷启动无业务请求时该 family 只有 HELP/TYPE、
-  没有样本，面板空白属正常；若窗口内 counter 完全没有变化，`rate()` 全为 0，
-  `histogram_quantile()` 会返回 **NaN**（Prometheus 的正常行为，实测持续流量后即恢复），
-  不是埋点坏了。SSE 长连接会拉高 p99，也是正常形态。
+- counter 一律用 `rate()` / `increase()` 查询，别用裸值。HTTP/配额计数、**两个直方图、
+  `upstream_error_classes_total`** 都是纯内存累计、重启归零且不进 SQLite 健康快照；
+  上游的 `requests_total` / `errors_total` 可能从 SQLite 快照恢复；`usage_*` 由
+  `data/usage/*.jsonl` 回放，进程重启不清零，所以成本面板直接画累计值。
+  失败类别与 `errors_total` 同源（同一处 `++`），每次计入健康的失败恰好落到一个类别；
+  模型 404 / 客户端断开按原设计不计入健康，因此也不出现在分类里。
+- **三个「延迟」别混淆**：`upstream_latency_ms` 是上游单次尝试的 **EWMA gauge**（无 p95/p99）；
+  `http_request_duration_seconds` 是网关整个 HTTP 请求的**总耗时直方图**；
+  `http_first_byte_seconds` 是流式请求到**首次 Flush（首字节）**的直方图，
+  这才是用户等首 token 的体感。三者一律用
+  `histogram_quantile(0.95, sum by (le) (rate(..._bucket[10m])))` 算分位数。
+  直方图只覆盖 `withLogging` 包裹的路由（`/v1/*`、`/api/admin/*`、`/a2a`）；
+  `/healthz`、`/metrics`、`/peer/*` 与前端静态资源不包裹，避免 Prometheus
+  每次抓 `/metrics` 都自指放大计数。总耗时带 `flow` 标签：SSE 会把整个流生成过程
+  算进去（可达数分钟），用 `flow="buffered"` 过滤才能得到「普通请求」的真实 p95；
+  面板 39 把两条线画在一起。首字节直方图只有流式样本，因为非流式响应从不 Flush。
+  冷启动无业务请求时 family 只有 HELP/TYPE、没有样本，面板空白属正常；若窗口内
+  counter 完全没有变化，`rate()` 全为 0，`histogram_quantile()` 会返回 **NaN**
+  （Prometheus 的正常行为，实测持续流量后即恢复），不是埋点坏了。
 - ⚠️ EWMA **只在一次上游成功时更新**。`internal/router/health.go` 已加 **15 分钟惰性 TTL**：
   超过 15m 没有成功请求时，`Latency()` / `Health()` / `Snapshot()` 一律返回 0，
   从 SQLite 健康快照恢复的陈旧值不会再被当成实时延迟、也不会再让 `Router.Pick`
@@ -539,8 +548,10 @@ docker compose exec grafana grafana cli admin reset-admin-password '<新口令>'
 - `/metrics` **不鉴权**，会暴露 provider 名、请求/错误数、延迟与成本量级。保持只绑回环，
   不要把 9070/19070 改绑 `0.0.0.0`。新增标签只允许「与现有 provider 列表同源的 ID」
   或「代码内有限枚举」（`scene` / `source` / `state` / `mode` / `entity` / `kind` /
-  `status` / `code` / `route` / `method` / `le`）；密钥、`key_id`、原始 URL path、
-  model/tool 名、session/task ID、上游错误文本、client_ip 一律禁止入标签。
+  `status` / `code` / `route` / `method` / `flow` / `class` / `le`）；密钥、`key_id`、
+  原始 URL path、model/tool 名、session/task ID、上游错误文本、client_ip 一律禁止入标签。
+  `class` 只由 `classifyUpstreamError()` 解析固定前缀 `upstream <3 位状态码>` 得到，
+  错误正文（可能含 URL / Key 片段）从不参与导出；`flow` 只取 `stream` / `buffered`。
   `route` 经 `metricRoute()` 折叠（管理台所有子路径 → `admin`，`/v1/*` → `inference`），
   `method` 经 `metricMethod()` 转小写且只放行 7 个标准方法，其余 → `other`。
   `internal/api/metrics_test.go` 会把标签名与标签值逐行过白名单（值必须是
@@ -564,7 +575,7 @@ Prometheus (rules) → alertmanager:9093 → dingtalk-bridge:8060 → 钉钉群�
 Alertmanager 的 webhook 协议与钉钉机器人不兼容，且钉钉「加签」要求每个请求带
 `timestamp` + `HMAC-SHA256(secret, ts+"\n"+secret)` 动态签名，
 所以加了 `deploy/dingtalk_bridge.py`（仅 Python 标准库、不发布宿主端口）。
-10 条告警里 `TSMHubAlertmanagerDown` / `TSMHubDingtalkNotificationsFailing` 是
+12 条告警里 `TSMHubAlertmanagerDown` / `TSMHubDingtalkNotificationsFailing` 是
 **自指告警**：通知链路本身挂掉时它们也送不出去，靠 Grafana 的通知链路面板（21–25）发现。
 黑盒探测的 3 条规则在探针自身挂掉时也送不出去，由
 `up{job="blackbox-exporter"}` 与面板 28–31 兜底。
@@ -612,6 +623,8 @@ curl --noproxy '*' -X POST http://127.0.0.1:19093/api/v2/alerts \
 | `probe_success` 全为 0 或空 | 先看 `up{job="blackbox-exporter"}`：为 0 是探针挂了，为 1 才是目标真的不通 |
 | MCP 桥面板（30–35）空白 | 桥镜像仍是旧 C 二进制（没有 `GET /metrics`）。`docker compose build mcp-fs mcp-git` 后 `docker compose up -d` 重建 5 桥；`make alert-check` 不覆盖这一步 |
 | HTTP p95 面板空白 | 新进程还没收到任何经过 `withLogging` 的业务请求，直方图 family 只有 HELP/TYPE；发一次 `/v1/models` 即出现 |
+| 首字节 / `flow=stream` 面板空白 | 只有调用过 `Flush()` 的流式响应才会产生首字节样本与 `flow="stream"` 序列；发一次带 `"stream":true` 的 `/v1/chat/completions`，或确认客户端没有降级成非流式 |
+| 失败类别全是 0 | `upstream_error_classes_total` 只统计**计入健康状态机**的失败；模型 404（`ModelFault`）与客户端断开（`ClientAbort`）按设计不计入，去看配额拒绝 / 用量错误指标 |
 
 **隐私边界**：URL / secret 只经 `.env` 插值注入桥接器容器，不写任何 yml、面板或提交；
 桥接器日志只打 `scheme://host/path?...`，异常文本经 `redact()` 去掉
@@ -650,9 +663,9 @@ make alert-check  # 钉钉桥单测 + MCP 桥 /metrics 冒烟 + 面板结构 + A
 
 | 包 | 覆盖内容 |
 |----|----------|
-| `internal/api` | 端到端：鉴权、failover、SSE、限流、Key 生命周期、/v1/models、配置落盘、provider 响应头、4xx 不熔断、上游计价、登录限流、413、panic 兜底、healthz 健康、env Key、/metrics 指标门禁与标签白名单、HTTP 直方图格式/路由折叠/nil 安全/端点隐私 |
+| `internal/api` | 端到端：鉴权、failover、SSE、限流、Key 生命周期、/v1/models、配置落盘、provider 响应头、4xx 不熔断、上游计价、登录限流、413、panic 兜底、healthz 健康、env Key、/metrics 指标门禁与标签白名单、HTTP 直方图格式/路由折叠/flow 分离/首字节 family/nil 安全/端点隐私、`withLogging` 流式 Flush 埋点、失败类别 0 值矩阵与错误正文不泄漏 |
 | `internal/proxy` | 请求体改写、`stream_options` 注入、SSE usage 解析、URL 拼接（转发主链路由 `internal/api` 的端到端用例覆盖）|
-| `internal/router` | 优先级排序、权重偏好、延迟降权、健康摘除与半开放行 |
+| `internal/router` | 优先级排序、权重偏好、延迟降权、健康摘除与半开放行、**失败类别枚举/前缀解析/与 errors 同源计数/深拷贝** |
 | `internal/store` | 原子写、更新回滚、删除 provider 时清理路由、Key CRUD |
 | `internal/quota` | 聚合与回放、RPM 窗口、四类额度拒绝、TopKeys、最近流水 |
 | `internal/auth` | Key 格式、Bearer 解析、常量时间比较、会话过期 |
