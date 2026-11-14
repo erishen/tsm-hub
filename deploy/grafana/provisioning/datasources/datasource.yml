@@ -1,0 +1,13 @@
+# Grafana 启动时自动注册 Prometheus 数据源（uid 与 dashboards/tsm-hub.json 对齐）
+apiVersion: 1
+datasources:
+  - name: Prometheus
+    type: prometheus
+    uid: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      timeInterval: 15s
+      httpMethod: POST

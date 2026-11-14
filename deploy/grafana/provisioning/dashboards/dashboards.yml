@@ -1,0 +1,13 @@
+# 自动加载 deploy/grafana/dashboards/ 下的面板（只读挂载，改面板请改仓库里的 JSON）
+apiVersion: 1
+providers:
+  - name: tsm-hub
+    orgId: 1
+    folder: tsm-hub
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

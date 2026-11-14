@@ -579,6 +579,53 @@ docker run -d \
 
 Or use a `.env` file with docker compose (already supported — just create `.env` from `.env.example`).
 
+## Monitoring (Prometheus & Grafana)
+
+The gateway is its own exporter — `GET /metrics` returns standard Prometheus text format
+(`text/plain; version=0.0.4`, with `# HELP` / `# TYPE`), no auth and no sidecar required.
+`docker-compose.yml` ships a Prometheus + Grafana stack on the same default compose network.
+
+```bash
+# 1) set a strong admin password in .env (see .env.example):
+#    GRAFANA_ADMIN_PASSWORD=<strong-password>
+# 2) start only the monitoring services (does not touch the running tsm-hub container)
+docker compose up -d prometheus grafana
+```
+
+| | URL | Notes |
+|---|-----|-------|
+| Prometheus | <http://127.0.0.1:19090> | `/-/healthy`, `/targets`, `/alerts`; 30d retention |
+| Grafana | <http://127.0.0.1:19091> | datasource + "tsm-hub 网关监控" dashboard auto-provisioned |
+
+The scrape target is **`tsm-hub:9070`** (container DNS), not `127.0.0.1:19070` — inside the
+Prometheus container that address is its own loopback. Both ports bind to `127.0.0.1` only.
+
+| File | Purpose |
+|------|---------|
+| `deploy/prometheus.yml` | scrape config (15s) + `rule_files` |
+| `deploy/prometheus.rules.yml` | 5 alerts: target down, upstream error rate >30%, provider removed, quota denials, EWMA latency >30s |
+| `deploy/grafana/provisioning/` | Prometheus datasource (`uid: prometheus`) + dashboard provider |
+| `deploy/grafana/dashboards/tsm-hub.json` | 10 panels: request rate, per-provider error rate / QPS / health / latency, HTTP status, quota denials |
+
+Seven metrics are exposed: `tsm_hub_uptime_seconds`, `tsm_hub_http_requests_total{status}`,
+`tsm_hub_quota_denials_total{code}`, and `{healthy,requests_total,errors_total,latency_ms}`
+under `tsm_hub_upstream_*{provider}`.
+
+Caveats:
+
+- Counters are in-process — always query with `rate()` / `increase()`, not raw values.
+  HTTP/quota counters reset on restart; upstream counters may be restored from the health
+  snapshot in SQLite.
+- Latency is an **EWMA gauge**, not a histogram: no p95/p99 yet (tracked in `docs/TODO.md`).
+- No token / cost / per-key metrics; usage lives in `data/usage/*.jsonl` and `/api/admin/usage`.
+- `/metrics` is **unauthenticated** and exposes provider names, request/error counts and
+  latency. Keep it on loopback; never rebind 9070/19070 to `0.0.0.0`.
+
+After editing rules, hot-reload without restarting:
+`curl --noproxy '*' -X POST http://127.0.0.1:19090/-/reload`.
+
+---
+
 ## Testing
 
 ```bash

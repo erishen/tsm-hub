@@ -1,0 +1,54 @@
+# tsm-hub 告警规则（由 deploy/prometheus.yml 的 rule_files 加载）
+# 注意：HTTP/配额 counter 是纯内存累计，重启归零；上游 counter 由 health Tracker
+# 维护且有 SQLite 快照恢复。所有规则一律用 rate()/increase()，不要用裸 counter 值。
+groups:
+  - name: tsm-hub
+    rules:
+      - alert: TSMHubDown
+        expr: up{job="tsm-hub"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "tsm-hub 抓取失败"
+          description: "Prometheus 已连续 2 分钟无法从 tsm-hub:9070/metrics 取到指标。检查容器与健康探针 /healthz。"
+
+      - alert: TSMHubUpstreamErrorRateHigh
+        expr: |
+          sum by (provider) (rate(tsm_hub_upstream_errors_total[5m]))
+            / clamp_min(sum by (provider) (rate(tsm_hub_upstream_requests_total[5m])), 0.001) > 0.3
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "上游 {{ $labels.provider }} 近 5 分钟错误率超过 30%"
+          description: "常见于免费额度耗尽或上游限流；核对路由优先级与该 provider 的余额/额度，不要盲目把耗尽额度的 target 调回链首。"
+
+      - alert: TSMHubProviderUnhealthy
+        # 只告警「承接过流量但现在被摘除」的 provider，避免长期禁用的 bai/nvidia 等空跑告警。
+        expr: tsm_hub_upstream_healthy == 0 and on(provider) tsm_hub_upstream_requests_total > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "上游 {{ $labels.provider }} 已被健康状态机摘除"
+          description: "连续失败触发冷却/半开探测中。可在管理台 Providers 页查看失败原因与冷却到期时间。"
+
+      - alert: TSMHubQuotaDenials
+        expr: increase(tsm_hub_quota_denials_total[5m]) > 0
+        for: 0m
+        labels:
+          severity: info
+        annotations:
+          summary: "出现限流/额度拒绝（{{ $labels.code }}）"
+          description: "近 5 分钟有请求被 RPM / token / 金额 / 每日额度挡下，核对 Key 配额配置。"
+
+      - alert: TSMHubUpstreamLatencyHigh
+        # 当前只有 EWMA gauge（没有 histogram，做不了 p95），阈值按 EWMA 设定。
+        expr: tsm_hub_upstream_latency_ms > 30000
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "上游 {{ $labels.provider }} 延迟 EWMA 超过 30s"
+          description: "该 provider 持续慢响应，智能路由的延迟降权会生效；若长期不改善可考虑降优先级。"

@@ -1,0 +1,29 @@
+# tsm-hub Prometheus 抓取配置（由 docker-compose.yml 挂载到 /etc/prometheus/prometheus.yml）
+# 网关自己就是 exporter：internal/api/metrics.go 输出标准 text/plain; version=0.0.4。
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  scrape_timeout: 10s
+  external_labels:
+    monitor: tsm-hub-local
+
+rule_files:
+  - /etc/prometheus/prometheus.rules.yml
+
+scrape_configs:
+  # 与 tsm-hub 同处 compose 默认网络，容器 DNS 名 tsm-hub 可解析（container_name 固定）。
+  # 不要写 127.0.0.1:19070 —— 那是 Prometheus 容器自身的 loopback。
+  # 也不要改绑 0.0.0.0 暴露 /metrics：该端点不鉴权，会泄露 provider 名与请求量。
+  - job_name: tsm-hub
+    metrics_path: /metrics
+    scheme: http
+    static_configs:
+      - targets: ["tsm-hub:9070"]
+        labels:
+          service: tsm-hub
+          env: local
+
+  # Prometheus 自监控（up{job="prometheus"}、tsdb 状态等）
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

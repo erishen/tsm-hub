@@ -429,6 +429,51 @@ docker compose up -d --build          # 或 docker build -t tsm-hub . && docker 
 镜像里只编译 Go（不需要在镜像内联网装 Node），前端产物从宿主机 `internal/web/dist/browser`
 拷进去；跳过前端构建也能跑，只是管理台是占位页。数据通过 `./data` 卷持久化。
 
+## 监控（Prometheus & Grafana）
+
+网关自身就是 exporter：`GET /metrics` 返回标准 Prometheus 文本格式
+（`text/plain; version=0.0.4`，带 `# HELP` / `# TYPE`），不鉴权、无需 sidecar。
+`docker-compose.yml` 已带一套 Prometheus + Grafana，与 tsm-hub 同处 compose 默认网络。
+
+```bash
+# 1) 在 .env 里设强口令（见 .env.example）：GRAFANA_ADMIN_PASSWORD=<强口令>
+# 2) 只启动监控两个服务，不会动正在运行的 tsm-hub 容器
+docker compose up -d prometheus grafana
+```
+
+| | 地址 | 说明 |
+|---|------|------|
+| Prometheus | <http://127.0.0.1:19090> | `/-/healthy`、`/targets`、`/alerts`；数据保留 30 天 |
+| Grafana | <http://127.0.0.1:19091> | 数据源与「tsm-hub 网关监控」面板自动注册 |
+
+抓取目标是 **`tsm-hub:9070`**（容器 DNS），不要写 `127.0.0.1:19070` —— 在 Prometheus
+容器里那是它自己的 loopback。两个端口都只绑 `127.0.0.1`。
+
+| 文件 | 作用 |
+|------|------|
+| `deploy/prometheus.yml` | 抓取配置（15s）+ `rule_files` |
+| `deploy/prometheus.rules.yml` | 5 条告警：target 掉线、上游错误率 >30%、provider 被摘除、配额拒绝、EWMA 延迟 >30s |
+| `deploy/grafana/provisioning/` | Prometheus 数据源（`uid: prometheus`）+ 面板自动加载 |
+| `deploy/grafana/dashboards/tsm-hub.json` | 10 个面板：请求速率、各 provider 错误率/QPS/健康/延迟、HTTP 状态码、配额拒绝 |
+
+暴露 7 个指标：`tsm_hub_uptime_seconds`、`tsm_hub_http_requests_total{status}`、
+`tsm_hub_quota_denials_total{code}`，以及 `tsm_hub_upstream_*` 下的
+`healthy` / `requests_total` / `errors_total` / `latency_ms`（标签 `provider`）。
+
+注意事项：
+
+- counter 都在进程内存里，一律用 `rate()` / `increase()` 查询，别用裸值。HTTP/配额计数
+  重启归零；上游计数可能从 SQLite 里的健康快照恢复。
+- 延迟是 **EWMA gauge**，没有直方图，暂时做不了 p95/p99（`docs/TODO.md` 已列为待办）。
+- 没有 token / 成本 / 按 Key 的指标；用量在 `data/usage/*.jsonl` 与 `/api/admin/usage`。
+- `/metrics` **不鉴权**，会暴露 provider 名、请求/错误数、延迟。保持只绑回环，
+  不要把 9070/19070 改绑 `0.0.0.0`。
+
+改完告警规则可热加载，无需重启：
+`curl --noproxy '*' -X POST http://127.0.0.1:19090/-/reload`。
+
+---
+
 ## 测试
 
 ```bash

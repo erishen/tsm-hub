@@ -172,5 +172,62 @@ services:
       timeout: 5s
       retries: 3
 
+  # ===== 监控：Prometheus + Grafana =====
+  # 网关本身即 exporter（GET /metrics，标准 Prometheus 0.0.4 文本格式、不鉴权）。
+  # 三者同处 compose 默认网络，用容器 DNS 名 tsm-hub:9070 抓取；
+  # 不要写 127.0.0.1:19070 —— 那是 Prometheus 容器自己的 loopback。
+  # 也不要把 9070/19070 改绑 0.0.0.0：/metrics 不鉴权，会暴露 provider 名与请求量。
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    container_name: tsm-hub-prometheus
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:19090:9090"
+    volumes:
+      - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deploy/prometheus.rules.yml:/etc/prometheus/prometheus.rules.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=30d
+      # 改完规则可 curl -X POST http://127.0.0.1:19090/-/reload 热加载
+      - --web.enable-lifecycle
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9090/-/healthy"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    container_name: tsm-hub-grafana
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:19091:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      # ⚠️ 首次启动前请在 .env 设置 GRAFANA_ADMIN_PASSWORD（见 .env.example）。
+      # 未设置时回落 admin/admin；端口只绑回环，切勿把 19091 改绑 0.0.0.0。
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_ROOT_URL: "http://127.0.0.1:19091/"
+    volumes:
+      # 只挂这两个子目录，保留镜像自带的 plugins/ 与 alerting/ 空目录。
+      # 覆盖整个 provisioning/ 会让 Grafana 启动时刷 "no such file or directory" error。
+      - ./deploy/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./deploy/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
 volumes:
   mcp-memory-data:
+  prometheus-data:
+  grafana-data:
