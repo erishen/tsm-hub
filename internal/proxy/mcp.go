@@ -181,7 +181,11 @@ type MCPStatus struct {
 }
 
 // MCPStatuses 返回全部配置 MCP server 的状态（供管理台展示）。
+// /metrics 也会调用它，故对未初始化的依赖返回空快照而不是 panic。
 func (p *Proxy) MCPStatuses() map[string]MCPStatus {
+	if p == nil || p.mcps == nil || p.store == nil {
+		return map[string]MCPStatus{}
+	}
 	return p.mcps.Statuses(p.store.Settings().Mcps)
 }
 

@@ -371,7 +371,7 @@ curl http://localhost:9070/v1/skills -H "Authorization: Bearer <你的Key>"
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/healthz` | 存活探针：`status`/`uptime_s`/`requests` + `degraded`/`providers[]` 上游健康 |
-| GET | `/metrics` | Prometheus 文本格式：HTTP 状态计数、配额拒绝计数、上游健康/请求/错误/延迟 EWMA |
+| GET | `/metrics` | Prometheus 文本格式：HTTP/配额计数、上游健康与延迟、累计 token/成本用量、健康状态机、MCP/A2A/运行时快照 |
 
 CLI 签发 Key 的等价操作：
 
@@ -456,10 +456,12 @@ docker compose exec grafana grafana cli admin reset-admin-password '<新口令>'
 ```
 
 面板已设为**默认首页**（`GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH`），登录后直接落到
-「tsm-hub 网关监控」，不用再去 Dashboards 里找。共 13 个面板：抓取状态 `up`、
-进程运行时长、请求速率、整体错误率、健康 Provider **比例**（不再是绝对数）、firing 告警数，
-以及各 provider 的错误率/QPS/延迟 EWMA/健康状态、HTTP 状态码速率、配额拒绝、触发中的告警。
-顶部 `Provider` 变量可多选筛选（默认 All）。配额拒绝用 `or vector(0)` 兜底——
+「tsm-hub 网关监控」，不用再去 Dashboards 里找。共 **20 个面板**（v5）：前 13 个是
+抓取状态 `up`、进程运行时长、请求速率、整体错误率、健康 Provider **比例**、firing 告警数，
+以及各 provider 的错误率/QPS/延迟 EWMA/健康状态、HTTP 状态码速率、配额拒绝、触发中的告警；
+后 7 个是 token 消耗、累计成本（单独看 24h 窗口）、冷却剩余、半开态与连续失败、
+场景请求速率与工具来源、MCP/A2A 快照、Go 运行时与配置实体。
+顶部 `Provider`、`Scene` 两个变量可多选筛选（默认 All）。配额拒绝用 `or vector(0)` 兜底——
 `/metrics` 在无拒绝记录时不输出该 family，否则面板会长期空白。
 改面板请改仓库里的 JSON：文件是只读挂载，provider 每 30s 自动重载。
 
@@ -468,28 +470,40 @@ docker compose exec grafana grafana cli admin reset-admin-password '<新口令>'
 
 | 文件 | 作用 |
 |------|------|
-| `deploy/prometheus.yml` | 抓取配置（15s）+ `rule_files` |
+| `deploy/prometheus.yml` | 抓取配置（15s）+ `rule_files` + 三条护栏：`sample_limit: 5000`、`label_limit: 32`、`label_value_length_limit: 128`，以及只保留 `tsm_hub_*` / `up` / `scrape_*` 的指标名白名单 |
 | `deploy/prometheus.rules.yml` | 5 条告警：target 掉线、上游错误率 >30%（要求 5m 内至少 5 次请求）、provider 被摘除、配额拒绝、EWMA 延迟 >30s（额外要求近 15m 有成功样本） |
 | `deploy/grafana/provisioning/` | Prometheus 数据源（`uid: prometheus`）+ 面板自动加载 |
-| `deploy/grafana/dashboards/tsm-hub.json` | 13 个面板：进程时长、抓取状态、firing 告警、健康比例、各 provider 错误率/QPS/健康/延迟、HTTP 状态码、配额拒绝；带 `Provider` 变量 |
+| `deploy/grafana/dashboards/tsm-hub.json` | 20 个面板（v5）、`Provider` + `Scene` 两个变量；成本面板单独看 24h |
 
-暴露 7 个指标：`tsm_hub_uptime_seconds`、`tsm_hub_http_requests_total{status}`、
-`tsm_hub_quota_denials_total{code}`，以及 `tsm_hub_upstream_*` 下的
-`healthy` / `requests_total` / `errors_total` / `latency_ms`（标签 `provider`）。
+**指标分层**（下表指标名均省略统一前缀 `tsm_hub_`；全部复用已有内存聚合，不新增状态、不改业务路径）：
+
+| 组 | 指标 | 数据源 |
+|---|---|---|
+| 核心 7 个 | `tsm_hub_uptime_seconds`、`http_requests_total{status}`、`quota_denials_total{code}`、`upstream_{healthy,requests_total,errors_total,latency_ms}{provider}` | `Server` 计数 + `router.Tracker.Snapshot()` |
+| 健康状态机 | `upstream_{half_open,consecutive_failures,cooldown_remaining_seconds,last_success_timestamp_seconds}{provider}` | 同上 `ProviderHealth`（管理台 Providers 页同款字段） |
+| 用量 / 成本 | `usage_{requests_total,tokens_total,cost_usd_total,errors_total,failovers_total,avg_latency_ms}{provider}`、`usage_scene_{requests_total,tokens_total}{scene}`、`failover_candidates_total{provider}`、`tool_calls_total{source}` | `quota.Recorder`，启动时从 `data/usage/*.jsonl` 回放，重启不清零 |
+| 子系统 / 运行时 | `mcp_servers{state}`、`mcp_tools`、`a2a_{tasks_active,capabilities,peer_mode}`、`config_entities{entity}`、`runtime_{goroutines,heap_alloc_bytes,cpu_cores}` | `Proxy.MCPStatuses()`、`A2A.AdminOverview()`、`store.List*()`、`runtime.MemStats` |
 
 注意事项：
 
-- counter 都在进程内存里，一律用 `rate()` / `increase()` 查询，别用裸值。HTTP/配额计数
-  重启归零；上游计数可能从 SQLite 里的健康快照恢复。
+- counter 一律用 `rate()` / `increase()` 查询，别用裸值。HTTP/配额计数重启归零；
+  上游计数可能从 SQLite 健康快照恢复；`usage_*` 由 `data/usage/*.jsonl` 回放，
+  进程重启不清零，所以成本面板直接画累计值。
 - 延迟是 **EWMA gauge**，没有直方图，暂时做不了 p95/p99（`docs/TODO.md` 已列为待办）。
   ⚠️ 它**只在一次上游成功时更新**。`internal/router/health.go` 已加 **15 分钟惰性 TTL**：
   超过 15m 没有成功请求时，`Latency()` / `Health()` / `Snapshot()` 一律返回 0，
   从 SQLite 健康快照恢复的陈旧值不会再被当成实时延迟、也不会再让 `Router.Pick`
   的延迟降权长期误判。`TSMHubUpstreamLatencyHigh` 告警还额外要求「近 15m 有成功
   样本」作为双保险。
-- 没有 token / 成本 / 按 Key 的指标；用量在 `data/usage/*.jsonl` 与 `/api/admin/usage`。
-- `/metrics` **不鉴权**，会暴露 provider 名、请求/错误数、延迟。保持只绑回环，
-  不要把 9070/19070 改绑 `0.0.0.0`。
+- 有累计 token / 成本 / 场景 / 工具来源指标，但**刻意没有按 Key、按 model、按 tool 名**的
+  维度：这些是高基数字段。按 Key 的明细仍在 `data/usage/*.jsonl` 与 `/api/admin/usage`。
+- `/metrics` **不鉴权**，会暴露 provider 名、请求/错误数、延迟与成本量级。保持只绑回环，
+  不要把 9070/19070 改绑 `0.0.0.0`。新增标签只允许「与现有 provider 列表同源的 ID」
+  或「代码内有限枚举」（`scene` / `source` / `state` / `mode` / `entity` / `kind` / `status` / `code`）；
+  密钥、`key_id`、原始 URL path、model/tool 名、session/task ID、上游错误文本、client_ip
+  一律禁止入标签。`internal/api/metrics_test.go` 会把标签名与标签值逐行过白名单
+  （值必须是 `[a-z0-9_-]+`），`deploy/prometheus.yml` 的 `sample_limit` 与指标名白名单
+  是第二道工程护栏；两者都在 `go test ./...` / `promtool check config` 里可验。
 
 改完告警规则可热加载，无需重启：
 `curl --noproxy '*' -X POST http://127.0.0.1:19092/-/reload`。
@@ -521,7 +535,7 @@ make cover   # 覆盖率
 
 | 包 | 覆盖内容 |
 |----|----------|
-| `internal/api` | 端到端：鉴权、failover、SSE、限流、Key 生命周期、/v1/models、配置落盘、provider 响应头、4xx 不熔断、上游计价、登录限流、413、panic 兜底、healthz 健康、env Key、/metrics（18 例）|
+| `internal/api` | 端到端：鉴权、failover、SSE、限流、Key 生命周期、/v1/models、配置落盘、provider 响应头、4xx 不熔断、上游计价、登录限流、413、panic 兜底、healthz 健康、env Key、/metrics 指标门禁与标签白名单 |
 | `internal/proxy` | 请求体改写、`stream_options` 注入、SSE usage 解析、URL 拼接（转发主链路由 `internal/api` 的端到端用例覆盖）|
 | `internal/router` | 优先级排序、权重偏好、延迟降权、健康摘除与半开放行 |
 | `internal/store` | 原子写、更新回滚、删除 provider 时清理路由、Key CRUD |

@@ -473,7 +473,7 @@ Additional probe endpoints (no auth required):
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/healthz` | Liveness probe: `status`/`uptime_s`/`requests` + `degraded`/`providers[]` upstream health |
-| GET | `/metrics` | Prometheus text format: HTTP status counts, quota rejection counts, upstream health/request/error/latency EWMA |
+| GET | `/metrics` | Prometheus text format: HTTP/quota counters, upstream health and latency, cumulative token/cost usage, health state machine, MCP/A2A/runtime snapshots |
 
 CLI equivalent for issuing a key:
 
@@ -609,33 +609,43 @@ docker compose exec grafana grafana cli admin reset-admin-password '<new-passwor
 
 The dashboard is the **default home dashboard** (via
 `GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH`), so logging in lands on it directly.
-It has 13 panels: scrape `up`, uptime, request rate, overall error rate, healthy
-provider **ratio** (not an absolute count), firing alert count, then per-provider
-error rate / QPS / EWMA latency / health, HTTP status rate, quota denials and
-firing alerts. Use the `Provider` variable at the top to filter (multi-select,
-All by default). Quota denials uses `or vector(0)` so an empty metric family
-shows 0 instead of a blank panel. Edit the JSON in the repo — the file is
-mounted read-only and the provider reloads it every 30s.
+It has **20 panels** (v5): the first 13 cover scrape `up`, uptime, request rate,
+overall error rate, healthy provider **ratio** (not an absolute count), firing alert
+count, then per-provider error rate / QPS / EWMA latency / health, HTTP status rate,
+quota denials and firing alerts. The last 7 add token usage, cumulative cost (own 24h
+window), cooldown remaining, half-open and consecutive failures, scene request rate and
+tool source, MCP/A2A snapshot, and Go runtime / config entities. Use the `Provider` and
+`Scene` variables at the top to filter (multi-select, All by default). Quota denials
+uses `or vector(0)` so an empty metric family shows 0 instead of a blank panel.
+Edit the JSON in the repo — the file is mounted read-only and the provider reloads
+it every 30s.
 
 The scrape target is **`tsm-hub:9070`** (container DNS), not `127.0.0.1:19070` — inside the
 Prometheus container that address is its own loopback. Both ports bind to `127.0.0.1` only.
 
 | File | Purpose |
 |------|---------|
-| `deploy/prometheus.yml` | scrape config (15s) + `rule_files` |
+| `deploy/prometheus.yml` | scrape config (15s) + `rule_files` + guards: `sample_limit: 5000`, `label_limit: 32`, `label_value_length_limit: 128`, and a metric-name allowlist keeping only `tsm_hub_*` / `up` / `scrape_*` |
 | `deploy/prometheus.rules.yml` | 5 alerts: target down, upstream error rate >30% (min 5 requests / 5m), provider removed, quota denials, EWMA latency >30s (gated on fresh successes in the last 15m) |
 | `deploy/grafana/provisioning/` | Prometheus datasource (`uid: prometheus`) + dashboard provider |
-| `deploy/grafana/dashboards/tsm-hub.json` | 13 panels: uptime, scrape status, firing alerts, health ratio, per-provider error rate / QPS / health / latency, HTTP status, quota denials; `Provider` variable |
+| `deploy/grafana/dashboards/tsm-hub.json` | 20 panels (v5), `Provider` + `Scene` variables; cost panel uses its own 24h window |
 
-Seven metrics are exposed: `tsm_hub_uptime_seconds`, `tsm_hub_http_requests_total{status}`,
-`tsm_hub_quota_denials_total{code}`, and `{healthy,requests_total,errors_total,latency_ms}`
-under `tsm_hub_upstream_*{provider}`.
+**Metric groups** (all names below omit the common `tsm_hub_` prefix; every group reuses
+existing in-memory aggregates — no new state, no business-path changes):
+
+| Group | Metrics | Source |
+|-------|---------|--------|
+| Core 7 | `uptime_seconds`, `http_requests_total{status}`, `quota_denials_total{code}`, `upstream_{healthy,requests_total,errors_total,latency_ms}{provider}` | `Server` counters + `router.Tracker.Snapshot()` |
+| Health state machine | `upstream_{half_open,consecutive_failures,cooldown_remaining_seconds,last_success_timestamp_seconds}{provider}` | Same `ProviderHealth` used by the admin Providers page |
+| Usage / cost | `usage_{requests_total,tokens_total,cost_usd_total,errors_total,failovers_total,avg_latency_ms}{provider}`, `usage_scene_{requests_total,tokens_total}{scene}`, `failover_candidates_total{provider}`, `tool_calls_total{source}` | `quota.Recorder`, replayed from `data/usage/*.jsonl` at startup (survives restarts) |
+| Subsystems / runtime | `mcp_servers{state}`, `mcp_tools`, `a2a_{tasks_active,capabilities,peer_mode}`, `config_entities{entity}`, `runtime_{goroutines,heap_alloc_bytes,cpu_cores}` | `Proxy.MCPStatuses()`, `A2A.AdminOverview()`, `store.List*()`, `runtime.MemStats` |
 
 Caveats:
 
-- Counters are in-process — always query with `rate()` / `increase()`, not raw values.
-  HTTP/quota counters reset on restart; upstream counters may be restored from the health
-  snapshot in SQLite.
+- Always query counters with `rate()` / `increase()`, not raw values. HTTP/quota counters
+  reset on restart; upstream counters may be restored from the SQLite health snapshot;
+  `usage_*` is replayed from `data/usage/*.jsonl`, so the cost panel plots the cumulative
+  value directly.
 - Latency is an **EWMA gauge**, not a histogram: no p95/p99 yet (tracked in `docs/TODO.md`).
   It is updated **only on a successful upstream call**. `internal/router/health.go` applies a
   **15-minute lazy TTL**: `Latency()` / `Health()` / `Snapshot()` return 0 once a provider has
@@ -643,9 +653,18 @@ Caveats:
   longer masquerade as current latency or skew `Router.Pick` downranking. The alert
   `TSMHubUpstreamLatencyHigh` additionally requires fresh successes in the last 15m as a
   defensive second guard.
-- No token / cost / per-key metrics; usage lives in `data/usage/*.jsonl` and `/api/admin/usage`.
-- `/metrics` is **unauthenticated** and exposes provider names, request/error counts and
-  latency. Keep it on loopback; never rebind 9070/19070 to `0.0.0.0`.
+- Cumulative token / cost / scene / tool-source metrics exist, but there are deliberately
+  **no per-key, per-model or per-tool dimensions** — those are high-cardinality. Per-key
+  detail stays in `data/usage/*.jsonl` and `/api/admin/usage`.
+- `/metrics` is **unauthenticated** and exposes provider names, request/error counts,
+  latency and cost magnitude. Keep it on loopback; never rebind 9070/19070 to `0.0.0.0`.
+  New labels may only be IDs from the existing provider list or a finite in-code enum
+  (`scene` / `source` / `state` / `mode` / `entity` / `kind` / `status` / `code`); API keys,
+  `key_id`, raw URL paths, model/tool names, session/task IDs, upstream error text and
+  client IPs are forbidden. `internal/api/metrics_test.go` checks every label name and
+  value against that whitelist (values must match `[a-z0-9_-]+`); the `sample_limit` and
+  metric-name allowlist in `deploy/prometheus.yml` are a second guard. Verify with
+  `go test ./...` and `promtool check config`.
 
 After editing rules, hot-reload without restarting:
 `curl --noproxy '*' -X POST http://127.0.0.1:19092/-/reload`.
@@ -678,7 +697,7 @@ make cover   # Coverage
 
 | Package | Coverage |
 |---------|----------|
-| `internal/api` | E2E: auth, failover, SSE, rate limiting, key lifecycle, /v1/models, config persistence, provider response header, 4xx no circuit break, upstream pricing, login rate limit, 413, panic fallback, healthz health, env key, /metrics (18 cases) |
+| `internal/api` | E2E: auth, failover, SSE, rate limiting, key lifecycle, /v1/models, config persistence, provider response header, 4xx no circuit break, upstream pricing, login rate limit, 413, panic fallback, healthz health, env key, /metrics gating and label whitelist |
 | `internal/proxy` | Request body rewrite, `stream_options` injection, SSE usage parsing, URL concatenation (forwarding main chain covered by `internal/api` e2e tests) |
 | `internal/router` | Priority sorting, weight preference, latency penalty, health removal and half-open pass |
 | `internal/store` | Atomic write, update rollback, route cleanup on provider deletion, Key CRUD |

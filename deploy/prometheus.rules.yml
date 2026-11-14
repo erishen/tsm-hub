@@ -1,8 +1,9 @@
 # tsm-hub 告警规则（由 deploy/prometheus.yml 的 rule_files 加载）
 # 注意：HTTP/配额 counter 是纯内存累计，重启归零；上游 counter 由 health Tracker
 # 维护且有 SQLite 快照恢复。所有规则一律用 rate()/increase()，不要用裸 counter 值。
-# gauge 同理：latency_ms 是 EWMA，只在成功上报时更新、无时间衰减、随快照恢复，
-# 判阈值前必须先用 increase() 确认近期确有成功样本，否则会永久误报（见末条规则）。
+# gauge 同理：latency_ms 是 EWMA，只在成功上报时更新、随 SQLite 快照恢复。
+# health.go 已给 Latency()/Health()/Snapshot() 加 15 分钟惰性 TTL（过期导出 0），
+# 判阈值前仍先用 increase() 确认近期确有成功样本，作为 TTL 之外的双保险。
 groups:
   - name: tsm-hub
     rules:
@@ -73,4 +74,4 @@ groups:
           severity: warning
         annotations:
           summary: "上游 {{ $labels.provider }} 近期成功请求延迟 EWMA 超过 30s"
-          description: "近 15 分钟有成功样本且延迟 EWMA 持续 >30s，智能路由的延迟降权会生效。EWMA 无时间衰减，长期无成功请求的 provider 不告警。"
+          description: "近 15 分钟有成功样本且延迟 EWMA 持续 >30s，智能路由的延迟降权会生效。EWMA 有 15 分钟惰性 TTL，长期无成功请求的 provider 导出 0，不告警。"

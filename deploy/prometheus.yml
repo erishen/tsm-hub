@@ -17,6 +17,18 @@ scrape_configs:
   - job_name: tsm-hub
     metrics_path: /metrics
     scheme: http
+    # /metrics 不鉴权。扩指标时先守住三条工程护栏，避免误把 key/URL/ID
+    # 或高基数值写进标签，把未鉴权端点的暴露面连带放大。
+    # 实测约 200 条序列；5000 留足余量，超限时整个 scrape 失败而不是静默截断。
+    sample_limit: 5000
+    label_limit: 32
+    label_value_length_limit: 128
+    metric_relabel_configs:
+      # 指标名白名单：网关指标一律 tsm_hub_ 前缀；up / scrape_* 是 Prometheus
+      # 抓取元信息，必须保留，否则 TSMHubDown 规则会失去数据源。
+      - source_labels: [__name__]
+        regex: "^(up|scrape_.+|tsm_hub_.+)$"
+        action: keep
     static_configs:
       - targets: ["tsm-hub:9070"]
         labels:

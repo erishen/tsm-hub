@@ -1,11 +1,11 @@
 {
   "uid": "tsm-hub-overview",
   "title": "tsm-hub 网关监控",
-  "description": "LLM 网关 /metrics 总览。顶部可用 Provider 变量筛选；延迟是 EWMA gauge（无 p95/p99），用量/成本不在此面板。数据源由 provisioning 自动注册。",
+  "description": "LLM 网关 /metrics 总览。除原有 7 个指标外，复用 quota.Recorder / Tracker.Snapshot() / MCPStatuses() / AdminOverview() 等已有内存聚合，新增用量成本、健康状态机、MCP/A2A、配置与运行时面板。延迟仍是 EWMA gauge（无 p95/p99）。所有标签均为代码内有限枚举或已配置的 provider ID，不含任何密钥、URL、ID。数据源由 provisioning 自动注册。",
   "tags": ["tsm-hub", "llm-gateway", "monitoring"],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 4,
+  "version": 5,
   "editable": true,
   "refresh": "30s",
   "time": { "from": "now-3h", "to": "now" },
@@ -22,6 +22,23 @@
         "datasource": { "type": "prometheus", "uid": "prometheus" },
         "query": { "query": "label_values(tsm_hub_upstream_healthy, provider)", "refId": "PrometheusVariableQueryEditor-VariableQuery" },
         "definition": "label_values(tsm_hub_upstream_healthy, provider)",
+        "refresh": 1,
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": true,
+        "sort": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "current": { "selected": true, "text": "All", "value": "$__all" },
+        "options": []
+      },
+      {
+        "name": "scene",
+        "label": "Scene",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": { "query": "label_values(tsm_hub_usage_scene_requests_total, scene)", "refId": "PrometheusVariableQueryEditor-VariableQuery" },
+        "definition": "label_values(tsm_hub_usage_scene_requests_total, scene)",
         "refresh": 1,
         "includeAll": true,
         "allValue": ".*",
@@ -208,6 +225,119 @@
       },
       "options": { "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
       "targets": [{ "refId": "A", "expr": "ALERTS{alertstate=\"firing\"}", "legendFormat": "{{alertname}} · {{provider}}" }]
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Token 消耗 by provider (1h 增量)",
+      "description": "来自 quota.Recorder 的累计计数（启动时由 data/usage/*.jsonl 回放，重启不清零），用 increase() 看增量。prompt + completion 按 provider 合并。",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 34 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "min": 0, "decimals": 0, "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 8, "showPoints": "never", "spanNulls": true } },
+        "overrides": []
+      },
+      "options": { "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [{ "refId": "A", "expr": "sum by (provider) (increase(tsm_hub_usage_tokens_total{provider=~\"$provider\"}[1h]))", "legendFormat": "{{provider}}" }]
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "累计成本 (USD) by provider",
+      "description": "quota.Recorder 的估算成本累计值，单独看 24h 窗口；汇率/单价来自配置里的 pricing，是估算不是账单。",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 34 },
+      "timeFrom": "24h",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "currencyUSD", "min": 0, "decimals": 4, "custom": { "drawStyle": "line", "lineWidth": 2, "lineInterpolation": "stepAfter", "fillOpacity": 5, "showPoints": "never", "spanNulls": true } },
+        "overrides": []
+      },
+      "options": { "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [{ "refId": "A", "expr": "sum by (provider) (tsm_hub_usage_cost_usd_total{provider=~\"$provider\"})", "legendFormat": "{{provider}}" }]
+    },
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "上游冷却剩余 (s)",
+      "description": "Tracker.Snapshot() 中 down_until / throttle_until 取较晚者减当前时间；0 表示不在冷却。配合 TSMHubProviderUnhealthy 判断何时会恢复。",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 42 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "s", "min": 0, "decimals": 0, "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 8, "showPoints": "never", "spanNulls": true } },
+        "overrides": []
+      },
+      "options": { "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [{ "refId": "A", "expr": "tsm_hub_upstream_cooldown_remaining_seconds{provider=~\"$provider\"}", "legendFormat": "{{provider}}" }]
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "半开态与连续失败",
+      "description": "半开态取 1/0；连续失败是带 TTL 的有效失败计数（过期自动归零）。可看出 provider 是在冷却、探测中还是刚恢复。",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 42 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "none", "min": 0, "decimals": 0, "custom": { "drawStyle": "line", "lineWidth": 2, "lineInterpolation": "stepAfter", "fillOpacity": 5, "showPoints": "never", "spanNulls": true } },
+        "overrides": []
+      },
+      "options": { "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "refId": "A", "expr": "tsm_hub_upstream_half_open{provider=~\"$provider\"}", "legendFormat": "半开 {{provider}}" },
+        { "refId": "B", "expr": "tsm_hub_upstream_consecutive_failures{provider=~\"$provider\"}", "legendFormat": "失败 {{provider}}" }
+      ]
+    },
+    {
+      "id": 18,
+      "type": "timeseries",
+      "title": "场景请求速率与工具调用来源",
+      "description": "场景只保留 chat/reason/code/fast/other 五类，工具只按 builtin/skill/mcp 三类汇总；任何具体工具名、模型名都不会进标签。",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 50 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "min": 0, "decimals": 3, "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 8, "showPoints": "never", "spanNulls": true } },
+        "overrides": []
+      },
+      "options": { "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "refId": "A", "expr": "sum by (scene) (rate(tsm_hub_usage_scene_requests_total{scene=~\"$scene\"}[5m]))", "legendFormat": "场景 {{scene}}" },
+        { "refId": "B", "expr": "sum by (source) (rate(tsm_hub_tool_calls_total[5m]))", "legendFormat": "工具 {{source}}" }
+      ]
+    },
+    {
+      "id": 19,
+      "type": "timeseries",
+      "title": "MCP / A2A 快照",
+      "description": "MCP 只导连接/断开数量与工具总数（不导 server 名），A2A 只导活跃任务数与能力数（不导 task ID、节点名）。",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 50 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "min": 0, "decimals": 0, "custom": { "drawStyle": "line", "lineWidth": 2, "lineInterpolation": "stepAfter", "fillOpacity": 5, "showPoints": "never", "spanNulls": true } },
+        "overrides": []
+      },
+      "options": { "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "refId": "A", "expr": "tsm_hub_mcp_servers", "legendFormat": "MCP {{state}}" },
+        { "refId": "B", "expr": "tsm_hub_a2a_tasks_active", "legendFormat": "A2A 活跃任务" },
+        { "refId": "C", "expr": "tsm_hub_a2a_capabilities", "legendFormat": "A2A 能力" }
+      ]
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "Go 运行时与配置实体",
+      "description": "goroutines 与堆内存用于发现长驻 SSE / MCP 子进程泄漏；配置实体数突变可当变更检测。",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 58 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "min": 0, "decimals": 0, "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 5, "showPoints": "never", "spanNulls": true } },
+        "overrides": []
+      },
+      "options": { "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "refId": "A", "expr": "tsm_hub_runtime_goroutines", "legendFormat": "goroutines" },
+        { "refId": "B", "expr": "tsm_hub_runtime_heap_alloc_bytes", "legendFormat": "heap alloc (bytes)" },
+        { "refId": "C", "expr": "tsm_hub_config_entities", "legendFormat": "配置 {{entity}}" }
+      ]
     }
   ]
 }
