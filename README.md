@@ -623,9 +623,9 @@ Prometheus container that address is its own loopback. Both ports bind to `127.0
 | File | Purpose |
 |------|---------|
 | `deploy/prometheus.yml` | scrape config (15s) + `rule_files` |
-| `deploy/prometheus.rules.yml` | 5 alerts: target down, upstream error rate >30%, provider removed, quota denials, EWMA latency >30s |
+| `deploy/prometheus.rules.yml` | 5 alerts: target down, upstream error rate >30%, provider removed, quota denials, EWMA latency >30s (gated on fresh successes in the last 15m) |
 | `deploy/grafana/provisioning/` | Prometheus datasource (`uid: prometheus`) + dashboard provider |
-| `deploy/grafana/dashboards/tsm-hub.json` | 10 panels: request rate, per-provider error rate / QPS / health / latency, HTTP status, quota denials |
+| `deploy/grafana/dashboards/tsm-hub.json` | 13 panels: uptime, scrape status, firing alerts, health ratio, per-provider error rate / QPS / health / latency, HTTP status, quota denials; `Provider` variable |
 
 Seven metrics are exposed: `tsm_hub_uptime_seconds`, `tsm_hub_http_requests_total{status}`,
 `tsm_hub_quota_denials_total{code}`, and `{healthy,requests_total,errors_total,latency_ms}`
@@ -637,6 +637,10 @@ Caveats:
   HTTP/quota counters reset on restart; upstream counters may be restored from the health
   snapshot in SQLite.
 - Latency is an **EWMA gauge**, not a histogram: no p95/p99 yet (tracked in `docs/TODO.md`).
+  It is updated **only on a successful upstream call**, has no time decay, and is restored from
+  the SQLite health snapshot on restart — an idle provider keeps its last (possibly days-old)
+  value forever. `TSMHubUpstreamLatencyHigh` therefore also requires a fresh-success signal in
+  the last 15m; when a provider is idle, read the latency panel as history, not current slowness.
 - No token / cost / per-key metrics; usage lives in `data/usage/*.jsonl` and `/api/admin/usage`.
 - `/metrics` is **unauthenticated** and exposes provider names, request/error counts and
   latency. Keep it on loopback; never rebind 9070/19070 to `0.0.0.0`.

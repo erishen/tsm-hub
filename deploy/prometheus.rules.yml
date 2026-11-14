@@ -1,6 +1,8 @@
 # tsm-hub 告警规则（由 deploy/prometheus.yml 的 rule_files 加载）
 # 注意：HTTP/配额 counter 是纯内存累计，重启归零；上游 counter 由 health Tracker
 # 维护且有 SQLite 快照恢复。所有规则一律用 rate()/increase()，不要用裸 counter 值。
+# gauge 同理：latency_ms 是 EWMA，只在成功上报时更新、无时间衰减、随快照恢复，
+# 判阈值前必须先用 increase() 确认近期确有成功样本，否则会永久误报（见末条规则）。
 groups:
   - name: tsm-hub
     rules:
@@ -44,11 +46,24 @@ groups:
           description: "近 5 分钟有请求被 RPM / token / 金额 / 每日额度挡下，核对 Key 配额配置。"
 
       - alert: TSMHubUpstreamLatencyHigh
-        # 当前只有 EWMA gauge（没有 histogram，做不了 p95），阈值按 EWMA 设定。
-        expr: tsm_hub_upstream_latency_ms > 30000
+        # tsm_hub_upstream_latency_ms 是 EWMA gauge：只在 ReportSuccess 时更新，
+        # 失败不更新、没有时间衰减，且随 SQLite 健康快照跨重启 Restore。一个历史
+        # 慢请求会让裸 gauge 永久超阈值（2026-11-14 kimi 的 58185ms 实际来自
+        # 11-04 最后一次成功，之后 10 天没有任何成功请求）。因此判阈值前必须
+        # 先确认「近 15m 有成功样本」：成功数 = 请求增量 - 错误增量
+        # （ReportSuccess 只 ++requests，失败两个都 ++）。
+        expr: |
+          (tsm_hub_upstream_latency_ms > 30000)
+          and on(provider)
+          (
+            (
+              sum by (provider) (increase(tsm_hub_upstream_requests_total[15m]))
+              - sum by (provider) (increase(tsm_hub_upstream_errors_total[15m]))
+            ) > 0
+          )
         for: 15m
         labels:
           severity: warning
         annotations:
-          summary: "上游 {{ $labels.provider }} 延迟 EWMA 超过 30s"
-          description: "该 provider 持续慢响应，智能路由的延迟降权会生效；若长期不改善可考虑降优先级。"
+          summary: "上游 {{ $labels.provider }} 近期成功请求延迟 EWMA 超过 30s"
+          description: "近 15 分钟有成功样本且延迟 EWMA 持续 >30s，智能路由的延迟降权会生效。EWMA 无时间衰减，长期无成功请求的 provider 不告警。"

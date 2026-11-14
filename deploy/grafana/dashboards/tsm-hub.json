@@ -5,7 +5,7 @@
   "tags": ["tsm-hub", "llm-gateway", "monitoring"],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 2,
+  "version": 3,
   "editable": true,
   "refresh": "30s",
   "time": { "from": "now-3h", "to": "now" },
@@ -145,7 +145,7 @@
       "id": 9,
       "type": "timeseries",
       "title": "上游延迟 EWMA (ms)",
-      "description": "网关目前只暴露 EWMA gauge，没有直方图，无法计算 p95/p99。",
+      "description": "网关只暴露 EWMA gauge，没有直方图，算不了 p95/p99。注意：EWMA 仅在上游成功时更新、无时间衰减、重启后从健康快照恢复；provider 长期无成功请求时这条曲线是历史值（如 kimi 的 58185ms 来自 2026-11-04 最后一次成功），不代表当前变慢。配套告警已加「近 15m 有成功样本」门控。",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {

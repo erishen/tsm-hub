@@ -113,6 +113,15 @@
 - [ ] 缓存相同 prompt 的响应（按 Key 可选开启，注意隐私）
 - [ ] 管理台支持多语言（当前中文）
 - [ ] `/metrics` 补充延迟分位直方图（当前 EWMA gauge）
+- [ ] 修正 EWMA 延迟口径与新鲜度（2026-11-14 定位，起因是 `kimi` 58185ms 永久假告警）：
+  `internal/router/health.go` 的 `latencyMS` 只在 `ReportSuccess` 更新、失败不动、无 TTL
+  衰减且随快照 `Restore` ⇒ 2026-11-04 最后一次成功的值到 11-14 仍被当成实时延迟，
+  既让 `TSMHubUpstreamLatencyHigh` 一直 firing，也让 `Router.Pick` 的延迟降权长期误判；
+  可参照 `effectiveFailuresLocked` 给 `Latency` 加惰性 TTL。
+  `internal/proxy/proxy.go:271` 传的是 `time.Since(started)`（整个请求起点，含前面
+  failover 累计耗时），应改传 `res.Latency`（单次 attempt）；
+  `internal/proxy/agent.go:489` 传固定 `0`，会反向把 EWMA 拽低，同样要修。
+  规则侧已先用「近 15m 有成功样本」门控挡住误报，但指标本身仍待根治。
 - [ ] Docker 镜像换 `scratch` + 静态链接（需验证 musl 下 SSE 与 DNS）
 - [ ] Key 维度模型白名单校验错误信息更具体
 

@@ -469,9 +469,9 @@ docker compose exec grafana grafana cli admin reset-admin-password '<新口令>'
 | 文件 | 作用 |
 |------|------|
 | `deploy/prometheus.yml` | 抓取配置（15s）+ `rule_files` |
-| `deploy/prometheus.rules.yml` | 5 条告警：target 掉线、上游错误率 >30%、provider 被摘除、配额拒绝、EWMA 延迟 >30s |
+| `deploy/prometheus.rules.yml` | 5 条告警：target 掉线、上游错误率 >30%、provider 被摘除、配额拒绝、EWMA 延迟 >30s（额外要求近 15m 有成功样本） |
 | `deploy/grafana/provisioning/` | Prometheus 数据源（`uid: prometheus`）+ 面板自动加载 |
-| `deploy/grafana/dashboards/tsm-hub.json` | 10 个面板：请求速率、各 provider 错误率/QPS/健康/延迟、HTTP 状态码、配额拒绝 |
+| `deploy/grafana/dashboards/tsm-hub.json` | 13 个面板：进程时长、抓取状态、firing 告警、健康比例、各 provider 错误率/QPS/健康/延迟、HTTP 状态码、配额拒绝；带 `Provider` 变量 |
 
 暴露 7 个指标：`tsm_hub_uptime_seconds`、`tsm_hub_http_requests_total{status}`、
 `tsm_hub_quota_denials_total{code}`，以及 `tsm_hub_upstream_*` 下的
@@ -482,6 +482,10 @@ docker compose exec grafana grafana cli admin reset-admin-password '<新口令>'
 - counter 都在进程内存里，一律用 `rate()` / `increase()` 查询，别用裸值。HTTP/配额计数
   重启归零；上游计数可能从 SQLite 里的健康快照恢复。
 - 延迟是 **EWMA gauge**，没有直方图，暂时做不了 p95/p99（`docs/TODO.md` 已列为待办）。
+  ⚠️ 它**只在一次上游成功时更新**、没有时间衰减，重启还会从 SQLite 健康快照恢复：
+  provider 长期没有成功请求时，会一直挂着最后一次（可能是几天前）的值。因此
+  `TSMHubUpstreamLatencyHigh` 告警额外要求「近 15m 有成功样本」；空闲 provider 的
+  延迟曲线请当作历史值看，不代表当前变慢。
 - 没有 token / 成本 / 按 Key 的指标；用量在 `data/usage/*.jsonl` 与 `/api/admin/usage`。
 - `/metrics` **不鉴权**，会暴露 provider 名、请求/错误数、延迟。保持只绑回环，
   不要把 9070/19070 改绑 `0.0.0.0`。
