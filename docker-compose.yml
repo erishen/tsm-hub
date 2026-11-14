@@ -185,7 +185,9 @@ services:
     container_name: tsm-hub-prometheus
     restart: unless-stopped
     ports:
-      - "127.0.0.1:19090:9090"
+      # 19090 已被宿主机上另一个 uvicorn 服务占用（浏览器会拿到它的 404），
+      # 故改用 19092。Grafana 数据源走容器 DNS prometheus:9090，不受宿主端口影响。
+      - "127.0.0.1:19092:9090"
     volumes:
       - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./deploy/prometheus.rules.yml:/etc/prometheus/prometheus.rules.yml:ro
@@ -194,7 +196,7 @@ services:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
       - --storage.tsdb.retention.time=30d
-      # 改完规则可 curl -X POST http://127.0.0.1:19090/-/reload 热加载
+      # 改完规则可 curl -X POST http://127.0.0.1:19092/-/reload 热加载
       - --web.enable-lifecycle
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9090/-/healthy"]
@@ -217,6 +219,8 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_SERVER_ROOT_URL: "http://127.0.0.1:19091/"
+      # 登录后直接落到网关监控面板，不必先去 Dashboards 里找。
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/tsm-hub.json
     volumes:
       # 只挂这两个子目录，保留镜像自带的 plugins/ 与 alerting/ 空目录。
       # 覆盖整个 provisioning/ 会让 Grafana 启动时刷 "no such file or directory" error。

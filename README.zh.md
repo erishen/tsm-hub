@@ -443,7 +443,7 @@ docker compose up -d prometheus grafana
 
 | | 地址 | 说明 |
 |---|------|------|
-| Prometheus | <http://127.0.0.1:19090> | `/-/healthy`、`/targets`、`/alerts`；数据保留 30 天 |
+| Prometheus | <http://127.0.0.1:19092> | `/-/healthy`、`/targets`、`/alerts`；数据保留 30 天 |
 | Grafana | <http://127.0.0.1:19091> | 数据源与「tsm-hub 网关监控」面板自动注册 |
 
 **Grafana 登录**：打开 <http://127.0.0.1:19091/>，用户名 `admin`，密码取 `.env` 里的
@@ -454,6 +454,14 @@ docker compose up -d prometheus grafana
 ```bash
 docker compose exec grafana grafana cli admin reset-admin-password '<新口令>'
 ```
+
+面板已设为**默认首页**（`GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH`），登录后直接落到
+「tsm-hub 网关监控」，不用再去 Dashboards 里找。共 13 个面板：抓取状态 `up`、
+进程运行时长、请求速率、整体错误率、健康 Provider **比例**（不再是绝对数）、firing 告警数，
+以及各 provider 的错误率/QPS/延迟 EWMA/健康状态、HTTP 状态码速率、配额拒绝、触发中的告警。
+顶部 `Provider` 变量可多选筛选（默认 All）。配额拒绝用 `or vector(0)` 兜底——
+`/metrics` 在无拒绝记录时不输出该 family，否则面板会长期空白。
+改面板请改仓库里的 JSON：文件是只读挂载，provider 每 30s 自动重载。
 
 抓取目标是 **`tsm-hub:9070`**（容器 DNS），不要写 `127.0.0.1:19070` —— 在 Prometheus
 容器里那是它自己的 loopback。两个端口都只绑 `127.0.0.1`。
@@ -479,7 +487,7 @@ docker compose exec grafana grafana cli admin reset-admin-password '<新口令>'
   不要把 9070/19070 改绑 `0.0.0.0`。
 
 改完告警规则可热加载，无需重启：
-`curl --noproxy '*' -X POST http://127.0.0.1:19090/-/reload`。
+`curl --noproxy '*' -X POST http://127.0.0.1:19092/-/reload`。
 
 ## 配置隐私门禁
 

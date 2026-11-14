@@ -594,7 +594,7 @@ docker compose up -d prometheus grafana
 
 | | URL | Notes |
 |---|-----|-------|
-| Prometheus | <http://127.0.0.1:19090> | `/-/healthy`, `/targets`, `/alerts`; 30d retention |
+| Prometheus | <http://127.0.0.1:19092> | `/-/healthy`, `/targets`, `/alerts`; 30d retention |
 | Grafana | <http://127.0.0.1:19091> | datasource + "tsm-hub 网关监控" dashboard auto-provisioned |
 
 **Grafana login**: open <http://127.0.0.1:19091/>, user `admin`, password is
@@ -606,6 +606,16 @@ change the password. Change it in the UI, or run:
 ```bash
 docker compose exec grafana grafana cli admin reset-admin-password '<new-password>'
 ```
+
+The dashboard is the **default home dashboard** (via
+`GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH`), so logging in lands on it directly.
+It has 13 panels: scrape `up`, uptime, request rate, overall error rate, healthy
+provider **ratio** (not an absolute count), firing alert count, then per-provider
+error rate / QPS / EWMA latency / health, HTTP status rate, quota denials and
+firing alerts. Use the `Provider` variable at the top to filter (multi-select,
+All by default). Quota denials uses `or vector(0)` so an empty metric family
+shows 0 instead of a blank panel. Edit the JSON in the repo — the file is
+mounted read-only and the provider reloads it every 30s.
 
 The scrape target is **`tsm-hub:9070`** (container DNS), not `127.0.0.1:19070` — inside the
 Prometheus container that address is its own loopback. Both ports bind to `127.0.0.1` only.
@@ -632,7 +642,7 @@ Caveats:
   latency. Keep it on loopback; never rebind 9070/19070 to `0.0.0.0`.
 
 After editing rules, hot-reload without restarting:
-`curl --noproxy '*' -X POST http://127.0.0.1:19090/-/reload`.
+`curl --noproxy '*' -X POST http://127.0.0.1:19092/-/reload`.
 
 ## Config privacy gate
 
