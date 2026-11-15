@@ -3,7 +3,7 @@
 //
 // 存储：SQLite（data/audit.db），纯 Go 实现（modernc.org/sqlite），无 cgo。
 // 保留策略：默认保留 90 天，可通过 settings.audit_retention_days 配置；
-// 启动时和每次写入时清理过期记录。
+// 启动时清理一次，之后按节流周期清理（不是每条日志都起一个清理协程）。
 package audit
 
 import (
@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -36,7 +37,19 @@ type Log struct {
 type Store struct {
 	db            *sql.DB
 	retentionDays int
+
+	// 后台清理的节流与生命周期。purgeMu 同时保护 retentionDays 的写入，
+	// wg 让 Close() 能等清理协程收尾，避免关闭后仍写 WAL/SHM 文件。
+	purgeMu   sync.Mutex
+	lastPurge time.Time
+	closed    bool
+	wg        sync.WaitGroup
 }
+
+// purgeInterval 是后台清理的最小间隔。审计写入可能很频繁，逐条起协程做
+// 全表 DELETE 会造成协程堆积和 SQLITE_BUSY；过期数据本身以天为单位，
+// 一小时的延迟完全可接受。
+const purgeInterval = time.Hour
 
 // Open 打开/创建审计日志库并建表。retentionDays <= 0 时使用默认 90 天。
 func Open(dataDir string, retentionDays int) (*Store, error) {
@@ -70,15 +83,36 @@ func Open(dataDir string, retentionDays int) (*Store, error) {
 	if retentionDays <= 0 {
 		retentionDays = 90
 	}
-	s := &Store{db: db, retentionDays: retentionDays}
-	s.purge()
+	s := &Store{db: db, retentionDays: retentionDays, lastPurge: time.Now()}
+	s.purge(retentionDays) // 启动时同步清理一次，不进协程
 	return s, nil
 }
 
 func (s *Store) SetRetentionDays(days int) {
 	if days > 0 {
+		s.purgeMu.Lock()
 		s.retentionDays = days
+		s.purgeMu.Unlock()
 	}
+}
+
+// maybePurge 按节流周期触发后台清理，且同一时刻最多一个清理协程。
+func (s *Store) maybePurge() {
+	if s == nil || s.db == nil {
+		return
+	}
+	s.purgeMu.Lock()
+	defer s.purgeMu.Unlock()
+	if s.closed || time.Since(s.lastPurge) < purgeInterval {
+		return
+	}
+	s.lastPurge = time.Now()
+	days := s.retentionDays // 在锁内快照，避免与 SetRetentionDays 竞态
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.purge(days)
+	}()
 }
 
 // Record 记录一条审计日志。
@@ -112,7 +146,7 @@ func (s *Store) Record(action, object, objectID string, detail any, operator, cl
 	if err != nil {
 		log.Printf("[audit] record failed: %v", err)
 	}
-	go s.purge()
+	s.maybePurge()
 }
 
 // Query 查询审计日志，按时间倒序。
@@ -167,26 +201,32 @@ func (s *Store) Query(object, action, objectID string, limit, offset int) ([]Log
 	return logs, total, nil
 }
 
-func (s *Store) purge() {
-	if s == nil || s.db == nil || s.retentionDays <= 0 {
+func (s *Store) purge(retentionDays int) {
+	if s == nil || s.db == nil || retentionDays <= 0 {
 		return
 	}
-	cutoff := time.Now().UTC().AddDate(0, 0, -s.retentionDays).Format(time.RFC3339Nano)
+	cutoff := time.Now().UTC().AddDate(0, 0, -retentionDays).Format(time.RFC3339Nano)
 	res, err := s.db.Exec("DELETE FROM audit_log WHERE ts < ?", cutoff)
 	if err != nil {
 		log.Printf("[audit] purge failed: %v", err)
 		return
 	}
 	if n, _ := res.RowsAffected(); n > 0 {
-		log.Printf("[audit] purged %d expired records (retention: %d days)", n, s.retentionDays)
+		log.Printf("[audit] purged %d expired records (retention: %d days)", n, retentionDays)
 	}
 }
 
 func (s *Store) Close() error {
-	if s != nil && s.db != nil {
-		return s.db.Close()
+	if s == nil || s.db == nil {
+		return nil
 	}
-	return nil
+	s.purgeMu.Lock()
+	s.closed = true
+	s.purgeMu.Unlock()
+	// 必须等后台清理结束再关库：否则协程可能在 Close 之后继续写
+	// WAL/SHM，在 Linux 上会让 t.TempDir() 因目录非空而清理失败。
+	s.wg.Wait()
+	return s.db.Close()
 }
 
 // maskSensitive 脱敏字符串中的敏感信息。

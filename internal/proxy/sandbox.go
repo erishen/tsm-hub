@@ -169,6 +169,14 @@ func (p *Proxy) toolExecuteCode(args toolArgs) (string, error) {
 		return "", err
 	}
 	tmp.Close()
+	// os.CreateTemp 创建的是 0600。文件以 :ro bind mount 进容器后，若 Docker
+	// 启用了用户命名空间映射（或镜像内有 USER），宿主属主与容器内 uid 不一致，
+	// 容器进程读不到 —— 原生 Linux CI 上会报 "can't open file ... Permission
+	// denied"（macOS 文件共享层会放宽权限，本机测不出来）。挂载本来就是只读，
+	// 显式放宽为 0444 让任意容器用户可读，同时保持不可写。
+	if err := os.Chmod(tmp.Name(), 0o444); err != nil {
+		return "", err
+	}
 
 	containerName := fmt.Sprintf("llm-sb-%d", time.Now().UnixNano())
 	cmdArgs := []string{

@@ -189,6 +189,29 @@ func TestRecordDetailTruncation(t *testing.T) {
 	}
 }
 
+// 回归：曾经每条 Record 都 go s.purge()，全表 DELETE 并发撞 SQLITE_BUSY，
+// 且 Close() 不等协程收尾会让 t.TempDir() 在 Linux 上清理失败。
+func TestRecordThrottlesBackgroundPurge(t *testing.T) {
+	s := newTestStore(t)
+	s.purgeMu.Lock()
+	before := s.lastPurge
+	s.purgeMu.Unlock()
+
+	for i := 0; i < 100; i++ {
+		s.Record("create", "provider", "p1", "x", "admin", "", "")
+	}
+
+	s.purgeMu.Lock()
+	after := s.lastPurge
+	s.purgeMu.Unlock()
+	if !after.Equal(before) {
+		t.Fatalf("purge 应在 %v 内节流，lastPurge 却从 %v 变成 %v", purgeInterval, before, after)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+}
+
 func TestRecordUserAgentTruncation(t *testing.T) {
 	s := newTestStore(t)
 	ua := strings.Repeat("a", 250)
