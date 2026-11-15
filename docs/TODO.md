@@ -98,7 +98,21 @@
 - [x] 端到端冒烟脚本（`make smoke`）
 - [x] Dockerfile + docker-compose（多阶段构建，tsm-hub 镜像 37.8MB；监控栈已加内存/CPU 上限）
 - [x] 代码重构：admin.go 拆分（2656行→6文件）、前端模板抽取（内联→外部HTML/CSS）、app 目录按类型分子目录、适配器子包
-- [x] 文档：README（中英）、ARCHITECTURE、SECURITY、TODO
+- [x] 文档：README（中英）、ARCHITECTURE、SECURITY、TODO、根目录 `SECURITY.md`
+- [x] **发布后安全收口**（2026-11-15）：根目录 `SECURITY.md`（GitHub 自动识别的
+      私密漏洞报告渠道 / 响应时限 / 范围 / 安全港，与 `docs/SECURITY.md` 的部署
+      加固分工）；`make cover-check` 用 `scripts/check-coverage.py` 直接解析
+      coverprofile 卡 `COVER_MIN=59.0` 下限（实测干净克隆 macOS 60.8% / Linux 59.8% /
+      本机含前端产物 61.1%，留平台差异余量；先自测解析器，profile 缺失 / 空 /
+      格式错误一律失败）；`make vulncheck` / `make vulncheck-gate` 用固定版本
+      `golang.org/x/vuln@v1.7.0` 做分级门禁——第三方可达漏洞硬失败、标准库告警
+      只 WARN 并留档原始 JSON，`VULN_STRICT=1` 可全拦。CI 新增 `coverage` / `vuln`
+      两个 job，双版 README 同步
+- [x] **依赖漏洞修复**（2026-11-15）：govulncheck 实测 `golang.org/x/text v0.3.8`
+      有两条可达公告（GO-2026-5970 无限循环 / GO-2026-6629 panic），升级到
+      `v0.41.0`（其 go.mod 仍要求 go 1.25.0，不抬高工具链）后第三方可达项归零。
+      ⚠️ `v0.42.0+` 要求 Go 1.26，`go get` 会连带把 `go.mod` / `go.work` 抬到 1.26，
+      别直接升 latest
 
 ### 近期修复
 
@@ -168,6 +182,12 @@
       `upstream_error_classes_total{provider,class}` 固定枚举分类
 - [ ] Docker 镜像换 `scratch` + 静态链接（需验证 musl 下 SSE 与 DNS）
 - [ ] Key 维度模型白名单校验错误信息更具体
+- [ ] **Go 工具链升级（独立决策，勿顺手做）**：`go.mod` 固定 1.25.0，而 Go 1.25
+      分支剩余 12 条标准库公告只在 1.26.9~1.26.11 修复（用补丁版 1.25.13 复扫
+      仍全在），因此 `vulncheck-gate` 把它们列为 WARN 而非让 CI 永久红。真要升级
+      须一并改：`go.mod` / `go.work` / Dockerfile 基础镜像 / `~/sdk` 完整 SDK /
+      `make cover` 的 GOROOT 回退路径 / `GOVULNCHECK_VERSION`，然后开
+      `VULN_STRICT=1` 把标准库也变成硬失败
 
 ---
 

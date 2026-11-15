@@ -874,6 +874,9 @@ make check         # Aggregate local gate: fmt-check + test + vet + privacy-chec
 make test          # All Go packages (runs the fmt-check gate first)
 make fmt-check     # Fails on any gofmt -l output
 make cover         # Coverage (auto-falls back to a complete Go 1.25 SDK under ~/sdk; override with GO=...)
+make cover-check   # Run cover, then enforce the COVER_MIN floor (self-tests the parser first)
+make vulncheck     # Full govulncheck report (pinned version; needs network for the Go vuln DB)
+make vulncheck-gate # CI gate: reachable third-party vulns fail, stdlib advisories are WARN
 make privacy-check # config.json* permissions + plaintext key gate
 make tree-privacy-check # Prospective commit content: credentials, build paths, private IDs, private IPs
 make dashboard-check # Dashboard structure + PromQL shape for both dashboards (stdlib only, no containers)
@@ -884,23 +887,35 @@ make alert-check   # DingTalk unit tests + MCP bridge /metrics smoke + dashboard
 
 ### CI vs local guards
 
-`.github/workflows/ci.yml` runs two parallel jobs on a clean Linux runner for every
-push to `main`, every PR, and manual `workflow_dispatch`: `gates` executes `make check`
-(all seven gates), `make test-race` and `make build`; `image` runs `docker build` to prove
-the alpine/musl + CGO + external-linkmode path and the `//go:embed` placeholder directory
-still produce a release image (the Dockerfile compiles Go only, so CI needs no Node/npm).
+`.github/workflows/ci.yml` runs four parallel jobs on a clean Linux runner for every
+push to `main`, every PR, and manual `workflow_dispatch`:
+
+- `gates`: `make check` (all seven gates), `make test-race`, `make build`;
+- `image`: `docker build` proving the alpine/musl + CGO + external-linkmode path and
+  the `//go:embed` placeholder directory still produce a release image (the Dockerfile
+  compiles Go only, so CI needs no Node/npm);
+- `coverage`: `make cover-check` — regenerates `coverage.out` and enforces the
+  `COVER_MIN` floor (a missing/empty/malformed profile is a hard failure). The floor
+  is set from the clean-clone measurement, where frontend-asset tests SKIP because
+  `internal/web/dist/browser` only has `.gitkeep`;
+- `vuln`: `make vulncheck-gate` with a pinned `govulncheck` version. Reachable
+  vulnerabilities in **third-party modules** fail the job; **standard-library**
+  advisories are printed as WARN (Go 1.25 has stopped receiving some patches, and a
+  gate that is permanently red is no gate at all). `VULN_STRICT=1` makes them blocking
+  once the toolchain is upgraded; the raw JSON report is uploaded as an artifact.
+
 Permissions are reduced to `contents: read`, and `pull_request_target` is deliberately
 avoided so test code from a fork PR can never execute in a write-capable context.
-The Go version comes from `go.mod`; Python is pinned to 3.12.
+The Go version comes from `go.mod`; Python is pinned to 3.12. See
+[SECURITY.md](./SECURITY.md) for how to report a vulnerability.
 
 The local pre-commit guard (`make install-hooks`) is versioned, but `core.hooksPath`
 lives in `.git/config` and **is not distributed with a clone** -- run `make install-hooks`
 once after cloning. CI is the backstop for collaboration and PRs.
 
 CI intentionally does not run `make alert-check` (11 monitoring containers plus a running
-Prometheus for `--live` expression parsing) or `make cover` (needs a full Go SDK and is
-slow); both stay manual. The `github-actions` entry in `.github/dependabot.yml` now has
-a workflow to keep up to date.
+Prometheus for `--live` expression parsing); it stays manual. The `github-actions` entry
+in `.github/dependabot.yml` now has a workflow to keep up to date.
 
 | Package | Coverage |
 |---------|----------|
@@ -943,6 +958,7 @@ a workflow to keep up to date.
 | Document | Description |
 |----------|-------------|
 | [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) | System architecture, request pipeline, component design |
+| [SECURITY.md](./SECURITY.md) | Vulnerability reporting policy, response SLA, scope, safe harbor |
 | [docs/SECURITY.md](./docs/SECURITY.md) | Security deployment guide: TLS, CORS, key management, hardening checklist |
 | [docs/PRIVACY.md](./docs/PRIVACY.md) | Privacy policy: data collection, usage, storage, data subject rights |
 | [docs/DPA.md](./docs/DPA.md) | Data Processing Agreement template (for B2B deployments) |

@@ -4,8 +4,9 @@ name: CI
 # 本机另有 pre-commit hook，但 core.hooksPath 写在 .git/config、不随克隆分发，
 # 所以协作/PR 场景必须由 CI 兜底。
 #
-# 不覆盖：make alert-check（需 11 个监控容器 + 运行中的 Prometheus 做 --live 解析）、
-#         make cover（需完整 Go SDK 且耗时较长）。两者仍在本机手动跑。
+# 不覆盖：make alert-check（需 11 个监控容器 + 运行中的 Prometheus 做 --live 解析），
+#         仍在本机手动跑。coverage / vuln 两个 job 分别承担覆盖率下限与
+#         第三方可达漏洞门禁。
 on:
   push:
     branches: [main]
@@ -66,3 +67,57 @@ jobs:
       # 实证 alpine/musl + CGO + external linkmode 与 //go:embed 占位目录能产出发布镜像。
       - name: Build release image
         run: docker build -t tsm-hub:ci .
+
+  coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # 干净克隆里 internal/web/dist/browser 只有 .gitkeep，前端产物相关用例会 SKIP，
+      # 所以 COVER_MIN 按 CI 实测值留余量；本地可用 make cover-check COVER_MIN=... 覆写。
+      # check-coverage.py 直接读 coverprofile，缺失/空/格式错误一律失败，不会静默通过。
+      - name: Coverage floor
+        run: make cover-check
+
+  vuln:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # 固定 govulncheck 版本，避免 @latest 的供应链漂移。扫描器只访问 vuln.go.dev，
+      # 请求里仅含「已知存在漏洞的模块路径」，不上传源码或私有依赖名。
+      # Go 1.25 分支已停止部分安全补丁，标准库公告会打成 WARN 而非让 CI 永久红；
+      # 第三方依赖里被真实调用到的漏洞仍然硬失败。
+      - name: Reachable dependency vulnerabilities
+        run: make vulncheck-gate
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: govulncheck-report
+          path: .data/govulncheck.json
+          if-no-files-found: warn

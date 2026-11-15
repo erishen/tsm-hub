@@ -4,9 +4,18 @@ PM         ?= $(shell command -v pnpm >/dev/null 2>&1 && echo pnpm || echo npm)
 GO         ?= go
 # 面板 live 校验用的 Prometheus 宿主地址（compose 固定 127.0.0.1:19092）
 PROM_URL   ?= http://127.0.0.1:19092
+# 覆盖率下限（PR 门槛）。实测：干净克隆 macOS 60.8%、Linux 容器（有 python3、
+# 无嵌套 Docker）59.8%、本机含前端产物 61.1%；取 59.0 给平台差异留余量。
+# 可 make cover-check COVER_MIN=... 覆写。
+COVER_MIN           ?= 59.0
+# govulncheck 固定版本：供应链上不用 @latest；v1.7.0 的 go.mod 要求 go 1.25.0，与本仓一致
+GOVULNCHECK_VERSION ?= v1.7.0
+# 1 = 连标准库告警也判失败（等 Go 工具链升级后再开）
+VULN_STRICT         ?= 0
 
 BINARY     := bin/tsm-hub
 MOCK       := bin/mockupstream
+GOVULNCHECK := $(GO) run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)
 VERSION    ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 
 # macOS 15 上纯 Go 内部链接产物的 dyld 会报 "missing LC_UUID"，
@@ -14,7 +23,7 @@ VERSION    ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo d
 export CGO_ENABLED := 1
 LDFLAGS := -X main.version=$(VERSION) -linkmode=external
 
-.PHONY: all build run test test-race check vet fmt fmt-check cover web-install web-build web-dev web-check web-lock-check dev dev-stop dev-logs dev-status mock mock-run mock-run-500 clean smoke help docker-build docker-up docker-down docker-stop docker-restart docker-logs docker-status privacy-check tree-privacy-check dashboard-check alert-check install-hooks uninstall-hooks
+.PHONY: all build run test test-race check vet fmt fmt-check cover cover-check vulncheck vulncheck-gate web-install web-build web-dev web-check web-lock-check dev dev-stop dev-logs dev-status mock mock-run mock-run-500 clean smoke help docker-build docker-up docker-down docker-stop docker-restart docker-logs docker-status privacy-check tree-privacy-check dashboard-check alert-check install-hooks uninstall-hooks
 
 all: build
 
@@ -63,8 +72,9 @@ run: build
 # 两面都要有：只查运行时配置挡不住把明文 key 写进源码（干净克隆里那份文件根本不存在）。
 # dashboard-check 只用标准库验结构/PromQL 形态，同样无需容器；它的 --live 版本需要
 # Prometheus 在跑，放在 alert-check 里。web-lock-check 验 pnpm 锁与 package.json 同步且
-# npm 回退产物未入库。alert-check 还需 promtool/amtool 与 11 个容器，cover 需完整 Go SDK
-# 且耗时较长，两者都保持独立。CI 或提交前跑这一条即可覆盖静态检查。
+# npm 回退产物未入库。alert-check 还需 promtool/amtool 与 11 个容器；cover-check
+# 需完整 Go SDK、vulncheck-gate 需联网访问漏洞库，三者都保持独立（CI 里由
+# coverage / vuln 两个 job 分别承担）。CI 或提交前跑这一条即可覆盖静态检查。
 check: fmt-check test vet privacy-check tree-privacy-check dashboard-check web-lock-check
 
 ## test: 跑单测与端到端冒烟（先过 gofmt 门禁）
@@ -164,6 +174,23 @@ cover:
 		exit 1; \
 	}; \
 	"$${go_bin}" tool cover -func=coverage.out | tail -1
+
+## cover-check: 覆盖率下限门禁（先自测解析器，再校验 coverage.out 不低于 COVER_MIN）
+cover-check: cover
+	@python3 -S scripts/check-coverage.py --self-test
+	@python3 -S scripts/check-coverage.py --profile coverage.out --min $(COVER_MIN)
+
+## vulncheck: 固定版本 govulncheck 全量扫描（需联网；打印原始报告，退出码反映发现）
+vulncheck:
+	$(GOVULNCHECK) ./...
+
+## vulncheck-gate: CI 分级门禁——第三方可达漏洞硬失败，标准库告警只报告并留档
+##   VULN_STRICT=1 连标准库告警也拦截（等 Go 工具链升级后再开）
+vulncheck-gate:
+	@mkdir -p .data
+	@if [ "$(VULN_STRICT)" = "1" ]; then extra=--strict; else extra=; fi; \
+	 python3 -S scripts/vuln-gate.py --go "$(GO)" --version "$(GOVULNCHECK_VERSION)" \
+	   --save .data/govulncheck.json $$extra
 
 vet:
 	go vet ./...

@@ -686,6 +686,9 @@ make check        # 聚合门禁：fmt-check + test + vet + privacy-check + tree
 make test         # 全部 Go 包（先跑 fmt-check 门禁）
 make fmt-check    # gofmt -l 非空即失败
 make cover        # 覆盖率（自动回退到 ~/sdk 下完整 Go 1.25 SDK；可用 GO=... 指定）
+make cover-check  # 跑 cover 后按 COVER_MIN 卡下限（先自测解析器，空/坏 profile 一律失败）
+make vulncheck    # 固定版本 govulncheck 原始报告（需联网访问 Go 漏洞库）
+make vulncheck-gate # CI 分级门禁：第三方可达漏洞硬失败，标准库告警只 WARN
 make privacy-check # config.json* 权限与明文 key 门禁
 make tree-privacy-check # 即将提交的内容（工作区优先）：凭据、构建机路径、私有标识、内网 IP
 make dashboard-check # 两个面板的结构 + PromQL 形态（仅标准库，无需容器）
@@ -697,17 +700,28 @@ make alert-check  # 钉钉桥单测 + MCP 桥 /metrics 冒烟 + 面板静态/liv
 ### 自动触发与本机守卫的分工
 
 `.github/workflows/ci.yml` 在 push 到 `main`、任意 PR 及手动 `workflow_dispatch` 时，
-于干净 Linux 环境跑两个并行 job：`gates` 依次执行 `make check`（七道）、`make test-race`、
-`make build`；`image` 用 `docker build` 实证 alpine/musl + CGO + 外部链接模式与
-`//go:embed` 占位目录能产出发布镜像（Dockerfile 只编译 Go，CI 无需 Node/npm）。
+于干净 Linux 环境跑四个并行 job：
+
+- `gates`：`make check`（七道）、`make test-race`、`make build`；
+- `image`：`docker build` 实证 alpine/musl + CGO + 外部链接模式与 `//go:embed`
+  占位目录能产出发布镜像（Dockerfile 只编译 Go，CI 无需 Node/npm）；
+- `coverage`：`make cover-check` 重新生成 `coverage.out` 并卡 `COVER_MIN` 下限
+  （profile 缺失/为空/格式错误都硬失败）。下限按干净克隆实测值留余量——那里
+  `internal/web/dist/browser` 只有 `.gitkeep`，前端产物相关用例会 SKIP；
+- `vuln`：`make vulncheck-gate` 用固定版本 `govulncheck` 扫描。**第三方模块里被
+  真实调用到的漏洞硬失败**；标准库公告打成 WARN（Go 1.25 分支已停止部分安全补丁，
+  一个永久红的门禁等于没有门禁），工具链升级后可用 `VULN_STRICT=1` 改成拦截；
+  原始 JSON 报告作为 artifact 留档。
+
 权限收敛为 `contents: read`，且刻意不用 `pull_request_target`（fork PR 自带的测试代码
 不能在有写权限的上下文里执行）。Go 版本取自 `go.mod`，Python 固定 3.12。
+漏洞报告渠道见 [SECURITY.md](./SECURITY.md)。
 
 本机另有 `make install-hooks` 启用的 pre-commit 快速守卫，但 `core.hooksPath` 写在
 `.git/config`、**不随克隆分发**，克隆后需手动执行一次；CI 是协作 / PR 场景的兜底。
 
-CI 刻意不跑 `make alert-check`（需 11 个监控容器与运行中的 Prometheus 做 `--live` 表达式解析）
-和 `make cover`（需完整 Go SDK、耗时较长），两者仍在本机手动执行。
+CI 刻意不跑 `make alert-check`（需 11 个监控容器与运行中的 Prometheus 做 `--live` 表达式解析），
+仍在本机手动执行；`make cover` / `govulncheck` 已由上面的 `coverage` / `vuln` 两个 job 承担。
 `.github/dependabot.yml` 的 `github-actions` 更新项也随本 workflow 一并生效。
 
 | 包 | 覆盖内容 |
@@ -743,6 +757,13 @@ CI 刻意不跑 `make alert-check`（需 11 个监控容器与运行中的 Prome
 - 每个响应都带 `X-Request-ID`，日志同 ID 可关联；panic 会自动兜底回 500 并带上该 ID。
 - 请求体超过 `settings.max_body_bytes` 直接返回 413（不截断后报误导性错误）。
 - `/healthz` 额外带 `degraded` 与 `providers[]` 字段，可区分「网关挂」与「某上游被摘除」。
+
+## 漏洞报告
+
+公开仓的[安全政策](./SECURITY.md)写明支持版本、私密报告渠道（GitHub Security
+Advisory）、响应时限、范围与安全港。**请勿用公开 Issue 披露漏洞细节**，报告前先把
+上游 Key、签发 Token、配置原文与含鉴权头的日志脱敏。部署加固另见
+[安全部署指南](./docs/SECURITY.md)。
 
 ## 相关文章
 - [tsm-hub：把 LLM、Tools、MCP、Skills 收进一个统一网关](https://erishen.cn/tsm_hub/)
