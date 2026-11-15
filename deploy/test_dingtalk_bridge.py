@@ -198,5 +198,53 @@ class SendTest(unittest.TestCase):
         self.assertNotIn("sign=abc", s)
 
 
+class RetryTest(unittest.TestCase):
+    def test_transient_failure_then_success(self):
+        calls = {"n": 0}
+
+        def flaky(req, timeout=None):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise ConnectionError("temporary blip")
+            return FakeResponse()
+
+        with mock.patch.object(bridge.urllib.request, "urlopen", flaky), \
+                mock.patch.object(bridge.time, "sleep"):
+            ok, reason = bridge.send_to_dingtalk(
+                bridge.format_message(am_payload()), FAKE_URL, FAKE_SECRET)
+        self.assertTrue(ok, reason)
+        self.assertEqual(calls["n"], 2)  # 1 失败 + 1 成功，只重试一次
+        self.assertNotIn(FAKE_SECRET, reason)
+
+    def test_business_error_not_retried(self):
+        calls = {"n": 0}
+        body = '{"errcode":310000,"errmsg":"关键词不匹配"}'.encode("utf-8")
+
+        def bad(req, timeout=None):
+            calls["n"] += 1
+            return FakeResponse(body)
+
+        with mock.patch.object(bridge.urllib.request, "urlopen", bad), \
+                mock.patch.object(bridge.time, "sleep"):
+            ok, reason = bridge.send_to_dingtalk(
+                bridge.format_message(am_payload()), FAKE_URL, FAKE_SECRET)
+        self.assertFalse(ok)
+        self.assertEqual(calls["n"], 1)  # 业务错误立即返回，不重试
+        self.assertIn("310000", reason)
+
+    def test_persistent_network_failure_reports_attempts(self):
+        def boom(req, timeout=None):
+            raise RuntimeError("down")
+
+        with mock.patch.object(bridge.urllib.request, "urlopen", boom), \
+                mock.patch.object(bridge.time, "sleep"):
+            ok, reason = bridge.send_to_dingtalk(
+                bridge.format_message(am_payload()), FAKE_URL, FAKE_SECRET)
+        self.assertFalse(ok)
+        self.assertIn("已尝试 3 次", reason)  # 1 + 默认 2 次重试
+        self.assertNotIn("fake-token-for-test", reason)
+        self.assertNotIn(FAKE_SECRET, reason)
+
+
 if __name__ == "__main__":
     unittest.main()

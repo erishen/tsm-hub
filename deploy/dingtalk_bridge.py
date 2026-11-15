@@ -38,6 +38,7 @@ SECRET_ENV = "DINGTALK_WEBHOOK_SECRET"
 KEYWORD_ENV = "DINGTALK_KEYWORD"
 DRY_RUN_ENV = "DINGTALK_DRY_RUN"
 TIMEOUT_ENV = "DINGTALK_HTTP_TIMEOUT"
+RETRY_ENV = "DINGTALK_MAX_RETRIES"
 PROM_ENV = "PROMETHEUS_EXTERNAL_URL"
 GRAFANA_ENV = "GRAFANA_EXTERNAL_URL"
 PORT_ENV = "DINGTALK_BRIDGE_PORT"
@@ -171,10 +172,14 @@ def format_message(
     return {"msgtype": "markdown", "markdown": {"title": title, "text": "\n".join(lines)}}
 
 
-def send_to_dingtalk(
-    message: Dict[str, Any], url: str, secret: str, timeout: float = 10.0
-) -> Tuple[bool, str]:
-    """加签并推送。返回值里的 URL 一律脱敏，异常文本经 redact 处理。"""
+def _send_once(
+    message: Dict[str, Any], url: str, secret: str, timeout: float
+) -> Tuple[bool, str, bool]:
+    """单次加签推送。返回 ``(ok, 脱敏原因, 是否传输层错误可重试)``。
+
+    传输层异常（连接失败 / 超时 / DNS 解析失败）标记为可重试；钉钉即便失败也回
+    HTTP 200 + ``errcode``，业务错误（关键词不匹配、签名错误）不可重试。
+    """
     data = json.dumps(message, ensure_ascii=False).encode("utf-8")
     req = urllib.request.Request(
         signed_url(url, secret),
@@ -185,12 +190,41 @@ def send_to_dingtalk(
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             body = resp.read().decode("utf-8", errors="replace")
-    except Exception as exc:  # noqa: BLE001 - 网络错误必须转成告警投递失败，不能让服务挂掉
-        return False, redact(f"推送失败 {type(exc).__name__}: {exc}", secret, url)
+    except Exception as exc:  # noqa: BLE001 - 传输层错误必须转成可重试的投递失败
+        return False, redact(f"推送失败 {type(exc).__name__}: {exc}", secret, url), True
     ok, why = business_ok(body)
     if not ok:
-        return False, f"钉钉拒绝：{redact(why, secret)}（{display_url(url)}）"
-    return True, f"已推送（{display_url(url)}）"
+        # 业务错误（errcode≠0）：不可重试，立即返回以免空耗。
+        return False, f"钉钉拒绝：{redact(why, secret)}（{display_url(url)}）", False
+    return True, f"已推送（{display_url(url)}）", False
+
+
+def send_to_dingtalk(
+    message: Dict[str, Any], url: str, secret: str, timeout: float = 10.0
+) -> Tuple[bool, str]:
+    """加签并推送；网络抖动最多重试 ``DINGTALK_MAX_RETRIES`` 次（默认 2，共 3 次尝试）。
+
+    重试只针对传输层异常（连接失败 / 超时 / DNS 解析失败）：钉钉即便失败也回 HTTP 200
+    且带 ``errcode``，业务错误（关键词不匹配、签名错误）不可重试，立即返回。每次失败文本
+    都经 ``redact`` 脱敏，URL 绝不进返回内容。
+    """
+    max_retries = 2
+    try:
+        max_retries = max(0, int(env(RETRY_ENV, "2")))
+    except ValueError:
+        max_retries = 2
+    last_reason = ""
+    for attempt in range(1 + max_retries):
+        if attempt:
+            # 短退避：0.5s、1s；避免 Retry-After 风暴的同时不至于拖垮 Alertmanager 回调。
+            time.sleep(0.5 * (2 ** (attempt - 1)))
+        ok, reason, network = _send_once(message, url, secret, timeout)
+        if ok:
+            return True, reason
+        last_reason = reason
+        if not network:
+            break  # 业务错误，不重试
+    return False, f"{last_reason}（已尝试 {1 + max_retries} 次）"
 
 
 class Handler(BaseHTTPRequestHandler):
