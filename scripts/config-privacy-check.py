@@ -9,7 +9,9 @@
 
 规则：
   1. 每个 config.json* 的权限必须是 0600（历史上出现过 0644 的迁移前备份）；
-  2. 每个 providers[].api_key 必须形如 env:XXX —— 明文上游 key 一律判失败。
+  2. 每个 providers[].api_key 必须是「非明文」形态：env:XXX（env 引用）或
+     enc:v1:XXX（AES-256-GCM 密文，TSM_HUB_MASTER_KEY 启用后落盘形态）。
+     明文上游 key 一律判失败。空字符串视为未配置、放行。
 
 --redact 只处理 config.json.bak-* 历史备份，把明文 api_key 原地替换成
 env:TSM_HUB_KEY_<PROVIDER_ID> 引用（保留完整配置结构，可继续当回滚点），
@@ -25,6 +27,19 @@ import stat
 import sys
 
 REDACT_PREFIX = "env:TSM_HUB_KEY_"
+
+# 可接受的「非明文」api_key 形态：
+#   - env:XXX          ：env 引用，运行时从环境解析（历史形态，本位）
+#   - enc:v1:XXX       ：AES-256-GCM 密文（TSM_HUB_MASTER_KEY 启用后 saveLocked 落盘形态）
+# 空字符串视为「未配置 key」，不报明文。
+ACCEPTED_PREFIXES = ("env:", "enc:v1:")
+
+
+def is_secret_ok(key: str) -> bool:
+    """一个 provider api_key 是否合规（非明文）。"""
+    if not key:
+        return True
+    return key.startswith(ACCEPTED_PREFIXES)
 
 
 def targets(data_dir: str) -> list[str]:
@@ -56,7 +71,7 @@ def scan(path: str) -> tuple[list[str], list[str]]:
     plaintext = [
         str(p.get("id", "?"))
         for p in doc.get("providers", [])
-        if not str(p.get("api_key", "")).startswith("env:")
+        if not is_secret_ok(str(p.get("api_key", "")))
     ]
     return problems, plaintext
 
@@ -69,7 +84,7 @@ def redact(path: str) -> int:
     changed = 0
     for p in doc.get("providers", []):
         key = str(p.get("api_key", ""))
-        if not key or key.startswith("env:"):
+        if is_secret_ok(key):
             continue
         ident = str(p.get("id", "")).upper()
         old = json.dumps(key, ensure_ascii=False)

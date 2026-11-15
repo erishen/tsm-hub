@@ -79,6 +79,7 @@ func Handler() (http.Handler, error) {
 			http.Error(w, "index.html not found", http.StatusNotFound)
 			return
 		}
+		data = []byte(injectWarnBadge(string(data)))
 		setCacheHeaders(w, "index.html")
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write(data)
@@ -101,6 +102,34 @@ func Handler() (http.Handler, error) {
 		}
 		serveWithCache(w, r, path)
 	}), nil
+}
+
+// warnBadgeScript 注入到管理台前端 index.html 的原生 JS：轮询 /api/admin/cost-warnings，
+// 在页面右上角显示红色徽标（数字=越线 key 数），悬浮显示明细。
+// 用原生 DOM 实现、不依赖 Angular，挂在 body 上，不侵入前端框架源码；
+// 读取 localStorage 中常见的会话 token key 作为 X-Session-Token，拿不到则不打扰。
+// make web-build 重建后 serveIndex 仍会注入，无需改前端源码。
+const warnBadgeScript = `<script>
+(function(){
+  var TOKEN_KEYS=['tsm_session_token','session_token','X-Session-Token','token'];
+  function getToken(){for(var i=0;i<TOKEN_KEYS.length;i++){try{var v=localStorage.getItem(TOKEN_KEYS[i]);if(v)return v;}catch(e){}}return '';}
+  function badge(){var b=document.getElementById('tsm-warn-badge');if(!b){b=document.createElement('div');b.id='tsm-warn-badge';b.style.cssText='position:fixed;top:12px;right:12px;z-index:2147483647;min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:#e5484d;color:#fff;font:12px/20px -apple-system,sans-serif;text-align:center;cursor:default;box-shadow:0 1px 4px rgba(0,0,0,.3)';document.body.appendChild(b);}return b;}
+  function poll(){var t=getToken();if(!t)return;fetch('/api/admin/cost-warnings',{headers:{'X-Session-Token':t},cache:'no-store'}).then(function(r){return r.ok?r.json():{warnings:[]};}).then(function(d){var b=badge();var w=d.warnings||[];if(w.length){b.style.display='block';b.title=w.slice(0,8).map(function(x){return (x.name||x.key_id)+' '+(x.kind)+' '+(x.ratio*100).toFixed(0)+'%';}).join('');b.textContent=w.length>99?'99+':String(w.length);}else{b.style.display='none';}}).catch(function(){});}
+  if(document.readyState!=='loading')poll();else document.addEventListener('DOMContentLoaded',poll);
+  setInterval(poll,60000);
+})();
+</script>`
+
+// injectWarnBadge 把告警红点脚本注入到 index.html 的 </head> 前（若存在 </head>）。
+// 已注入则直接返回原内容，保证幂等（serveIndex 每次请求都从磁盘重读再注入）。
+func injectWarnBadge(html string) string {
+	if !strings.Contains(html, "</head>") {
+		return html
+	}
+	if strings.Contains(html, warnBadgeScript) {
+		return html
+	}
+	return strings.Replace(html, "</head>", warnBadgeScript+"\n</head>", 1)
 }
 
 // placeholder 是前端未构建时的提示页。

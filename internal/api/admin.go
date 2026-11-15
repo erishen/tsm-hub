@@ -11,6 +11,7 @@ import (
 	"github.com/erishen/tsm-hub/internal/store"
 	"net"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -19,6 +20,7 @@ import (
 func (s *Server) adminMux() http.Handler {
 	m := http.NewServeMux()
 	m.HandleFunc("GET /api/admin/overview", s.admin(s.handleOverview))
+	m.HandleFunc("GET /api/admin/cost-warnings", s.admin(s.handleCostWarnings))
 	m.HandleFunc("GET /api/admin/providers", s.admin(s.handleListProviders))
 	m.HandleFunc("GET /api/admin/providers/balances", s.admin(s.handleProviderBalances))
 	m.HandleFunc("GET /api/admin/models/catalog", s.admin(s.handleModelsCatalog))
@@ -248,6 +250,17 @@ func newID() string {
 	buf := make([]byte, 6)
 	_, _ = rand.Read(buf)
 	return hex.EncodeToString(buf)
+}
+
+// handleCostWarnings 返回当前所有 key 额度使用率越过告警线（>=80%）的列表，供管理台红点。
+// 实时计算（与请求路径的 CheckWarn 解耦），按使用率降序。
+func (s *Server) handleCostWarnings(w http.ResponseWriter, r *http.Request) {
+	warns := s.limiter.SnapshotWarnings(s.store.ListKeys())
+	sort.Slice(warns, func(i, j int) bool { return warns[i].Ratio > warns[j].Ratio })
+	writeJSON(w, http.StatusOK, map[string]any{
+		"warnings": warns,
+		"count":    len(warns),
+	})
 }
 
 // ---------- overview ----------

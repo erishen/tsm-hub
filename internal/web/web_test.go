@@ -77,3 +77,44 @@ func contains(s, sub string) bool {
 	}
 	return false
 }
+
+// TestInjectWarnBadge 验证告警红点脚本注入：必须在 </head> 前插入、不重复注入、无 </head> 时原样返回。
+func TestInjectWarnBadge(t *testing.T) {
+	withHead := "<html><head><title>x</title></head><body>hi</body></html>"
+	out := injectWarnBadge(withHead)
+	if !contains(out, warnBadgeScript) {
+		t.Fatal("warn badge script not injected")
+	}
+	if idx := indexOf(out, warnBadgeScript); idx == -1 || !contains(out[idx:], "</head>") {
+		t.Fatalf("script not placed before </head>: %q", out)
+	}
+	// 幂等：再注入一次不应翻倍。
+	if twice := injectWarnBadge(out); countSub(twice, warnBadgeScript) != 1 {
+		t.Fatalf("expected exactly 1 injection, got %d", countSub(twice, warnBadgeScript))
+	}
+	// 没有 </head> 时原样返回。
+	noHead := "<html><body>hi</body></html>"
+	if got := injectWarnBadge(noHead); got != noHead {
+		t.Fatalf("no </head> should return unchanged, got %q", got)
+	}
+}
+
+func indexOf(s, sub string) int {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return i
+		}
+	}
+	return -1
+}
+
+func countSub(s, sub string) int {
+	n := 0
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			n++
+			i += len(sub) - 1
+		}
+	}
+	return n
+}

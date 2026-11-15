@@ -71,6 +71,60 @@ func (l *Limiter) CheckWarn(key store.APIKey) (kind string, used, limit float64,
 	return "", 0, 0, false
 }
 
+// WarnInfo 是某个 Key 的额度告警快照，供管理台红点展示。
+type WarnInfo struct {
+	KeyID string  `json:"key_id"`
+	Name  string  `json:"name"`
+	Kind  string  `json:"kind"` // max_tokens / max_cost_usd / daily_tokens
+	Used  float64 `json:"used"`
+	Limit float64 `json:"limit"`
+	Ratio float64 `json:"ratio"` // used/limit
+}
+
+// SnapshotWarnings 主动计算并返回当前所有 key 中额度使用率越过 warnRatio 线（>=80%）的项，
+// 供管理台红点展示。与 CheckWarn 的"跨线只提示一次、记日志"解耦：这里每次都实时计算，不改内部状态。
+func (l *Limiter) SnapshotWarnings(keys []store.APIKey) []WarnInfo {
+	out := make([]WarnInfo, 0, len(keys))
+	for _, k := range keys {
+		if !k.Enabled {
+			continue
+		}
+		total := l.rec.Total(k.ID)
+		today := l.rec.Today(k.ID)
+		type cand struct {
+			kind  string
+			used  float64
+			limit float64
+		}
+		cands := make([]cand, 0, 3)
+		if k.Quota.MaxTokens > 0 {
+			cands = append(cands, cand{"max_tokens", float64(total.TotalTokens), float64(k.Quota.MaxTokens)})
+		}
+		if k.Quota.MaxCostUSD > 0 {
+			cands = append(cands, cand{"max_cost_usd", total.CostUSD, k.Quota.MaxCostUSD})
+		}
+		if k.Quota.DailyTokens > 0 {
+			cands = append(cands, cand{"daily_tokens", float64(today.TotalTokens), float64(k.Quota.DailyTokens)})
+		}
+		for _, c := range cands {
+			if c.limit <= 0 {
+				continue
+			}
+			if r := c.used / c.limit; r >= warnRatio {
+				out = append(out, WarnInfo{
+					KeyID: k.ID,
+					Name:  k.Name,
+					Kind:  c.kind,
+					Used:  c.used,
+					Limit: c.limit,
+					Ratio: r,
+				})
+			}
+		}
+	}
+	return out
+}
+
 // DenyReason 描述拒绝原因。
 type DenyReason struct {
 	Code    string `json:"code"`

@@ -363,3 +363,59 @@ func TestLimiterSweepKeepsActiveKeys(t *testing.T) {
 		t.Errorf("hits[k] length = %d, want 3 (expired timestamps compacted)", got)
 	}
 }
+
+// TestSnapshotWarnings 验证 SnapshotWarnings 实时计算越线（>=80%）额度，
+// 不改内部状态、跳过禁用 key、字段正确。与 CheckWarn 解耦。
+func TestSnapshotWarnings(t *testing.T) {
+	r := rec(t)
+	now := time.Now()
+	_ = r.Record(recOf(now, "k1", "m", 85, "")) // 85/100 = 85% ≥ 80%
+	_ = r.Record(recOf(now, "k2", "m", 50, "")) // 50/100 = 50% < 80%
+	_ = r.Record(recOf(now, "k3", "m", 10, ""))
+	_ = r.Record(recOf(now, "k3", "m", 10, "")) // 成本 0.02 / 上限 0.02 = 100%
+	l := NewLimiter(r)
+
+	keys := []store.APIKey{
+		{ID: "k1", Enabled: true, Name: "Alpha", Quota: store.Quota{MaxTokens: 100}},
+		{ID: "k2", Enabled: true, Name: "Beta", Quota: store.Quota{MaxTokens: 100}},
+		{ID: "k3", Enabled: true, Name: "Gamma", Quota: store.Quota{MaxCostUSD: 0.02}},
+		{ID: "k4", Enabled: false, Name: "Off", Quota: store.Quota{MaxTokens: 1}}, // 禁用，跳过
+	}
+	warns := l.SnapshotWarnings(keys)
+	got := map[string]bool{}
+	for _, w := range warns {
+		got[w.KeyID+"/"+w.Kind] = true
+		if w.Ratio < 0 || w.Ratio > 1.0001 {
+			t.Errorf("ratio out of range: %+v", w)
+		}
+	}
+	if !got["k1/max_tokens"] {
+		t.Errorf("expected k1 max_tokens warning, got %+v", warns)
+	}
+	if got["k2/max_tokens"] {
+		t.Errorf("k2 should not warn (50%%)")
+	}
+	if !got["k3/max_cost_usd"] {
+		t.Errorf("expected k3 max_cost_usd warning, got %+v", warns)
+	}
+	if got["k4/max_tokens"] {
+		t.Errorf("disabled key k4 must be skipped")
+	}
+	if len(got) != 2 {
+		t.Errorf("expected 2 warnings, got %d: %+v", len(got), warns)
+	}
+	for _, w := range warns {
+		if w.KeyID == "k1" {
+			if w.Name != "Alpha" {
+				t.Errorf("k1 name = %q, want Alpha", w.Name)
+			}
+			if w.Ratio < 0.85 || w.Ratio >= 0.86 {
+				t.Errorf("k1 ratio = %v, want ~0.85", w.Ratio)
+			}
+		}
+	}
+	// 不改变限流内部状态。
+	if len(l.warn) != 0 {
+		t.Errorf("SnapshotWarnings must not mutate warn state, got %v", l.warn)
+	}
+}
