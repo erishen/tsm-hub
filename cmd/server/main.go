@@ -163,6 +163,21 @@ func run(cfg config.Config) error {
 	// config.json 热加载：Provider/Route/Key 变更即时生效，无需重启。
 	go watchConfig(st, logger)
 
+	// SIGHUP 兜底热加载：fsnotify 在部分挂载的文件系统（某些 NFS/Docker volume、
+	// 网络盘）上不触发事件，此时可用 `kill -HUP <pid>` 强制重载。Reload 幂等，
+	// 与 watchConfig 并行无冲突；失败保留旧配置（Reload 内部已保证）。
+	go func() {
+		sighup := make(chan os.Signal, 1)
+		signal.Notify(sighup, syscall.SIGHUP)
+		for range sighup {
+			if err := st.Reload(); err != nil {
+				logger.Warn("SIGHUP config reload failed, keeping previous config", "err", err)
+			} else {
+				logger.Info("config reloaded via SIGHUP", "path", cfg.ConfigFile())
+			}
+		}
+	}()
+
 	// 优雅退出。
 	errCh := make(chan error, 1)
 	go func() {

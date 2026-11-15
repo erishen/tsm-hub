@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -201,6 +202,18 @@ func (s *Store) Settings() Settings {
 
 // saveLocked 原子落盘：先写同目录临时文件，再 rename 覆盖。
 func (s *Store) saveLocked() error {
+	// 跨进程写串行化：锁住与 config 同目录的 lock 文件，防止多实例并发落盘相互覆盖
+	// （如 k8s 多副本共享同一挂载卷）。同进程内的并发已由调用方（Update/New）的 s.mu 保护，
+	// 此处专防多进程。锁为劝告锁（flock），仅对同样走 saveLocked 的进程生效。
+	lk, err := os.OpenFile(s.path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return fmt.Errorf("open config lock: %w", err)
+	}
+	defer lk.Close()
+	if err := syscall.Flock(int(lk.Fd()), syscall.LOCK_EX); err != nil {
+		return fmt.Errorf("lock config: %w", err)
+	}
+	defer syscall.Flock(int(lk.Fd()), syscall.LOCK_UN)
 	// 在临时副本上加密密钥字段后落盘，保持内存态 s.cfg 为明文（proxy 仍需明文鉴权）。
 	draft := s.cfg
 	draft.Providers = append([]Provider(nil), s.cfg.Providers...)
