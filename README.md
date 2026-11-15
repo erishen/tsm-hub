@@ -863,13 +863,14 @@ variable to the `tsm-hub` service in `docker-compose.yml`, then
 ## Testing
 
 ```bash
-make check         # Aggregate local gate: fmt-check + test + vet + privacy-check + tree-privacy-check (no containers needed)
+make check         # Aggregate local gate: fmt-check + test + vet + privacy-check + tree-privacy-check + dashboard-check (no containers needed)
 make test          # All Go packages (runs the fmt-check gate first)
 make fmt-check     # Fails on any gofmt -l output
 make cover         # Coverage (auto-falls back to a complete Go 1.25 SDK under ~/sdk; override with GO=...)
 make privacy-check # config.json* permissions + plaintext key gate
 make tree-privacy-check # Prospective commit content: credentials, build paths, private IDs, private IPs
-make alert-check   # DingTalk unit tests + MCP bridge /metrics smoke + both dashboards' structure/PromQL + AM/Prometheus config (config checks need the stack up)
+make dashboard-check # Dashboard structure + PromQL shape for both dashboards (stdlib only, no containers)
+make alert-check   # DingTalk unit tests + MCP bridge /metrics smoke + dashboard static + live PromQL queries + AM/Prometheus config (needs the stack up)
 ```
 
 | Package | Coverage |

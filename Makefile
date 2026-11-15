@@ -2,6 +2,8 @@
 PM         ?= $(shell command -v pnpm >/dev/null 2>&1 && echo pnpm || echo npm)
 # 覆盖率目标可显式指定 Go：make cover GO=$HOME/sdk/go1.25.0/bin/go
 GO         ?= go
+# 面板 live 校验用的 Prometheus 宿主地址（compose 固定 127.0.0.1:19092）
+PROM_URL   ?= http://127.0.0.1:19092
 
 BINARY     := bin/tsm-hub
 MOCK       := bin/mockupstream
@@ -12,7 +14,7 @@ VERSION    ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo d
 export CGO_ENABLED := 1
 LDFLAGS := -X main.version=$(VERSION) -linkmode=external
 
-.PHONY: all build run test test-race check vet fmt fmt-check cover web-install web-build web-dev web-check dev dev-stop dev-logs dev-status mock mock-run mock-run-500 clean smoke help docker-build docker-up docker-down docker-stop docker-restart docker-logs docker-status privacy-check tree-privacy-check alert-check
+.PHONY: all build run test test-race check vet fmt fmt-check cover web-install web-build web-dev web-check dev dev-stop dev-logs dev-status mock mock-run mock-run-500 clean smoke help docker-build docker-up docker-down docker-stop docker-restart docker-logs docker-status privacy-check tree-privacy-check dashboard-check alert-check
 
 all: build
 
@@ -56,12 +58,13 @@ mock-run-500: mock
 run: build
 	./$(BINARY) -data ./data
 
-## check: 纯本地聚合门禁（gofmt + 单测 + vet + 两道隐私），不依赖运行中的容器
+## check: 纯本地聚合门禁（gofmt + 单测 + vet + 两道隐私 + 面板结构），不依赖运行中的容器
 # privacy-check 守运行时配置（data/config.json*），tree-privacy-check 守即将提交的仓库内容。
 # 两面都要有：只查运行时配置挡不住把明文 key 写进源码（干净克隆里那份文件根本不存在）。
-# alert-check 需 promtool/amtool 与 11 个容器在跑，故刻意不并入；cover 需完整 Go SDK
-# 且耗时较长，同样保持独立。CI 或提交前跑这一条即可覆盖全部静态检查。
-check: fmt-check test vet privacy-check tree-privacy-check
+# dashboard-check 只用标准库验结构/PromQL 形态，同样无需容器；它的 --live 版本需要
+# Prometheus 在跑，放在 alert-check 里。alert-check 还需 promtool/amtool 与 11 个容器，
+# cover 需完整 Go SDK 且耗时较长，两者都保持独立。CI 或提交前跑这一条即可覆盖静态检查。
+check: fmt-check test vet privacy-check tree-privacy-check dashboard-check
 
 ## test: 跑单测与端到端冒烟（先过 gofmt 门禁）
 test: fmt-check
@@ -86,11 +89,15 @@ privacy-check:
 tree-privacy-check:
 	@python3 -S scripts/tree-privacy-check.py
 
-## alert-check: 钉钉桥单测 + MCP 桥 /metrics 冒烟 + 两个 dashboard 结构/PromQL 形态 + AM/Prometheus 配置（后两项需监控栈已 up）
+## dashboard-check: 两个面板的结构 + PromQL 形态（纯标准库，无需容器）
+dashboard-check:
+	@python3 -S deploy/check_dashboards.py
+
+## alert-check: 钉钉桥单测 + MCP 桥 /metrics 冒烟 + 面板结构/PromQL 静态与 live 校验 + AM/Prometheus 配置（需监控栈已 up）
 alert-check:
 	@python3 -S -m unittest discover -s deploy -p 'test_*.py'
 	@sh deploy/test_mcp_gateway_metrics.sh
-	@python3 -S deploy/check_dashboards.py
+	@python3 -S deploy/check_dashboards.py --live $(PROM_URL)
 	@docker compose exec -T alertmanager amtool check-config /etc/alertmanager/alertmanager.yml
 	@docker compose exec -T prometheus promtool check config /etc/prometheus/prometheus.yml
 	@docker compose exec -T prometheus promtool check rules /etc/prometheus/prometheus.rules.yml

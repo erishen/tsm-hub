@@ -3,11 +3,18 @@
 
     python3 -S deploy/check_dashboards.py
     python3 -S deploy/check_dashboards.py --dir /tmp/some-dashboards
+    python3 -S deploy/check_dashboards.py --live http://127.0.0.1:19092
 
 背景：`make alert-check` 原先只用一段内联 python 校验 tsm-hub.json，
 新增 cicdkit.json 时没有覆盖，导致 histogram_quantile 写成柯里化形式
 （`f(q)(vector)`）与「直接对累计 bucket 裸值算分位」两类错误都绿着过。
 这里把两个面板的断言收口到一处，并锁死直方图写法的语义。
+
+静态断言只能锁形态：形态看着对、但 Prometheus 实际判语法错的表达式，
+会一路放行到 Grafana 打开面板时变成持续的 /api/ds/query 400。`--live`
+把不含 Grafana 模板变量（$provider / $__rate_interval 等）的表达式逐个
+交给运行中的 Prometheus 解析，把这类「静态绿、运行态红」钉死在门禁里
+（需要监控栈已 up；纯本地提交前跑不带 --live 的静态版即可）。
 
 tsm-hub.json（原有断言，逐条迁移，行为不变）：
   - panel id 唯一 / version >= 9 / 至少 39 个面板
@@ -28,6 +35,8 @@ import json
 import os
 import re
 import sys
+import urllib.parse
+import urllib.request
 
 WINDOW_GAUGES = ("runs_total", "probe_total", "deploys_total", "active_runs")
 
@@ -96,12 +105,52 @@ CHECKS = {
 }
 
 
+def live_check(directory: str, base_url: str) -> int:
+    """让运行中的 Prometheus 逐个解析面板表达式，返回失败个数。
+
+    含 ``$`` 的表达式依赖 Grafana 模板变量，裸 PromQL 端点无法求值，跳过并计数。
+    显式禁用代理：本地探测被 http_proxy 接走会拿到 502，看起来像服务端坏了。
+    """
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    total_bad = 0
+    for name in CHECKS:
+        with open(os.path.join(directory, name), encoding="utf-8") as f:
+            doc = json.load(f)
+        exprs = [e for _, e in expressions(doc)]
+        pending = [e for e in exprs if e.strip() and "$" not in e]
+        bad: list[tuple[str, str]] = []
+        for expr in pending:
+            url = base_url.rstrip("/") + "/api/v1/query?" + urllib.parse.urlencode(
+                {"query": expr}
+            )
+            try:
+                with opener.open(url, timeout=10) as resp:
+                    payload = json.load(resp)
+                if payload.get("status") != "success":
+                    bad.append((expr, str(payload.get("error", "non-success status"))[:100]))
+            except (OSError, ValueError) as e:
+                bad.append((expr, str(e)[:100]))
+        for expr, err in bad[:5]:
+            print("FAIL live %s: %s -> %s" % (name, expr[:70], err))
+        print(
+            "OK   %s live: %d/%d accepted, %d template expressions skipped"
+            % (name, len(pending) - len(bad), len(pending), len(exprs) - len(pending))
+        )
+        total_bad += len(bad)
+    return total_bad
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument(
         "--dir",
         default=os.path.join("deploy", "grafana", "dashboards"),
         help="dashboard 目录（默认 deploy/grafana/dashboards）",
+    )
+    ap.add_argument(
+        "--live",
+        metavar="URL",
+        help="额外把无模板变量的表达式交给运行中的 Prometheus 解析（需监控栈已 up）",
     )
     args = ap.parse_args()
     failed = 0
@@ -115,8 +164,17 @@ def main() -> int:
         except (OSError, ValueError, KeyError, StopIteration, AssertionError) as e:
             print("FAIL %s: %s" % (name, e))
             failed += 1
-    print("--- %d/%d dashboards clean" % (len(CHECKS) - failed, len(CHECKS)))
-    return 1 if failed else 0
+    static_failed = failed
+    live_failed = live_check(args.dir, args.live) if args.live else 0
+    print(
+        "--- %d/%d dashboards clean%s"
+        % (
+            len(CHECKS) - static_failed,
+            len(CHECKS),
+            ", %d live query error(s)" % live_failed if args.live else "",
+        )
+    )
+    return 1 if (static_failed or live_failed) else 0
 
 
 if __name__ == "__main__":

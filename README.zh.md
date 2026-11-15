@@ -676,13 +676,14 @@ python3 -S scripts/config-privacy-check.py --redact   # 只脱敏 *.bak-*，绝�
 ## 测试
 
 ```bash
-make check        # 聚合门禁：fmt-check + test + vet + privacy-check + tree-privacy-check（纯本地，不依赖容器）
+make check        # 聚合门禁：fmt-check + test + vet + privacy-check + tree-privacy-check + dashboard-check（纯本地，不依赖容器）
 make test         # 全部 Go 包（先跑 fmt-check 门禁）
 make fmt-check    # gofmt -l 非空即失败
 make cover        # 覆盖率（自动回退到 ~/sdk 下完整 Go 1.25 SDK；可用 GO=... 指定）
 make privacy-check # config.json* 权限与明文 key 门禁
 make tree-privacy-check # 即将提交的内容（工作区优先）：凭据、构建机路径、私有标识、内网 IP
-make alert-check  # 钉钉桥单测 + MCP 桥 /metrics 冒烟 + 两个面板结构/PromQL + AM/Prometheus 配置（配置校验需监控栈已 up）
+make dashboard-check # 两个面板的结构 + PromQL 形态（仅标准库，无需容器）
+make alert-check  # 钉钉桥单测 + MCP 桥 /metrics 冒烟 + 面板静态/live PromQL 校验 + AM/Prometheus 配置（需监控栈已 up）
 ```
 
 | 包 | 覆盖内容 |
