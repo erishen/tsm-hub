@@ -209,9 +209,13 @@ docker-build: web-build
 
 ## docker-up: docker compose 启动（自动先构建前端，挂载 ./data，后台运行）
 # compose 把容器内 9070 映射到宿主 19070；9070 是 make run 的本地直连端口。
+# 监控栈（prometheus/alertmanager/grafana/blackbox-exporter/dingtalk-bridge）随同启动：
+# blackbox-exporter 主动探测 tsm-hub /healthz 与 5 个 MCP 桥 /health，「用户视角」存活由它验证。
 docker-up: web-build
 	docker compose up -d --build
-	@echo "✓ tsm-hub started, visit http://127.0.0.1:19070"
+	@echo "✓ tsm-hub + 监控栈已启动"
+	@echo "  管理台: http://127.0.0.1:19070   Prometheus: http://127.0.0.1:19092   Grafana: http://127.0.0.1:19091   Alertmanager: http://127.0.0.1:19093"
+	@echo "  blackbox-exporter 已接入：探测 tsm-hub /healthz 与 5 个 MCP 桥 /health（用 make docker-status 查看探针结果）"
 
 ## docker-down: 停止并删除 docker 容器（保留 ./data 数据）
 docker-down:
@@ -244,6 +248,13 @@ docker-status:
 	@echo ""
 	@echo "健康检查："
 	@curl -s --noproxy '*' http://127.0.0.1:19070/healthz 2>/dev/null | python3 -S -c "import sys,json; d=json.load(sys.stdin); print(f'  状态: {d[\"status\"]}, 运行: {d[\"uptime_s\"]}s, Provider: {len(d[\"providers\"])}个')" 2>/dev/null || echo "  服务未响应"
+	@echo ""
+	@echo "黑盒探测 (blackbox-exporter，验证「用户视角」存活):"
+	@curl -s --noproxy '*' -G 'http://127.0.0.1:19092/api/v1/query' --data-urlencode 'query=up{job="blackbox-exporter"}' 2>/dev/null | python3 -S -c "import sys,json;d=json.load(sys.stdin);r=d.get('data',{}).get('result',[]);print('  blackbox-exporter 自身:', 'UP' if r and r[0]['value'][1]=='1' else 'DOWN') if r else print('  blackbox-exporter 自身: 无数据')" 2>/dev/null || echo "  blackbox-exporter 自身: 查询失败(Prometheus 不可达?)"
+	@echo "  healthz 探测 (tsm-hub /healthz):"
+	@curl -s --noproxy '*' -G 'http://127.0.0.1:19092/api/v1/query' --data-urlencode 'query=probe_success{job="blackbox-healthz"}' 2>/dev/null | python3 -S -c "import sys,json;d=json.load(sys.stdin);r=d.get('data',{}).get('result',[]);[print('    %s: %s' % (m['metric'].get('instance','?'), 'OK' if m['value'][1]=='1' else 'FAIL')) for m in r] or (r or print('    (无数据)'))" 2>/dev/null || echo "    查询失败"
+	@echo "  MCP 桥探测 (/health):"
+	@curl -s --noproxy '*' -G 'http://127.0.0.1:19092/api/v1/query' --data-urlencode 'query=probe_success{job="blackbox-mcp"}' 2>/dev/null | python3 -S -c "import sys,json;d=json.load(sys.stdin);r=d.get('data',{}).get('result',[]);[print('    %s: %s' % (m['metric'].get('instance','?'), 'OK' if m['value'][1]=='1' else 'FAIL')) for m in r] or (r or print('    (无数据)'))" 2>/dev/null || echo "    查询失败"
 
 clean: dev-stop
 	rm -rf bin coverage.out $(DEV_DIR)
