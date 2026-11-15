@@ -14,7 +14,7 @@ glm 平台有两档：
 用法：
     python3 monitor_glm.py            # 立即探一次
     # 挂 crontab（每 6 小时自动探）：
-    #   0 */6 * * * cd <repo-root> && /usr/bin/python3 monitor_glm.py >> monitor_glm.log 2>&1
+    #   0 */6 * * * cd <repo-root> && /usr/bin/python3 scripts/monitor_glm.py >> monitor_glm.log 2>&1
 
 依赖：仅标准库（urllib/json），无第三方包。
 """
@@ -24,7 +24,10 @@ import sys
 import urllib.error
 import urllib.request
 
-CFG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "config.json")
+# 本脚本随仓库移动过（根目录 -> scripts/），config 与 GW 一律按“仓库根目录”定位，
+# 不再依赖脚本自身所在目录，避免挪位置后 data/config.json 解析错位。
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+CFG = os.path.join(REPO_ROOT, "data", "config.json")
 GW = "http://127.0.0.1:19070"
 ROUTE_KEYS = ["", "agnes-2.0-flash", "chat", "fast", "deepseek-v4-flash"]
 
