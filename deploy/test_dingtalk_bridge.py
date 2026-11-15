@@ -1,6 +1,6 @@
 """dingtalk_bridge.py 的门禁测试（仅标准库；make alert-check 会跑）。
 
-重点覆盖三件事：加签算法与 daoye-engine 同款、Alertmanager payload 转钉钉消息
+重点覆盖三件事：加签算法符合钉钉 HMAC-SHA256 规范、Alertmanager payload 转钉钉消息
 不丢关键字段、以及**任何路径都不得把 webhook URL / secret 写进日志或响应**。
 """
 from __future__ import annotations

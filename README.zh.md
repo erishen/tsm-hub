@@ -601,9 +601,9 @@ Alertmanager 的 webhook 协议与钉钉机器人不兼容，且钉钉「加签�
 `up{job="blackbox-exporter"}` 与面板 28–31 兜底。
 
 **配置**：密钥只放 `.env`（已 gitignore，权限保持 `0600`）。
-`DINGTALK_WEBHOOK_URL` / `DINGTALK_WEBHOOK_SECRET` 与
-`work/sale/daoye-engine` 的 `DAOYE_WEBHOOK_*` 是同一个群机器人，直接复制那两个值即可；
-加签算法与那边 `daoye_engine/notify.py` 同款。
+`DINGTALK_WEBHOOK_URL` / `DINGTALK_WEBHOOK_SECRET` 指向同一个钉钉群机器人；
+从你既有的告警配置里复制这两个值即可（那边的变量名可能不同）；
+加签算法是钉钉标准的 HMAC-SHA256 方案。
 `DINGTALK_KEYWORD=告警` 适配「自定义关键词」安全设置（标题与正文都会带上关键词），
 若群里设的是别的词要改；`DINGTALK_DRY_RUN=1` 只记日志不推送。
 
@@ -676,12 +676,13 @@ python3 -S scripts/config-privacy-check.py --redact   # 只脱敏 *.bak-*，绝�
 ## 测试
 
 ```bash
-make check        # 聚合门禁：fmt-check + test + vet + privacy-check（纯本地，不依赖容器）
+make check        # 聚合门禁：fmt-check + test + vet + privacy-check + tree-privacy-check（纯本地，不依赖容器）
 make test         # 全部 Go 包（先跑 fmt-check 门禁）
 make fmt-check    # gofmt -l 非空即失败
 make cover        # 覆盖率（自动回退到 ~/sdk 下完整 Go 1.25 SDK；可用 GO=... 指定）
 make privacy-check # config.json* 权限与明文 key 门禁
-make alert-check  # 钉钉桥单测 + MCP 桥 /metrics 冒烟 + 面板结构 + AM/Prometheus 配置（配置校验需监控栈已 up）
+make tree-privacy-check # 即将提交的内容（工作区优先）：凭据、构建机路径、私有标识、内网 IP
+make alert-check  # 钉钉桥单测 + MCP 桥 /metrics 冒烟 + 两个面板结构/PromQL + AM/Prometheus 配置（配置校验需监控栈已 up）
 ```
 
 | 包 | 覆盖内容 |

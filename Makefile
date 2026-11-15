@@ -8,11 +8,11 @@ MOCK       := bin/mockupstream
 VERSION    ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 
 # macOS 15 上纯 Go 内部链接产物的 dyld 会报 "missing LC_UUID"，
-# 统一用 external linkmode 规避（与 cicd-platform 的处理一致）。
+# 统一用 external linkmode 规避（macOS 15 的 dyld LC_UUID 限制）。
 export CGO_ENABLED := 1
 LDFLAGS := -X main.version=$(VERSION) -linkmode=external
 
-.PHONY: all build run test test-race check vet fmt fmt-check cover web-install web-build web-dev web-check dev dev-stop dev-logs dev-status mock mock-run mock-run-500 clean smoke help docker-build docker-up docker-down docker-stop docker-restart docker-logs docker-status privacy-check alert-check
+.PHONY: all build run test test-race check vet fmt fmt-check cover web-install web-build web-dev web-check dev dev-stop dev-logs dev-status mock mock-run mock-run-500 clean smoke help docker-build docker-up docker-down docker-stop docker-restart docker-logs docker-status privacy-check tree-privacy-check alert-check
 
 all: build
 
@@ -56,10 +56,12 @@ mock-run-500: mock
 run: build
 	./$(BINARY) -data ./data
 
-## check: 纯本地聚合门禁（gofmt + 单测 + vet + 隐私），不依赖运行中的容器
+## check: 纯本地聚合门禁（gofmt + 单测 + vet + 两道隐私），不依赖运行中的容器
+# privacy-check 守运行时配置（data/config.json*），tree-privacy-check 守即将提交的仓库内容。
+# 两面都要有：只查运行时配置挡不住把明文 key 写进源码（干净克隆里那份文件根本不存在）。
 # alert-check 需 promtool/amtool 与 11 个容器在跑，故刻意不并入；cover 需完整 Go SDK
 # 且耗时较长，同样保持独立。CI 或提交前跑这一条即可覆盖全部静态检查。
-check: fmt-check test vet privacy-check
+check: fmt-check test vet privacy-check tree-privacy-check
 
 ## test: 跑单测与端到端冒烟（先过 gofmt 门禁）
 test: fmt-check
@@ -75,15 +77,20 @@ fmt-check:
 	fi
 	@echo "✓ gofmt clean"
 
-## privacy-check: 校验 data/config.json* 权限(0600)且 provider api_key 全是 env: 引用
+## privacy-check: 校验 data/config.json* 权限(0600)且 provider api_key 全是 env:/enc:v1: 引用
 privacy-check:
 	@python3 -S scripts/config-privacy-check.py --check
 
-## alert-check: 钉钉桥单测 + MCP 桥 /metrics 冒烟 + dashboard 结构 + AM/Prometheus 配置（后两项需监控栈已 up）
+## tree-privacy-check: 扫即将提交的内容（工作区优先 + 未跟踪新文件 + 暂存区新增行）
+## 凭据 / 构建机路径 / 私有标识 / 内网 IP；只打印文件名+行号+规则名，绝不打印命中内容
+tree-privacy-check:
+	@python3 -S scripts/tree-privacy-check.py
+
+## alert-check: 钉钉桥单测 + MCP 桥 /metrics 冒烟 + 两个 dashboard 结构/PromQL 形态 + AM/Prometheus 配置（后两项需监控栈已 up）
 alert-check:
 	@python3 -S -m unittest discover -s deploy -p 'test_*.py'
 	@sh deploy/test_mcp_gateway_metrics.sh
-	@python3 -S -c "import json; d=json.load(open('deploy/grafana/dashboards/tsm-hub.json')); ids=[p['id'] for p in d['panels']]; assert len(ids)==len(set(ids)), 'duplicate panel ids'; assert d['version']>=9, 'dashboard version too old'; assert len(ids)>=39, 'missing v8 panels'; assert '重启归零' in next(p for p in d['panels'] if p['id']==36)['description'], 'panel 36 counter-scope note missing'; exprs=' '.join(t['expr'] for p in d['panels'] for t in p.get('targets',[])); assert all(m in exprs for m in ('tsm_hub_upstream_error_classes_total','tsm_hub_http_first_byte_seconds_bucket','flow=')), 'v8 metrics not wired into panels'"
+	@python3 -S deploy/check_dashboards.py
 	@docker compose exec -T alertmanager amtool check-config /etc/alertmanager/alertmanager.yml
 	@docker compose exec -T prometheus promtool check config /etc/prometheus/prometheus.yml
 	@docker compose exec -T prometheus promtool check rules /etc/prometheus/prometheus.rules.yml

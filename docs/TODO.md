@@ -79,7 +79,8 @@
 - [x] Go 编译零警告、`go vet` 通过
 - [x] 前端编译零警告（Angular）
 - [x] 单元测试全部通过（`go test ./...` 覆盖 14 个包；`make test` 前置 `fmt-check` 门禁，
-      `make check` 聚合格式/单测/vet/隐私四道纯本地门禁，`make test-race` 竞态回归亦全绿）。
+      `make check` 聚合格式/单测/vet 与两道隐私共五道纯本地门禁（`privacy-check` 守运行时
+      配置，`tree-privacy-check` 守即将提交的仓库内容），`make test-race` 竞态回归亦全绿）。
       `make cover` 已修好并自动回退到完整 Go 1.25 SDK；补齐适配器子包契约测试后
       该包覆盖率 8.9% → 86.6%，全仓总覆盖率 51.4% → **58.8%**
       （2026-11-15 再补 `internal/config` 86.0% / `internal/audit` 89.0% 单测，此前两包 0.0% 且

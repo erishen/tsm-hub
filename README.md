@@ -780,9 +780,10 @@ exactly that case. The 3 blackbox alerts are likewise undeliverable if the probe
 itself dies; `up{job="blackbox-exporter"}` and panels 28–31 cover that gap.
 
 **Setup**: secrets live only in `.env` (gitignored, keep mode `0600`).
-`DINGTALK_WEBHOOK_URL` / `DINGTALK_WEBHOOK_SECRET` are the same group robot as
-`work/sale/daoye-engine`'s `DAOYE_WEBHOOK_*`; copy those two values. The signing
-algorithm matches `daoye_engine/notify.py`. `DINGTALK_KEYWORD=告警` covers robots using
+`DINGTALK_WEBHOOK_URL` / `DINGTALK_WEBHOOK_SECRET` point at one DingTalk group
+robot; copy the two values from your existing alerting setup (variable names may
+differ there). The signing algorithm is the standard DingTalk HMAC-SHA256 scheme.
+`DINGTALK_KEYWORD=告警` covers robots using
 a custom-keyword rule (the word appears in both title and body) — change it if your
 robot uses a different keyword. `DINGTALK_DRY_RUN=1` logs only, without pushing.
 
@@ -862,12 +863,13 @@ variable to the `tsm-hub` service in `docker-compose.yml`, then
 ## Testing
 
 ```bash
-make check         # Aggregate local gate: fmt-check + test + vet + privacy-check (no containers needed)
+make check         # Aggregate local gate: fmt-check + test + vet + privacy-check + tree-privacy-check (no containers needed)
 make test          # All Go packages (runs the fmt-check gate first)
 make fmt-check     # Fails on any gofmt -l output
 make cover         # Coverage (auto-falls back to a complete Go 1.25 SDK under ~/sdk; override with GO=...)
 make privacy-check # config.json* permissions + plaintext key gate
-make alert-check   # DingTalk unit tests + MCP bridge /metrics smoke + dashboard structure + AM/Prometheus config (config checks need the stack up)
+make tree-privacy-check # Prospective commit content: credentials, build paths, private IDs, private IPs
+make alert-check   # DingTalk unit tests + MCP bridge /metrics smoke + both dashboards' structure/PromQL + AM/Prometheus config (config checks need the stack up)
 ```
 
 | Package | Coverage |

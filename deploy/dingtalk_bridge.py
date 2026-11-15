@@ -7,8 +7,8 @@
 本服务做三件事：协议转换、中文消息排版、加签推送。
 
 配置全部走环境变量（compose 从仓库根 .env 插值），**URL 与 secret 绝不写进
-任何入库文件，也绝不出现在日志/HTTP 错误里**。加签算法与
-``work/sale/daoye-engine/daoye_engine/notify.py`` 保持同款，复用同一个群机器人。
+任何入库文件，也绝不出现在日志/HTTP 错误里**。加签算法是钉钉标准的
+HMAC-SHA256 方案，与既有告警配置复用同一个群机器人。
 
 端点：
   GET  /healthz           健康探针（只回报 configured 布尔值，不回报 URL）
