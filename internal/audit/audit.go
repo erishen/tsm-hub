@@ -195,17 +195,21 @@ func maskSensitive(s string) string {
 	fields := []string{"api_key", "apiKey", "token", "password", "secret"}
 	for _, field := range fields {
 		prefix := `"` + field + `":"`
+		from := 0
 		for {
-			idx := strings.Index(result, prefix)
+			idx := strings.Index(result[from:], prefix)
 			if idx < 0 {
 				break
 			}
-			start := idx + len(prefix)
+			pos := from + idx
+			start := pos + len(prefix)
 			end := strings.Index(result[start:], `"`)
 			if end < 0 {
 				break
 			}
 			result = result[:start] + "***" + result[start+end:]
+			// 跳过刚写入的 "***"，否则会在同一处前缀上反复匹配，陷入死循环。
+			from = start + 3
 		}
 	}
 	// 脱敏 sk- 开头的 key
