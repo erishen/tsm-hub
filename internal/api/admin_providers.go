@@ -174,7 +174,7 @@ func (s *Server) probeAliBailianLimits(ctx context.Context, baseURL, key string)
 		return nil
 	}
 	req.Header.Set("Authorization", "Bearer "+key)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := adminHTTPClient.Do(req)
 	if err != nil {
 		return nil
 	}
@@ -286,7 +286,7 @@ func (s *Server) probeBalance(ctx context.Context, baseURL, key string) map[stri
 			continue
 		}
 		upReq.Header.Set("Authorization", "Bearer "+key)
-		resp, err := http.DefaultClient.Do(upReq)
+		resp, err := adminHTTPClient.Do(upReq)
 		cancel()
 		if err != nil || resp.StatusCode != http.StatusOK {
 			if resp != nil {

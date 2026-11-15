@@ -23,6 +23,12 @@ import (
 	"time"
 )
 
+// toolHTTPClient 是内置工具（汇率查询等）访问外部 API 的共享 client。
+// 显式设置 Timeout（15s）兜底，避免外部 API 挂起时 goroutine 永久阻塞
+// （DefaultClient 的 Timeout 为 0）。调用点已用 context.WithTimeout 设置
+// 更紧的超时，Client.Timeout 作为最终兜底生效。
+var toolHTTPClient = &http.Client{Timeout: 15 * time.Second}
+
 const (
 	fetchMaxBytes = 2 << 20 // fetch_url 响应上限 2MB
 	readMaxBytes  = 512 << 10
@@ -756,7 +762,7 @@ func (p *Proxy) toolExchangeRate(args toolArgs) (string, error) {
 		return "", err
 	}
 	req.Header.Set("User-Agent", "tsm-hub/1.0")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := toolHTTPClient.Do(req)
 	if err != nil {
 		return "", err
 	}

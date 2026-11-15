@@ -737,7 +737,7 @@ func (s *Server) probeModelsOnce(ctx context.Context, baseURL, key string) ([]ma
 				upReq.Header.Set("Authorization", "Bearer "+key)
 			}
 		}
-		resp, err := http.DefaultClient.Do(upReq)
+		resp, err := adminHTTPClient.Do(upReq)
 		if err != nil {
 			return nil, nil, err
 		}
