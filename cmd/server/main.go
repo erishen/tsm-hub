@@ -239,6 +239,10 @@ func checkConfigSecurity(configFile string, st *store.Store, logger *slog.Logger
 		if p.APIKey == "" {
 			continue
 		}
+		// 已加密的密钥不算明文，跳过（既不算明文也不算 env 引用）。
+		if store.IsEncryptedSecret(p.APIKey) {
+			continue
+		}
 		if strings.HasPrefix(p.APIKey, store.EnvKeyPrefix) {
 			envKeys++
 		} else {

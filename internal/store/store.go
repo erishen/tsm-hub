@@ -62,6 +62,10 @@ func New(path string) (*Store, error) {
 		if err := json.Unmarshal(raw, &s.cfg); err != nil {
 			return nil, fmt.Errorf("parse config %s: %w", path, err)
 		}
+		// 解密落盘的密钥字段（若有主密钥且字段已加密）。无主密钥的明文配置原地 no-op。
+		if err := OpenConfig(&s.cfg); err != nil {
+			return nil, fmt.Errorf("open config %s: %w", path, err)
+		}
 	}
 	s.applyDefaults()
 	s.applyEnvOverrides()
@@ -197,7 +201,15 @@ func (s *Store) Settings() Settings {
 
 // saveLocked 原子落盘：先写同目录临时文件，再 rename 覆盖。
 func (s *Store) saveLocked() error {
-	raw, err := json.MarshalIndent(s.cfg, "", "  ")
+	// 在临时副本上加密密钥字段后落盘，保持内存态 s.cfg 为明文（proxy 仍需明文鉴权）。
+	draft := s.cfg
+	draft.Providers = append([]Provider(nil), s.cfg.Providers...)
+	draft.Routes = append([]Route(nil), s.cfg.Routes...)
+	draft.Keys = append([]APIKey(nil), s.cfg.Keys...)
+	if err := SealConfig(&draft); err != nil {
+		return fmt.Errorf("seal config secrets: %w", err)
+	}
+	raw, err := json.MarshalIndent(draft, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal config: %w", err)
 	}
@@ -639,6 +651,10 @@ func (s *Store) Reload() error {
 	var cfg Config
 	if err := json.Unmarshal(raw, &cfg); err != nil {
 		return fmt.Errorf("parse config %s: %w", s.path, err)
+	}
+	// 解密密钥字段（同 load 路径；密文无主密钥则报错并保留旧配置）。
+	if err := OpenConfig(&cfg); err != nil {
+		return fmt.Errorf("open config %s: %w", s.path, err)
 	}
 	cfg.Version = CurrentVersion
 	s.cfg = cfg
