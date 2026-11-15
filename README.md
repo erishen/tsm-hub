@@ -10,7 +10,7 @@
 - **Protocol**: OpenAI-compatible client API (`/v1/chat/completions`, `/v1/models`, …), with SSE streaming passthrough; **upstream protocol adapter layer** supports 13 protocols (OpenAI/Anthropic/Azure/Gemini/Bedrock/SageMaker/Cohere/Mistral/HuggingFace/Replicate/Together/Fireworks/Groq) + 12 China platforms (all OpenAI-compatible)
 - **Capability pool**: built-in generic tools + Agent Skills library + MCP servers + Docker sandbox + session memory
 - **Smart routing**: priority failover, weighted distribution, smart cost-aware routing, auto scene routing, deterministic fastpath
-- **Security & compliance**: SHA-256 key hashing, audit logs (auto-redacted secrets), automatic usage cleanup, upstream key `env:` references, native TLS/HTTPS, CORS middleware, startup security self-check (config permissions / plaintext key warnings / TLS warnings), [Security Guide](./docs/SECURITY.md), [Privacy Policy](./docs/PRIVACY.md), [DPA Template](./docs/DPA.md)
+- **Security & compliance**: SHA-256 key hashing, audit logs (auto-redacted secrets), automatic usage cleanup, upstream key `env:` references, optional AES-256-GCM at-rest encryption of upstream keys (`TSM_HUB_MASTER_KEY`, fail-closed), config write file-lock + `SIGHUP` hot reload (multi-instance safe), outbound calls on timeout-guarded HTTP clients, native TLS/HTTPS, CORS middleware, startup security self-check (config permissions / plaintext key warnings / TLS warnings / master key validation), cost-warning badge in the admin console (`GET /api/admin/cost-warnings`), [Security Guide](./docs/SECURITY.md), [Privacy Policy](./docs/PRIVACY.md), [DPA Template](./docs/DPA.md)
 - **Admin console**: 19 pages (Dashboard/Providers/Upstream Platforms/Routes/Keys/Models/Balances/Usage/Observability/Skills/MCP/Tools/Memory/Sandbox/Fastpath/Recommendations/Playground/Audit Logs/A2A Panel), dark mode, global search, PWA
 
 ---
@@ -147,6 +147,12 @@ TSM_HUB_ADDR=:9070
 TSM_HUB_DATA_DIR=./data
 TSM_HUB_ADMIN_TOKEN=your-admin-token
 TSM_HUB_LOG_LEVEL=info
+
+# At-rest encryption (optional): master key for AES-256-GCM sealing of
+# providers[].api_key in config.json. 32 bytes as 64-char hex or 44-char base64.
+# Unset = keys stay as env:/plaintext (backward compatible); malformed key
+# refuses to start (fail fast). Format validated at startup.
+# TSM_HUB_MASTER_KEY=0123...ef
 
 # Smart routing strategy
 TSM_HUB_SMART_STRATEGY=stability_first  # cost_first / stability_first / task_aware / balanced
@@ -835,8 +841,10 @@ The Alertmanager UI is also unauthenticated — keep 19093 on loopback.
 ## Config privacy gate
 
 `data/config.json` and every `config.json.bak-*` must be mode `0600`, and every
-`providers[].api_key` must be an `env:TSM_HUB_KEY_*` reference — never a literal
-upstream key. Historical backups are kept as rollback points but redacted in place.
+`providers[].api_key` must be an `env:TSM_HUB_KEY_*` reference or `enc:v1:…`
+ciphertext (AES-256-GCM at rest, enabled by `TSM_HUB_MASTER_KEY`) — never a
+literal upstream key. Historical backups are kept as rollback points but
+redacted in place.
 
 ```bash
 make privacy-check                                    # read-only; exit 1 on bad perms / plaintext key

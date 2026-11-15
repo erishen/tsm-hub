@@ -9,7 +9,7 @@
 - **协议**：客户端 OpenAI 兼容（`/v1/chat/completions`、`/v1/models`…），含 SSE 流式透传；**上游协议适配层**支持 13 种协议（OpenAI/Anthropic/Azure/Gemini/Bedrock/SageMaker/Cohere/Mistral/HuggingFace/Replicate/Together/Fireworks/Groq）+ 12 个国内平台（均 OpenAI 兼容）
 - **能力池**：内置通用工具 + Agent Skills 技能库 + MCP server + Docker 沙箱 + 会话记忆
 - **智能路由**：优先级 failover、权重分流、smart 成本智能路由、auto 场景路由、确定性快路径
-- **安全合规**：Key SHA-256 哈希存储、审计日志、用量自动清理、上游 Key `env:` 引用、[安全部署指南](./docs/SECURITY.md)
+- **安全合规**：Key SHA-256 哈希存储、审计日志、用量自动清理、上游 Key `env:` 引用、可选 AES-256-GCM 落盘加密（`TSM_HUB_MASTER_KEY`，fail-closed）、配置写文件锁 + `SIGHUP` 热加载（多实例安全）、出站调用走带超时 HTTP client、管理台成本告警红点（`GET /api/admin/cost-warnings`）、[安全部署指南](./docs/SECURITY.md)
 - **管理台**：18 个页面（概览/Providers/上游平台/路由表/Keys/模型/额度/用量/监控/技能库/MCP/工具/记忆/沙箱/快路径/应用推荐/测试/审计日志），深色模式、全局搜索、PWA
 
 ---
@@ -657,7 +657,8 @@ Alertmanager UI 同样无鉴权，19093 只绑回环。
 ## 配置隐私门禁
 
 `data/config.json` 及所有 `config.json.bak-*` 权限必须是 `0600`，且每个
-`providers[].api_key` 必须写成 `env:TSM_HUB_KEY_*` 引用，不允许明文上游 key。
+`providers[].api_key` 必须写成 `env:TSM_HUB_KEY_*` 引用或 `enc:v1:…` 密文
+（AES-256-GCM 落盘加密，由 `TSM_HUB_MASTER_KEY` 启用），不允许明文上游 key。
 历史备份保留作回滚点，但已就地脱敏。
 
 ```bash

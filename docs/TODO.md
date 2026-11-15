@@ -64,6 +64,8 @@
 - [x] Admin Token 鉴权（`X-Admin-Token`），登录暴力尝试防护（5 次锁 10 分钟）
 - [x] Key SHA-256 哈希存储，新建只展示一次明文，2 分钟重看窗口
 - [x] config.json 权限 600，上游 Key 支持 `env:VAR` 引用（不写进配置文件）
+- [x] 上游 Key 可选 AES-256-GCM 落盘加密（`TSM_HUB_MASTER_KEY` → `enc:v1:`，fail-closed），
+      配置写文件锁（flock）+ SIGHUP 兜底热加载
 - [x] 审计日志 SQLite（操作记录）
 - [x] 请求体超限保护（413）、panic 兜底（500 + Request ID）
 - [x] 4xx 不误熔断、上游错误响应 gzip 解压、JSON 错误格式化
@@ -105,6 +107,13 @@
       的审计记录会让请求 goroutine 永久阻塞（正是隐私门禁路径，创建 provider 带 api_key 即触发）。
       修法：维护 `from` 游标跳过已处理片段。新增 `internal/audit` 单测（含 `TestRecordSensitiveMasked` /
       `TestMaskSensitive`）锁死回归；`internal/config` 同步补 13 例单测。总覆盖率 56.9% → **58.8%**
+- [x] **出站 HTTP client 超时加固**（2026-11-15）：`http.DefaultClient`（Timeout=0 永不超时）
+      → 共享带超时 client（管理台/模型探测 20s、工具调用 15s，另有 `toolHTTPClient`）。
+      属防御性加固：逐处核实调用方本已带 `context.WithTimeout`（3~12s），无活跃 bug
+- [x] **`TSM_HUB_MASTER_KEY` 配错启动 fail fast**（2026-11-15）：磁盘为明文配置时，
+      格式错的主密钥原本要到首次管理台保存才报 `seal config secrets`（错误暴露过晚）；
+      启动路径前置 `store.CheckMasterKey()` 校验，配错直接拒绝启动。
+      `TestCheckMasterKey` 6 例锁死（未设/合法 hex/base64/63 位 hex/短 base64）
 
 ---
 
@@ -112,13 +121,22 @@
 
 ### P1 — 推荐做
 
-- [ ] **多实例一致性**：当前配置与限流都在单进程内存里；多副本需要 SQLite/Postgres
-      或引入文件锁 + reload 机制（`store` 已有原子写，fsnotify 热加载已就位：盯目录 + 文件名过滤）
+- [x] **多实例一致性**（2026-11-15 完成）：`saveLocked` 写入前对 `config.json.lock`
+      取 `syscall.Flock(LOCK_EX)` 跨进程串行化（写侧本身已是 tmp+fsync+rename 原子替换）；
+      新增 SIGHUP 兜底热加载（fsnotify 盯目录为主，Reload 幂等、失败保留旧配置）。
+      多副本仍共享单机内存限流状态，跨实例配额同步仍需 SQLite/Postgres（见 P2 后续）
 - [ ] **流式 token 估算兜底**：上游不返回 usage 时按字符数粗估，标记 `estimated=true`
       （2026-10-18 核查：当前路由内 provider 全部正常返回 usage，暂不实施）
-- [ ] **成本告警管理台红点**：后端 warn 日志已上线，管理台红点提示待前端接入
-- [ ] **Provider API Key AES 加密存储**：当前默认明文存 config.json（权限 600 + env: 引用可规避），
-      可加 master key 配置，存储时 AES 加密/读取时解密
+- [x] **成本告警管理台红点**（2026-11-15 完成）：`quota.Limiter.SnapshotWarnings`
+      实时快照使用率 ≥80% 的 key（不改限流状态）；`GET /api/admin/cost-warnings`
+      按使用率降序返回；管理台首页由 Go 侧 serveIndex 运行时注入原生 JS 红点
+      （幂等、不碰前端源码、`make web-build` 后仍生效），点击跳转 `/keys`
+- [x] **Provider API Key AES 加密存储**（2026-11-15 完成）：设 `TSM_HUB_MASTER_KEY`
+      （64 位 hex / 44 位 base64 = 32 字节）后，config.json 落盘的 `providers[].api_key`
+      变为 `enc:v1:<nonce||ct>`（AES-256-GCM，随机 nonce）；内存态仍明文供鉴权；
+      未设密钥 = 明文兼容（env: 引用不加密），有密文无密钥 fail-closed；
+      密钥格式启动时校验、配错拒绝启动（`store.CheckMasterKey` fail fast，
+      避免拖到首次管理台保存才报错）；privacy-check 门禁同步放行 `enc:v1:` 密文
 - [x] **admin token 保持现状，不再提醒**（2026-11-14 用户明确指令）：启动时长度 <16 只告警
       不拒绝；当前部署口令偏短，但服务只绑 `127.0.0.1`，**刻意不调整**。另注意
       `docker-compose.yml` 里 `TSM_HUB_ADMIN_TOKEN` 是注释掉的、compose 只注入显式列出的
