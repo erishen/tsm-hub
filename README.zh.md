@@ -3,7 +3,7 @@
 > 自制 Token Key + 智能路由的 LLM 网关：对外只暴露自己签发的 `sk-tr-…` Key，
 > 内部把 OpenAI 兼容请求智能路由到配置好的多家上游模型。
 
-- **后端**：Go 1.25，单二进制、标准库优先——直接依赖只有两个：`modernc.org/sqlite`（纯 Go 驱动）与 `github.com/dop251/goja`（Fastpath 检测器的 JS 沙箱）
+- **后端**：Go 1.26.11，单二进制、标准库优先——直接依赖三个：`modernc.org/sqlite`（纯 Go 驱动）、`github.com/dop251/goja`（Fastpath 检测器的 JS 沙箱）与 `github.com/fsnotify/fsnotify`（配置热加载监听）
 - **前端**：Angular 19（standalone + signals），构建产物 `embed` 进 Go 二进制
 - **存储**：JSON 配置文件（原子写）+ JSONL 用量流水 + SQLite（记忆/审计日志），无需外部数据库
 - **协议**：客户端 OpenAI 兼容（`/v1/chat/completions`、`/v1/models`…），含 SSE 流式透传；**上游协议适配层**支持 13 种协议（OpenAI/Anthropic/Azure/Gemini/Bedrock/SageMaker/Cohere/Mistral/HuggingFace/Replicate/Together/Fireworks/Groq）+ 12 个国内平台（均 OpenAI 兼容）
@@ -685,10 +685,10 @@ python3 -S scripts/config-privacy-check.py --redact   # 只脱敏 *.bak-*，绝�
 make check        # 聚合门禁：fmt-check + test + vet + privacy-check + tree-privacy-check + dashboard-check + web-lock-check（纯本地，不依赖容器）
 make test         # 全部 Go 包（先跑 fmt-check 门禁）
 make fmt-check    # gofmt -l 非空即失败
-make cover        # 覆盖率（自动回退到 ~/sdk 下完整 Go 1.25 SDK；可用 GO=... 指定）
+make cover        # 覆盖率（自动回退到 ~/sdk 下完整 Go 1.26.11 SDK；可用 GO=... 指定）
 make cover-check  # 跑 cover 后按 COVER_MIN 卡下限（先自测解析器，空/坏 profile 一律失败）
 make vulncheck    # 固定版本 govulncheck 原始报告（需联网访问 Go 漏洞库）
-make vulncheck-gate # CI 分级门禁：第三方可达漏洞硬失败，标准库告警只 WARN
+make vulncheck-gate # CI 分级门禁：所有可达漏洞硬失败（默认 VULN_STRICT=1）
 make privacy-check # config.json* 权限与明文 key 门禁
 make tree-privacy-check # 即将提交的内容（工作区优先）：凭据、构建机路径、私有标识、内网 IP
 make dashboard-check # 两个面板的结构 + PromQL 形态（仅标准库，无需容器）
@@ -708,10 +708,10 @@ make alert-check  # 钉钉桥单测 + MCP 桥 /metrics 冒烟 + 面板静态/liv
 - `coverage`：`make cover-check` 重新生成 `coverage.out` 并卡 `COVER_MIN` 下限
   （profile 缺失/为空/格式错误都硬失败）。下限按干净克隆实测值留余量——那里
   `internal/web/dist/browser` 只有 `.gitkeep`，前端产物相关用例会 SKIP；
-- `vuln`：`make vulncheck-gate` 用固定版本 `govulncheck` 扫描。**第三方模块里被
-  真实调用到的漏洞硬失败**；标准库公告打成 WARN（Go 1.25 分支已停止部分安全补丁，
-  一个永久红的门禁等于没有门禁），工具链升级后可用 `VULN_STRICT=1` 改成拦截；
-  原始 JSON 报告作为 artifact 留档。
+- `vuln`：`make vulncheck-gate` 用固定版本 `govulncheck` 扫描。**所有可达漏洞
+  一律硬失败**，含标准库：`go.mod` 钉在 Go 1.26.11（正是修掉 Go 1.25 分支遗留
+  12 条公告的补丁版），因此 `VULN_STRICT=1` 默认开启且保持常绿。
+  `VULN_STRICT=0` 只是工具链万一落后时的临时退路；原始 JSON 报告作为 artifact 留档。
 
 权限收敛为 `contents: read`，且刻意不用 `pull_request_target`（fork PR 自带的测试代码
 不能在有写权限的上下文里执行）。Go 版本取自 `go.mod`，Python 固定 3.12。

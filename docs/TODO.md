@@ -88,7 +88,7 @@
       + `docker build` 发布镜像冒烟，补上「clone 后 hooksPath 不随仓库分发」的兜底，此前 dependabot 的
       `github-actions` 更新项因无 workflow 一直空转），
       `make test-race` 竞态回归亦全绿）。
-      `make cover` 已修好并自动回退到完整 Go 1.25 SDK；补齐适配器子包契约测试后
+      `make cover` 已修好并自动回退到完整 Go 1.26.11 SDK；补齐适配器子包契约测试后
       该包覆盖率 8.9% → 86.6%，全仓总覆盖率 51.4% → **61.1%**（2026-11-15 实测）
       （2026-11-15 再补 `internal/config` 86.0% / `internal/audit` 89.0% 单测，此前两包 0.0% 且
       无间接覆盖，是安全敏感路径盲区；顺带揪出并修复 `audit.maskSensitive` 死循环，见近期修复。
@@ -105,14 +105,14 @@
       coverprofile 卡 `COVER_MIN=59.0` 下限（实测干净克隆 macOS 60.8% / Linux 59.8% /
       本机含前端产物 61.1%，留平台差异余量；先自测解析器，profile 缺失 / 空 /
       格式错误一律失败）；`make vulncheck` / `make vulncheck-gate` 用固定版本
-      `golang.org/x/vuln@v1.7.0` 做分级门禁——第三方可达漏洞硬失败、标准库告警
-      只 WARN 并留档原始 JSON，`VULN_STRICT=1` 可全拦。CI 新增 `coverage` / `vuln`
-      两个 job，双版 README 同步
+      `golang.org/x/vuln@v1.9.0` 做分级门禁——第三方可达漏洞硬失败；同日升级到
+      Go 1.26.11 后默认 `VULN_STRICT=1` 连标准库也硬失败并留档原始 JSON。
+      CI 新增 `coverage` / `vuln` 两个 job，双版 README 同步
 - [x] **依赖漏洞修复**（2026-11-15）：govulncheck 实测 `golang.org/x/text v0.3.8`
       有两条可达公告（GO-2026-5970 无限循环 / GO-2026-6629 panic），升级到
       `v0.41.0`（其 go.mod 仍要求 go 1.25.0，不抬高工具链）后第三方可达项归零。
       ⚠️ `v0.42.0+` 要求 Go 1.26，`go get` 会连带把 `go.mod` / `go.work` 抬到 1.26，
-      别直接升 latest
+      当时为守住 1.25 工具链才没升 latest；**该约束现已随 1.26.11 升级解除**
 
 ### 近期修复
 
@@ -182,12 +182,19 @@
       `upstream_error_classes_total{provider,class}` 固定枚举分类
 - [ ] Docker 镜像换 `scratch` + 静态链接（需验证 musl 下 SSE 与 DNS）
 - [ ] Key 维度模型白名单校验错误信息更具体
-- [ ] **Go 工具链升级（独立决策，勿顺手做）**：`go.mod` 固定 1.25.0，而 Go 1.25
-      分支剩余 12 条标准库公告只在 1.26.9~1.26.11 修复（用补丁版 1.25.13 复扫
-      仍全在），因此 `vulncheck-gate` 把它们列为 WARN 而非让 CI 永久红。真要升级
-      须一并改：`go.mod` / `go.work` / Dockerfile 基础镜像 / `~/sdk` 完整 SDK /
-      `make cover` 的 GOROOT 回退路径 / `GOVULNCHECK_VERSION`，然后开
-      `VULN_STRICT=1` 把标准库也变成硬失败
+- [x] **Go 工具链升级到 1.26.11**（2026-11-15 完成，起因 Dependabot PR #6）：
+      `modernc.org/sqlite v1.62.0` 要求 Go 1.26，PR 把 `go.mod` 抬到 1.26.0 后
+      `image` job 因 Dockerfile 仍是 `golang:1.25-alpine` + `GOTOOLCHAIN=local` 报
+      `go.mod requires go >= 1.26.0` 而红（其余三 job 因 setup-go 按 go.mod 装 1.26
+      全绿）。完整升级同步六处：`go.mod` / `go.sum`（钉 **1.26.11** 而非 1.26.0，
+      否则 setup-go 装 1.26.0 仍有 12 条标准库公告、strict 会红）、共享 `go.work`、
+      Dockerfile 基础镜像 `golang:1.26-alpine`（镜像内正是 1.26.11）、本机
+      `~/sdk/go1.26.11`、`make cover` 的 GOROOT 回退、`GOVULNCHECK_VERSION`
+      v1.7.0 → **v1.9.0**（要求 go 1.26.0），并把 `VULN_STRICT` 默认改为 **1**。
+      实扫 `reachable 0 / third-party 0 / stdlib 0 / informational 0`。
+      ⚠️ 共享 `go.work` 抬到 1.26.11 后 `cicdkit`（go.mod 仍是 `go 1.22`）已用
+      1.26.11 实编通过；`go mod tidy` 顺带把 `fsnotify` 从 indirect 扶正为直接
+      依赖（配置热加载本来就 import 了它）
 
 ---
 
@@ -206,10 +213,11 @@
 - ~~`make cover` 依赖完整 Go 1.25 工具链~~ **（2026-11-15 已修，非仓库缺陷）**：本机原只装
   Go 1.22.2，`go.mod` / `go.work` 要求 1.25 ⇒ Go 自动下载的 `golang.org/toolchain` 缓存被裁剪，
   `go test -coverprofile` 报 `go: no such tool "covdata"`；`GOTOOLCHAIN=local` 会被版本要求挡回。
-  现已装好官方 SDK `~/sdk/go1.25.0`（tarball SHA256 与官方一致），`make cover` 会按 GOROOT
-  识别残缺缓存并自动回退到该 SDK，也可 `make cover GO=/path/to/go` 显式指定。
+  现已有官方 SDK `~/sdk/go1.25.0`（tarball SHA256 与官方一致；2026-11-15 晚升级到
+  Go 1.26.11 后新增 `~/sdk/go1.26.11`，回退路径同步改为 `go1.26*`），`make cover` 会按
+  GOROOT 识别残缺缓存并自动回退到完整 SDK，也可 `make cover GO=/path/to/go` 显式指定。
   实测 14 包全绿、总覆盖率 **56.9%**（11-15 补完适配器测试后），`make test` / `go vet` /
   镜像构建都不受影响。
   ⚠️ 11-14 版按「`pkg/tool/.../covdata` 文件是否存在」自检是错的：官方完整 SDK 同样没有
-  独立 `covdata` 二进制（Go 1.25 由 go 命令内置），会误报；11-15 改为按 GOROOT 路径识别
+  独立 `covdata` 二进制（Go 1.25 / 1.26 均由 go 命令内置），会误报；11-15 改为按 GOROOT 路径识别
   残缺的自动下载 toolchain + 前置 SDK 的 bin 到 PATH，并把失败明确区分为工具链问题/测试问题

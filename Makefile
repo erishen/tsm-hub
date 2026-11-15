@@ -1,6 +1,6 @@
 # 前端包管理器：优先 pnpm，没装则回退 npm（可用 make PM=pnpm ... 显式指定）
 PM         ?= $(shell command -v pnpm >/dev/null 2>&1 && echo pnpm || echo npm)
-# 覆盖率目标可显式指定 Go：make cover GO=$HOME/sdk/go1.25.0/bin/go
+# 覆盖率目标可显式指定 Go：make cover GO=$HOME/sdk/go1.26.11/bin/go
 GO         ?= go
 # 面板 live 校验用的 Prometheus 宿主地址（compose 固定 127.0.0.1:19092）
 PROM_URL   ?= http://127.0.0.1:19092
@@ -8,10 +8,10 @@ PROM_URL   ?= http://127.0.0.1:19092
 # 无嵌套 Docker）59.8%、本机含前端产物 61.1%；取 59.0 给平台差异留余量。
 # 可 make cover-check COVER_MIN=... 覆写。
 COVER_MIN           ?= 59.0
-# govulncheck 固定版本：供应链上不用 @latest；v1.7.0 的 go.mod 要求 go 1.25.0，与本仓一致
-GOVULNCHECK_VERSION ?= v1.7.0
-# 1 = 连标准库告警也判失败（等 Go 工具链升级后再开）
-VULN_STRICT         ?= 0
+# govulncheck 固定版本：供应链上不用 @latest；v1.9.0 要求 go 1.26.0，与本仓 1.26.11 一致
+GOVULNCHECK_VERSION ?= v1.9.0
+# 1 = 连标准库告警也判失败。Go 1.26.11 已修掉此前 12 条公告，故默认开启
+VULN_STRICT         ?= 1
 
 BINARY     := bin/tsm-hub
 MOCK       := bin/mockupstream
@@ -132,18 +132,19 @@ alert-check:
 test-race:
 	go test -race -ldflags '-linkmode=external' ./...
 
-# go.mod / go.work 要求 go >= 1.25。若本机只装了 1.22，Go 会自动下载
+# go.mod / go.work 要求 go >= 1.26.11（钉补丁版是为了让标准库公告全部修掉、
+# VULN_STRICT=1 能常绿）。若本机只装了旧版 Go，GOTOOLCHAIN 会自动下载
 # golang.org/toolchain 模块；该缓存被裁剪时 go test -cover 会报
 # "go: no such tool covdata"。官方完整 SDK 的 pkg/tool 同样没有独立 covdata
-# 二进制（Go 1.25 由 go 命令内置），所以不能用「文件是否存在」判断工具链，
-# 改为按 GOROOT 路径识别残缺缓存并回退到 ~/sdk/go1.25.*；GO= 可显式指定。
+# 二进制（Go 1.26 由 go 命令内置），所以不能用「文件是否存在」判断工具链，
+# 改为按 GOROOT 路径识别残缺缓存并回退到 ~/sdk/go1.26.*；GO= 可显式指定。
 # 这与仓库代码无关，make test / 镜像构建不受影响。
 ## cover: 生成覆盖率（自动绕开不完整的自动下载 toolchain）
 cover:
 	@go_bin="${GO}"; \
 	if ! command -v "$${go_bin}" >/dev/null 2>&1; then \
 		echo "✗ 找不到 Go 可执行文件： $${go_bin}"; \
-		echo "  请把 Go 1.25 的 bin 加入 PATH，或用 make cover GO=/path/to/go 指定"; \
+		echo "  请把 Go 1.26.11 的 bin 加入 PATH，或用 make cover GO=/path/to/go 指定"; \
 		exit 2; \
 	fi; \
 	go_path=$$(command -v "$${go_bin}"); \
@@ -153,18 +154,18 @@ cover:
 	case "$${goroot}" in \
 		*"/pkg/mod/golang.org/toolchain@"*) \
 			sdk=""; sdkroot=""; \
-			for d in "$$HOME"/sdk/go1.25*; do \
+			for d in "$$HOME"/sdk/go1.26*; do \
 				if [ -x "$${d}/bin/go" ]; then sdk="$${d}/bin/go"; sdkroot="$${d}"; break; fi; \
 			done; \
 			if [ -n "$${sdk}" ]; then \
-				echo "ℹ 当前 go 走的是不完整的自动下载 toolchain，自动改用官方 SDK： $${sdk}"; \
+				echo "ℹ 当前 go 走自动下载的 toolchain 缓存（可能被裁剪），改用完整 SDK： $${sdk}"; \
 				go_bin="$${sdk}"; export GOROOT="$${sdkroot}"; export PATH="$${sdkroot}/bin:$${PATH}"; \
 			else \
-				echo "✗ 当前 go 走的是不完整的自动下载 toolchain（缺 covdata），且 ~/sdk 下没有官方 Go 1.25 SDK"; \
+				echo "✗ 当前 go 走自动下载的 toolchain 缓存（可能被裁剪），且 ~/sdk 下没有官方 Go 1.26.11 SDK"; \
 				echo "  GOROOT= $${goroot}"; \
 				echo "  安装完整 SDK 后重跑："; \
-				echo "    curl -fLO https://mirrors.aliyun.com/golang/go1.25.0.darwin-arm64.tar.gz"; \
-				echo "    mkdir -p ~/sdk && tar -C ~/sdk -xzf go1.25.0.darwin-arm64.tar.gz && mv ~/sdk/go ~/sdk/go1.25.0"; \
+				echo "    curl -fLO https://go.dev/dl/go1.26.11.darwin-arm64.tar.gz"; \
+				echo "    mkdir -p ~/sdk && tar -C ~/sdk -xzf go1.26.11.darwin-arm64.tar.gz && mv ~/sdk/go ~/sdk/go1.26.11"; \
 				echo "  或用 make cover GO=/path/to/complete/go 指定"; \
 				exit 2; \
 			fi ;; \
@@ -184,8 +185,8 @@ cover-check: cover
 vulncheck:
 	$(GOVULNCHECK) ./...
 
-## vulncheck-gate: CI 分级门禁——第三方可达漏洞硬失败，标准库告警只报告并留档
-##   VULN_STRICT=1 连标准库告警也拦截（等 Go 工具链升级后再开）
+## vulncheck-gate: CI 分级门禁——第三方可达漏洞硬失败；默认 VULN_STRICT=1 连标准库也拦截
+##   VULN_STRICT=0 可退回「标准库只 WARN」（仅工具链暂未跟上时临时用）
 vulncheck-gate:
 	@mkdir -p .data
 	@if [ "$(VULN_STRICT)" = "1" ]; then extra=--strict; else extra=; fi; \

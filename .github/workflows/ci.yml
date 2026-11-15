@@ -6,7 +6,7 @@ name: CI
 #
 # 不覆盖：make alert-check（需 11 个监控容器 + 运行中的 Prometheus 做 --live 解析），
 #         仍在本机手动跑。coverage / vuln 两个 job 分别承担覆盖率下限与
-#         第三方可达漏洞门禁。
+#         可达漏洞门禁（VULN_STRICT=1，标准库告警同样拦截）。
 on:
   push:
     branches: [main]
@@ -31,7 +31,7 @@ jobs:
         with:
           persist-credentials: false
 
-      # go.mod 声明 go 1.25.0；用 go-version-file 而非硬编码，避免工具链漂移。
+      # go.mod 声明 go 1.26.11；用 go-version-file 而非硬编码，避免工具链漂移。
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -110,8 +110,8 @@ jobs:
 
       # 固定 govulncheck 版本，避免 @latest 的供应链漂移。扫描器只访问 vuln.go.dev，
       # 请求里仅含「已知存在漏洞的模块路径」，不上传源码或私有依赖名。
-      # Go 1.25 分支已停止部分安全补丁，标准库公告会打成 WARN 而非让 CI 永久红；
-      # 第三方依赖里被真实调用到的漏洞仍然硬失败。
+      # go.mod 钉在 Go 1.26.11（已修掉此前 12 条标准库公告），VULN_STRICT=1
+      # 让标准库告警同样硬失败；第三方依赖里被真实调用到的漏洞本来就是硬失败。
       - name: Reachable dependency vulnerabilities
         run: make vulncheck-gate
 

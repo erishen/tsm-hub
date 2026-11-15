@@ -1,24 +1,22 @@
 #!/usr/bin/env python3
-"""govulncheck 分级门禁：第三方依赖的可达漏洞硬失败，标准库告警只报告。
+"""govulncheck 分级门禁：可达漏洞按「谁该负责修」分层判定。
 
-    python3 -S scripts/vuln-gate.py --version v1.7.0 [options]
+    python3 -S scripts/vuln-gate.py --version v1.9.0 [options]
     python3 -S scripts/vuln-gate.py --report .data/govulncheck.json
     python3 -S scripts/vuln-gate.py --self-test
 
-为什么不直接让 ``govulncheck ./...`` 的退出码当门禁：本仓库 ``go.mod`` 固定
-Go 1.25.0，而 Go 1.25 分支已停止发布安全补丁（剩下的标准库告警只在 1.26.9+
-修复）。若对所有可达漏洞一律失败，CI 会**永久红**，等于没有门禁。因此按
-「谁该负责修」分层：
+不直接拿 ``govulncheck ./...`` 的退出码当门禁，是为了区分责任方并保留可
+执行的修复路径：
 
   * 第三方模块里被真实调用到的漏洞 → 升级依赖即可解决，**硬失败**；
-  * 标准库里被真实调用到的漏洞 → 需要升级 Go 工具链，属独立决策，
-    **打印为 WARN**（含编号与修复版本），不拦截；
+  * 标准库里被真实调用到的漏洞 → 需升级 Go 工具链；本仓 ``go.mod`` 钉在
+    Go 1.26.11（已修掉此前 12 条公告），Makefile 默认 ``VULN_STRICT=1`` 让它
+    们同样**硬失败**；``VULN_STRICT=0``（不带 ``--strict``）才退回 WARN；
   * 仅在模块/包层面出现、调用链没到的漏洞 → 计数字、不拦截。
 
-``--strict`` 会把标准库告警也变成失败，供工具链升级后切换。
 报告解析失败、扫描器报错、缺少 config/SBOM 对象一律判失败，不静默放行。
 
-判据取自 govulncheck v1.7.0 的 JSON 流：带 ``function`` 帧的 finding 才是
+判据取自 govulncheck v1.9.0 的 JSON 流：带 ``function`` 帧的 finding 才是
 「被真实调用」，只有 ``module``/``version`` 的 finding 是信息性条目；
 **trace[0] 是脆弱符号本身**，用它所属的模块归属，而不是整条调用链里出现过的
 所有模块（否则「标准库漏洞恰好经过第三方包调用」会被误判成第三方问题）。
@@ -140,16 +138,16 @@ def verdict(data: dict, strict: bool) -> tuple[bool, list[str]]:
         ),
     ]
     if data["stdlib"]:
-        blocking = "BLOCKING (--strict)" if strict else "WARN (toolchain upgrade)"
+        blocking = "BLOCKING (--strict)" if strict else "WARN (use --strict to block)"
         lines.append("%s: %d stdlib advisories:" % (blocking, len(data["stdlib"])))
         for oid in sorted(data["stdlib"])[:MAX_LIST]:
             lines.append("  " + describe(oid, data))
         if len(data["stdlib"]) > MAX_LIST:
             lines.append("  ... and %d more" % (len(data["stdlib"]) - MAX_LIST))
         lines.append(
-            "  Some are fixed in later 1.25.x patches, the rest only in Go 1.26.9+;"
+            "  Upgrade the Go toolchain to the fixed version listed above;"
         )
-        lines.append("  toolchain upgrade is tracked in docs/TODO.md.")
+        lines.append("  see docs/TODO.md and SECURITY.md for the supported-version policy.")
     if data["third"]:
         lines.append("FAIL: %d reachable third-party vulnerabilities:" % len(data["third"]))
         for oid in sorted(data["third"])[:MAX_LIST]:
@@ -176,7 +174,7 @@ def self_test() -> int:
         return kw
 
     cfg = obj(
-        config=obj(scanner_version="v1.7.0", go_version="go1.25.0", db_last_modified="test")
+        config=obj(scanner_version="v1.9.0", go_version="go1.26.11", db_last_modified="test")
     )
     sbom = obj(
         SBOM=obj(
@@ -203,7 +201,7 @@ def self_test() -> int:
             osv="GO-TEST-2",
             fixed_version="v1.26.9",
             trace=[
-                obj(module="stdlib", version="v1.25.0", package="net/http", function="Serve"),
+                obj(module="stdlib", version="v1.26.11", package="net/http", function="Serve"),
                 obj(module="example.com/app", package="main", function="main"),
             ],
         )
@@ -237,15 +235,35 @@ def self_test() -> int:
         except ValueError:
             continue
         raise AssertionError("malformed JSON stream must be rejected")
-    print("OK   self-test passed (6 cases)")
+    # 结论行走 main() 的真实分支；覆盖 strict / 非 strict / 失败三种输出，
+    # 防止只在「现场扫描」路径才触发的 NameError 再次漏过自测。
+    if result_line(True, True) != "OK   no reachable vulnerabilities":
+        raise AssertionError("strict success line changed")
+    if result_line(True, False) != "OK   no reachable third-party vulnerabilities":
+        raise AssertionError("non-strict success line changed")
+    if result_line(False, True) != "FAIL vulnerability gate":
+        raise AssertionError("failure line changed")
+    print("OK   self-test passed (9 cases)")
     return 0
+
+
+def result_line(ok: bool, strict: bool) -> str:
+    """最终结论行。抽成函数以便 self-test 覆盖 strict / 非 strict 两条路径。"""
+    if not ok:
+        return "FAIL vulnerability gate"
+    label = (
+        "no reachable vulnerabilities"
+        if strict
+        else "no reachable third-party vulnerabilities"
+    )
+    return "OK   " + label
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--report", help="读取已有 -json 报告；不指定则现场扫描")
     ap.add_argument("--go", default="go", help="go 可执行文件")
-    ap.add_argument("--version", default="v1.7.0", help="govulncheck 固定版本")
+    ap.add_argument("--version", default="v1.9.0", help="govulncheck 固定版本")
     ap.add_argument("--save", help="把原始 -json 报告另存到该路径")
     ap.add_argument("--strict", action="store_true", help="标准库告警也判失败")
     ap.add_argument("--self-test", action="store_true", help="只跑解析器自测")
@@ -269,7 +287,7 @@ def main() -> int:
     ok, lines = verdict(data, args.strict)
     for line in lines:
         print(line)
-    print("OK   no reachable third-party vulnerabilities" if ok else "FAIL vulnerability gate")
+    print(result_line(ok, args.strict))
     return 0 if ok else 1
 
 

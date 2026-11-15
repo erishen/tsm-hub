@@ -12,9 +12,10 @@
 | 更早的提交或自行 fork 的旧副本 | ❌ 否，请先在 `main` 上复现 |
 
 本项目是**自托管**软件：更新二进制、升级构建用的 Go 工具链、以及加固运行环境
-都由部署方负责。当前 `go.mod` 固定 Go 1.25 最低版本，而 Go 1.25 分支已有部分
-标准库公告不再获得补丁；CI 的 `make vulncheck-gate` 会把这类告警列为 WARN，
-工具链升级作为独立事项记在 [docs/TODO.md](./docs/TODO.md)。
+都由部署方负责。当前 `go.mod` 钉在 **Go 1.26.11**（该补丁版修掉了 Go 1.25 分支
+遗留的 12 条标准库公告）；CI 的 `make vulncheck-gate` 默认 `VULN_STRICT=1`，
+第三方与标准库的可达漏洞**一律硬失败**，不再有 WARN 豁免。后续工具链升级见
+[docs/TODO.md](./docs/TODO.md)。
 
 ## Reporting a vulnerability / 报告漏洞
 
@@ -78,7 +79,7 @@
 make check            # 七道纯本地门禁（含隐私 / 面板 / 锁一致性）
 make cover-check      # 覆盖率下限
 make vulncheck        # 打印 govulncheck 原始报告
-make vulncheck-gate   # CI 分级门禁（VULN_STRICT=1 连标准库告警也拦截）
+make vulncheck-gate   # CI 门禁（默认 VULN_STRICT=1，所有可达漏洞都拦截）
 ```
 
 相关文档：[docs/SECURITY.md](./docs/SECURITY.md) ·

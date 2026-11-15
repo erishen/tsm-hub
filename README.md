@@ -4,7 +4,7 @@
 > Expose only your own `sk-tr-…` keys to clients; internally route OpenAI-compatible requests to multiple configured upstream providers,
 > with a built-in capability pool (generic tools + Agent Skills + MCP servers + Docker sandbox + session memory) that every downstream client gets for free.
 
-- **Backend**: Go 1.25, single binary, stdlib-first — only two direct dependencies: `modernc.org/sqlite` (pure-Go driver) and `github.com/dop251/goja` (JS runtime for the Fastpath detector sandbox)
+- **Backend**: Go 1.26.11, single binary, stdlib-first — three direct dependencies: `modernc.org/sqlite` (pure-Go driver), `github.com/dop251/goja` (JS runtime for the Fastpath detector sandbox), and `github.com/fsnotify/fsnotify` (config hot-reload watcher)
 - **Frontend**: Angular 19 (standalone + signals), build output `embed`ded into the Go binary
 - **Storage**: JSON config (atomic writes) + JSONL usage logs + SQLite (memory/audit logs), no external DB required
 - **Protocol**: OpenAI-compatible client API (`/v1/chat/completions`, `/v1/models`, …), with SSE streaming passthrough; **upstream protocol adapter layer** supports 13 protocols (OpenAI/Anthropic/Azure/Gemini/Bedrock/SageMaker/Cohere/Mistral/HuggingFace/Replicate/Together/Fireworks/Groq) + 12 China platforms (all OpenAI-compatible)
@@ -873,10 +873,10 @@ variable to the `tsm-hub` service in `docker-compose.yml`, then
 make check         # Aggregate local gate: fmt-check + test + vet + privacy-check + tree-privacy-check + dashboard-check + web-lock-check (no containers needed)
 make test          # All Go packages (runs the fmt-check gate first)
 make fmt-check     # Fails on any gofmt -l output
-make cover         # Coverage (auto-falls back to a complete Go 1.25 SDK under ~/sdk; override with GO=...)
+make cover         # Coverage (auto-falls back to a complete Go 1.26.11 SDK under ~/sdk; override with GO=...)
 make cover-check   # Run cover, then enforce the COVER_MIN floor (self-tests the parser first)
 make vulncheck     # Full govulncheck report (pinned version; needs network for the Go vuln DB)
-make vulncheck-gate # CI gate: reachable third-party vulns fail, stdlib advisories are WARN
+make vulncheck-gate # CI gate: all reachable vulns fail (VULN_STRICT=1 by default)
 make privacy-check # config.json* permissions + plaintext key gate
 make tree-privacy-check # Prospective commit content: credentials, build paths, private IDs, private IPs
 make dashboard-check # Dashboard structure + PromQL shape for both dashboards (stdlib only, no containers)
@@ -898,11 +898,12 @@ push to `main`, every PR, and manual `workflow_dispatch`:
   `COVER_MIN` floor (a missing/empty/malformed profile is a hard failure). The floor
   is set from the clean-clone measurement, where frontend-asset tests SKIP because
   `internal/web/dist/browser` only has `.gitkeep`;
-- `vuln`: `make vulncheck-gate` with a pinned `govulncheck` version. Reachable
-  vulnerabilities in **third-party modules** fail the job; **standard-library**
-  advisories are printed as WARN (Go 1.25 has stopped receiving some patches, and a
-  gate that is permanently red is no gate at all). `VULN_STRICT=1` makes them blocking
-  once the toolchain is upgraded; the raw JSON report is uploaded as an artifact.
+- `vuln`: `make vulncheck-gate` with a pinned `govulncheck` version. **All reachable
+  vulnerabilities fail the job**, including standard-library ones: `go.mod` pins Go
+  1.26.11 (the patch level that fixes the 12 advisories left behind by the 1.25
+  branch), so `VULN_STRICT=1` is the default and stays green. `VULN_STRICT=0` is
+  only a temporary escape hatch if the toolchain ever lags; the raw JSON report is
+  uploaded as an artifact.
 
 Permissions are reduced to `contents: read`, and `pull_request_target` is deliberately
 avoided so test code from a fork PR can never execute in a write-capable context.

@@ -326,7 +326,7 @@ healthy ──────► healthy   healthy ──────────�
 ### 13.1 构建策略
 
 采用多阶段构建（`Dockerfile`）：
-- **构建阶段**：`golang:1.25-alpine`，编译 Go 二进制（CGO_ENABLED=1，external linkmode 兼容 musl）
+- **构建阶段**：`golang:1.26-alpine`（镜像内为 Go 1.26.11），编译 Go 二进制（CGO_ENABLED=1，external linkmode 兼容 musl）
 - **运行阶段**：`alpine:3.20`，仅包含二进制 + ca-certificates + tzdata，以非 root 用户 `tsmhub` 运行
 
 前端构建产物不在镜像内编译（避免镜像内装 Node.js），而是由宿主机 `make web-build` 构建后同步到 `internal/web/dist/browser/`，通过 `go:embed` 嵌入二进制。`make docker-build` 和 `make docker-up` 会自动先运行 `web-build`，确保管理台始终是最新版本。

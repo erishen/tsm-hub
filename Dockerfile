@@ -7,7 +7,7 @@
 #
 # 如果跳过前端构建，镜像依然可用（API 正常），只是管理台显示占位页。
 
-FROM golang:1.25-alpine AS builder
+FROM golang:1.26-alpine AS builder
 
 RUN apk add --no-cache gcc musl-dev
 
