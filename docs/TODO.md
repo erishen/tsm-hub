@@ -77,7 +77,9 @@
 - [x] 单元测试全部通过（`go test ./...` 覆盖 14 个包；`make test` 前置 `fmt-check` 门禁，
       `make check` 聚合格式/单测/vet/隐私四道纯本地门禁，`make test-race` 竞态回归亦全绿）。
       `make cover` 已修好并自动回退到完整 Go 1.25 SDK；补齐适配器子包契约测试后
-      该包覆盖率 8.9% → 86.6%，全仓总覆盖率 51.4% → **56.9%**
+      该包覆盖率 8.9% → 86.6%，全仓总覆盖率 51.4% → **58.8%**
+      （2026-11-15 再补 `internal/config` 86.0% / `internal/audit` 89.0% 单测，此前两包 0.0% 且
+      无间接覆盖，是安全敏感路径盲区；顺带揪出并修复 `audit.maskSensitive` 死循环，见近期修复）
 - [x] 端到端冒烟脚本（`make smoke`）
 - [x] Dockerfile + docker-compose（多阶段构建，tsm-hub 镜像 37.8MB；监控栈已加内存/CPU 上限）
 - [x] 代码重构：admin.go 拆分（2656行→6文件）、前端模板抽取（内联→外部HTML/CSS）、app 目录按类型分子目录、适配器子包
@@ -98,6 +100,11 @@
 - [x] **config 热加载原子替换失效**（2026-10-18）：watchConfig 改盯目录 + 文件名过滤，saveLocked/编辑器原子保存后仍生效（§8）
 - [x] **数据竞争修复**（2026-10-18）：`go test -race` 全绿；客户端断开（499）不计 provider 失败、不计错误率
 - [x] **错误率 41.7% → 33.9%**（2026-10-18）：放宽 isModelNotFound、清理路由死模型、gemini 移出默认路由、alibailian 禁用
+- [x] **`audit.maskSensitive` 死循环修复**（2026-11-15）：替换敏感值为 `"***"` 后同一 `"api_key":"` 前缀仍匹配，
+      内层 `for` 在同一 idx 反复重置换成 `***` 永不终止 → 任何 detail 含 `api_key`/`token`/`password`/`secret`
+      的审计记录会让请求 goroutine 永久阻塞（正是隐私门禁路径，创建 provider 带 api_key 即触发）。
+      修法：维护 `from` 游标跳过已处理片段。新增 `internal/audit` 单测（含 `TestRecordSensitiveMasked` /
+      `TestMaskSensitive`）锁死回归；`internal/config` 同步补 13 例单测。总覆盖率 56.9% → **58.8%**
 
 ---
 
