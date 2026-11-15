@@ -694,6 +694,22 @@ make install-hooks  # 启用版本化 pre-commit 守卫（make uninstall-hooks �
 make alert-check  # 钉钉桥单测 + MCP 桥 /metrics 冒烟 + 面板静态/live PromQL 校验 + AM/Prometheus 配置（需监控栈已 up）
 ```
 
+### 自动触发与本机守卫的分工
+
+`.github/workflows/ci.yml` 在 push 到 `main`、任意 PR 及手动 `workflow_dispatch` 时，
+于干净 Linux 环境跑两个并行 job：`gates` 依次执行 `make check`（七道）、`make test-race`、
+`make build`；`image` 用 `docker build` 实证 alpine/musl + CGO + 外部链接模式与
+`//go:embed` 占位目录能产出发布镜像（Dockerfile 只编译 Go，CI 无需 Node/npm）。
+权限收敛为 `contents: read`，且刻意不用 `pull_request_target`（fork PR 自带的测试代码
+不能在有写权限的上下文里执行）。Go 版本取自 `go.mod`，Python 固定 3.12。
+
+本机另有 `make install-hooks` 启用的 pre-commit 快速守卫，但 `core.hooksPath` 写在
+`.git/config`、**不随克隆分发**，克隆后需手动执行一次；CI 是协作 / PR 场景的兜底。
+
+CI 刻意不跑 `make alert-check`（需 11 个监控容器与运行中的 Prometheus 做 `--live` 表达式解析）
+和 `make cover`（需完整 Go SDK、耗时较长），两者仍在本机手动执行。
+`.github/dependabot.yml` 的 `github-actions` 更新项也随本 workflow 一并生效。
+
 | 包 | 覆盖内容 |
 |----|----------|
 | `internal/api` | 端到端：鉴权、failover、SSE、限流、Key 生命周期、/v1/models、配置落盘、provider 响应头、4xx 不熔断、上游计价、登录限流、413、panic 兜底、healthz 健康、env Key、/metrics 指标门禁与标签白名单、HTTP 直方图格式/路由折叠/flow 分离/首字节 family/nil 安全/端点隐私、`withLogging` 流式 Flush 埋点、失败类别 0 值矩阵与错误正文不泄漏；管理台辅助纯函数：token 脱敏、provider ID 校验、上游额度/建议 JSON 解析、MCP server 名提取 |

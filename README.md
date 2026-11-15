@@ -882,6 +882,26 @@ make install-hooks # Enable the versioned pre-commit guard (disable with make un
 make alert-check   # DingTalk unit tests + MCP bridge /metrics smoke + dashboard static + live PromQL queries + AM/Prometheus config (needs the stack up)
 ```
 
+### CI vs local guards
+
+`.github/workflows/ci.yml` runs two parallel jobs on a clean Linux runner for every
+push to `main`, every PR, and manual `workflow_dispatch`: `gates` executes `make check`
+(all seven gates), `make test-race` and `make build`; `image` runs `docker build` to prove
+the alpine/musl + CGO + external-linkmode path and the `//go:embed` placeholder directory
+still produce a release image (the Dockerfile compiles Go only, so CI needs no Node/npm).
+Permissions are reduced to `contents: read`, and `pull_request_target` is deliberately
+avoided so test code from a fork PR can never execute in a write-capable context.
+The Go version comes from `go.mod`; Python is pinned to 3.12.
+
+The local pre-commit guard (`make install-hooks`) is versioned, but `core.hooksPath`
+lives in `.git/config` and **is not distributed with a clone** -- run `make install-hooks`
+once after cloning. CI is the backstop for collaboration and PRs.
+
+CI intentionally does not run `make alert-check` (11 monitoring containers plus a running
+Prometheus for `--live` expression parsing) or `make cover` (needs a full Go SDK and is
+slow); both stay manual. The `github-actions` entry in `.github/dependabot.yml` now has
+a workflow to keep up to date.
+
 | Package | Coverage |
 |---------|----------|
 | `internal/api` | E2E: auth, failover, SSE, rate limiting, key lifecycle, /v1/models, config persistence, provider response header, 4xx no circuit break, upstream pricing, login rate limit, 413, panic fallback, healthz health, env key, /metrics gating and label whitelist, histogram format / route folding / flow split / first-byte family / nil safety / endpoint privacy, `withLogging` streaming Flush instrumentation, zero-value error-class matrix and no error-body leakage; admin helper pure functions: token redaction, provider ID validation, upstream quota/suggestion JSON parsing, MCP server-name extraction |

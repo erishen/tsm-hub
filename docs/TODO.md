@@ -83,7 +83,10 @@
       （`privacy-check` 守运行时配置，`tree-privacy-check` 守即将提交的仓库内容，
       `dashboard-check` 守面板结构与 PromQL 形态，`web-lock-check` 守 pnpm 锁与
       `package.json` 同步且 npm 回退产物未入库；`make install-hooks` 启用版本化
-      pre-commit 快速守卫，`make alert-check` 额外用 `--live` 让 Prometheus 实解析表达式），
+      pre-commit 快速守卫，`make alert-check` 额外用 `--live` 让 Prometheus 实解析表达式；
+      `.github/workflows/ci.yml` 在 push/PR 自动跑这七道门禁 + `test-race` + `build`
+      + `docker build` 发布镜像冒烟，补上「clone 后 hooksPath 不随仓库分发」的兜底，此前 dependabot 的
+      `github-actions` 更新项因无 workflow 一直空转），
       `make test-race` 竞态回归亦全绿）。
       `make cover` 已修好并自动回退到完整 Go 1.25 SDK；补齐适配器子包契约测试后
       该包覆盖率 8.9% → 86.6%，全仓总覆盖率 51.4% → **61.1%**（2026-11-15 实测）

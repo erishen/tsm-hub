@@ -1,0 +1,68 @@
+name: CI
+
+# 把本机 `make check` 的七道门禁原样搬到干净的 Linux 环境，并自动触发。
+# 本机另有 pre-commit hook，但 core.hooksPath 写在 .git/config、不随克隆分发，
+# 所以协作/PR 场景必须由 CI 兜底。
+#
+# 不覆盖：make alert-check（需 11 个监控容器 + 运行中的 Prometheus 做 --live 解析）、
+#         make cover（需完整 Go SDK 且耗时较长）。两者仍在本机手动跑。
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# 最小权限：只读代码，不写回仓库，不需要任何 secrets。
+# 刻意不用 pull_request_target —— fork PR 自带的测试代码会在有权限的上下文里执行。
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # go.mod 声明 go 1.25.0；用 go-version-file 而非硬编码，避免工具链漂移。
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # 三个门禁脚本用了 list[...] / re.Match[str] 注解，需要 Python >= 3.9。
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # fmt-check / test / vet / privacy-check / tree-privacy-check /
+      # dashboard-check / web-lock-check。干净克隆里 privacy-check 会明确打印
+      # SKIP（无 data/config.json），仓库面已由 tree-privacy-check 覆盖。
+      - name: Local gates (make check)
+        run: make check
+
+      - name: Race regression
+        run: make test-race
+
+      # 验证 //go:embed 占位目录与外部链接产物在干净克隆里可构建。
+      - name: Build server binary
+        run: make build
+
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # 多阶段 Dockerfile 只编译 Go（前端产物由宿主预先构建），CI 里无需 Node/npm。
+      # 实证 alpine/musl + CGO + external linkmode 与 //go:embed 占位目录能产出发布镜像。
+      - name: Build release image
+        run: docker build -t tsm-hub:ci .
