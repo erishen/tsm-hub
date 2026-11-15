@@ -33,3 +33,7 @@ mcp/node_modules/
 # npm config (may contain registry auth tokens; keep local only)
 .npmrc
 web/.fakehome/
+
+# 个人供应商运维清单（含个人路由策略/优先级细节，2026-11-15 用户决定 local only；
+# 文件已 git rm --cached 移出跟踪——勿删此规则，否则下次 git add -A 会把真实清单带回公开仓）
+docs/providers-inventory.zh.md
