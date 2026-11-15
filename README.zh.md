@@ -10,7 +10,7 @@
 - **能力池**：内置通用工具 + Agent Skills 技能库 + MCP server + Docker 沙箱 + 会话记忆
 - **智能路由**：优先级 failover、权重分流、smart 成本智能路由、auto 场景路由、确定性快路径
 - **安全合规**：Key SHA-256 哈希存储、审计日志、用量自动清理、上游 Key `env:` 引用、可选 AES-256-GCM 落盘加密（`TSM_HUB_MASTER_KEY`，fail-closed）、配置写文件锁 + `SIGHUP` 热加载（多实例安全）、出站调用走带超时 HTTP client、管理台成本告警红点（`GET /api/admin/cost-warnings`）、[安全部署指南](./docs/SECURITY.md)
-- **管理台**：18 个页面（概览/Providers/上游平台/路由表/Keys/模型/额度/用量/监控/技能库/MCP/工具/记忆/沙箱/快路径/应用推荐/测试/审计日志），深色模式、全局搜索、PWA
+- **管理台**：19 个页面（概览/Providers/上游平台/路由表/Keys/模型/额度/用量/监控/技能库/MCP/工具/记忆/沙箱/快路径/应用推荐/测试/审计日志/A2A 面板），深色模式、全局搜索、PWA
 
 ---
 
