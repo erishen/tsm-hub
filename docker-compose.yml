@@ -190,6 +190,11 @@ services:
       # 19090 已被宿主机上另一个 uvicorn 服务占用（浏览器会拿到它的 404），
       # 故改用 19092。Grafana 数据源走容器 DNS prometheus:9090，不受宿主端口影响。
       - "127.0.0.1:19092:9090"
+    # 加入跨项目共享的外部网络 cicd-monitor，使 Prometheus 容器能解析
+    # 独立 compose 项目 cicdkit 的容器 DNS 名 `cicdkit` 并抓取其 /metrics。
+    networks:
+      - default
+      - cicd-monitor
     volumes:
       - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./deploy/prometheus.rules.yml:/etc/prometheus/prometheus.rules.yml:ro
@@ -333,3 +338,15 @@ volumes:
   prometheus-data:
   alertmanager-data:
   grafana-data:
+
+# 跨项目共享的外部网络：让 Prometheus 抓取独立 compose 项目 cicdkit。
+# 需先创建一次：docker network create cicd-monitor（幂等，已存在则跳过）。
+# 与 cicdkit/docker-compose.yml 里声明的同名 external 网络是同一个网络。
+# ⚠️ 共享网络是双向的：同网任意容器都能读取 tsm-hub-prometheus:9090 的
+#    /metrics（不鉴权），并 POST /-/reload（--web.enable-lifecycle 已开启）。
+#    宿主端口仍只绑 127.0.0.1，但容器网络边界已扩大；只接可信的本机服务，
+#    不要把不可信容器加进 cicd-monitor。详见 docs/PRIVACY.md §3.2。
+networks:
+  cicd-monitor:
+    external: true
+    name: cicd-monitor

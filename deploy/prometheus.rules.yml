@@ -164,3 +164,28 @@ groups:
         annotations:
           summary: "blackbox-exporter 不可达，黑盒探测已停摆"
           description: "此时 probe_success 全为 absent，不能据此判断目标健康。检查 tsm-hub-blackbox 容器与 deploy/blackbox.yml。"
+
+  # ===== cicdkit（独立 compose 项目，经共享网络 cicd-monitor 抓取）=====
+  # 注意：cicdkit 的 runs_total / probe_total / deploys_total 是「保留窗口级」
+  # gauge（随 store trim 回落、重启归零），绝不能对其用裸值或 rate()。
+  # 只有 build_seconds / deploy_seconds 是直方图，可安全用 histogram_quantile + rate。
+  - name: cicdkit
+    rules:
+      - alert: CicdkitDown
+        expr: up{job="cicdkit"} == 0 or absent(up{job="cicdkit"})
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "cicdkit /metrics 抓取失败"
+          description: "Prometheus 连续 3 分钟无法从 cicdkit:8080/metrics 取到指标（经共享网络 cicd-monitor）。检查 cicdkit 容器是否存活、是否已加入 cicd-monitor 网络（docker network inspect cicd-monitor）。"
+
+      - alert: CicdkitBuildsSlow
+        # p95 构建耗时 15 分钟持续 > 10 分钟。用直方图（而非窗口级 gauge）才能安全告警。
+        expr: histogram_quantile(0.95, sum by (le) (rate(cicdkit_build_seconds_bucket[15m]))) > 600
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "cicdkit 构建 p95 耗时过高"
+          description: "近 15 分钟构建耗时 p95 超过 10 分钟，可能是基础镜像拉取慢、构建上下文变大或宿主机资源紧张。结合 cicdkit 面板「构建耗时 p50/p95」确认。"

@@ -131,3 +131,17 @@ scrape_configs:
         target_label: instance
       - target_label: __address__
         replacement: blackbox-exporter:9115
+
+  # ===== cicdkit CI/CD 平台（独立 compose 项目，经共享网络 cicd-monitor 抓取）=====
+  # cicdkit 服务容器名为 cicdkit，监听容器内 :8080（宿主只发布 127.0.0.1:10081，
+  # 跨容器不走宿主端口）。两个项目都加入全局命名网络 cicd-monitor（见各自
+  # docker-compose.yml 的 networks.cicd-monitor.name），容器 DNS 可解析 cicdkit。
+  # 指标全部由 store 现场派生（cicdkit_/up），标签仅有限枚举，序列量恒定很小。
+  - job_name: cicdkit
+    metrics_path: /metrics
+    scheme: http
+    static_configs:
+      - targets: ["cicdkit:8080"]
+        labels:
+          service: cicdkit
+          env: local
