@@ -29,6 +29,11 @@ web/out-tsc/
 internal/web/dist/browser/*
 !internal/web/dist/browser/.gitkeep
 mcp/node_modules/
+# mcp/package-lock.json 已跟踪，是 MCP 桥依赖的确定性来源；若用户级
+# ~/.gitignore_global 里有 `package-lock.json` 规则，它会被判为「已忽略但已跟踪」，
+# 协作时容易出现 add -f / 误删后加不回来的坑。仓库级 .gitignore 优先级高于
+# core.excludesFile，这里显式取反放行（只放行这一个，其余 package-lock 仍忽略）。
+!mcp/package-lock.json
 
 # npm config (may contain registry auth tokens; keep local only)
 .npmrc
