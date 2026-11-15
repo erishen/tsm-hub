@@ -98,6 +98,13 @@ func run(cfg config.Config) error {
 			"add one in the admin console or via POST /api/admin/providers")
 	}
 
+	// 主密钥自检：设置了 TSM_HUB_MASTER_KEY 但格式错误时拒绝启动（fail-fast）。
+	// 明文配置下若不在此拦住，实例平时一切正常，直到管理台首次保存才报
+	// "seal config secrets" 失败——错误暴露得越晚越难定位。
+	if err := store.CheckMasterKey(); err != nil {
+		return err
+	}
+
 	// 安全自检：config.json 权限和明文 API Key。
 	checkConfigSecurity(cfg.ConfigFile(), st, logger)
 

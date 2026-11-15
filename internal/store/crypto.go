@@ -42,6 +42,15 @@ func masterKey() (key []byte, ok bool, err error) {
 	return nil, false, fmt.Errorf("%s must be 32 bytes: 64 hex chars or 44-char base64; got len=%d", masterKeyEnv, len(raw))
 }
 
+// CheckMasterKey 启动时校验 TSM_HUB_MASTER_KEY（若设置）。
+// 未设置 → nil（明文模式，向后兼容）；设置了但格式错误 → error，
+// 供启动路径 fail-fast：否则明文配置下实例一切正常，
+// 直到管理台首次保存才以 "seal config secrets" 失败，错误暴露得越晚越难定位。
+func CheckMasterKey() error {
+	_, _, err := masterKey()
+	return err
+}
+
 // Seal 对明文做 AES-256-GCM 加密，返回带前缀的密文。
 // 以下情况原样返回（不加密）：空串、已是密文（带前缀）、env: 引用（不含真实密钥）。
 // 未配置主密钥时返回明文（向后兼容）。

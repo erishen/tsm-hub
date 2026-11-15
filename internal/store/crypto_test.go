@@ -2,6 +2,7 @@ package store
 
 import (
 	"encoding/base64"
+	"os"
 	"strings"
 	"testing"
 )
@@ -140,5 +141,39 @@ func TestSealOpenConfig(t *testing.T) {
 	}
 	if c.Providers[1].APIKey != "env:REF" {
 		t.Fatalf("env ref after open mismatch, got %q", c.Providers[1].APIKey)
+	}
+}
+
+// TestCheckMasterKey 验证启动期主密钥自检：未设置放行（明文模式）、
+// 两种合法格式放行、格式错误报错（fail-fast，避免首次保存才暴露）。
+func TestCheckMasterKey(t *testing.T) {
+	// 未设置：放行。
+	t.Setenv(masterKeyEnv, "")
+	if err := CheckMasterKey(); err != nil {
+		t.Fatalf("unset key should pass, got %v", err)
+	}
+	os.Unsetenv(masterKeyEnv)
+	if err := CheckMasterKey(); err != nil {
+		t.Fatalf("absent key should pass, got %v", err)
+	}
+	// 合法 hex。
+	t.Setenv(masterKeyEnv, testMasterKeyHex)
+	if err := CheckMasterKey(); err != nil {
+		t.Fatalf("valid hex should pass, got %v", err)
+	}
+	// 合法 base64（32 字节）。
+	t.Setenv(masterKeyEnv, base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	if err := CheckMasterKey(); err != nil {
+		t.Fatalf("valid base64 should pass, got %v", err)
+	}
+	// 格式错误：63 位 hex（31.5 字节）。
+	t.Setenv(masterKeyEnv, "00112233445566778899aabbccddeeff00112233445566778899aabbccddeef")
+	if err := CheckMasterKey(); err == nil {
+		t.Fatal("malformed key should fail fast")
+	}
+	// 格式错误：base64 但不是 32 字节。
+	t.Setenv(masterKeyEnv, base64.StdEncoding.EncodeToString([]byte("too-short")))
+	if err := CheckMasterKey(); err == nil {
+		t.Fatal("short base64 key should fail fast")
 	}
 }
