@@ -14,7 +14,7 @@ VERSION    ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo d
 export CGO_ENABLED := 1
 LDFLAGS := -X main.version=$(VERSION) -linkmode=external
 
-.PHONY: all build run test test-race check vet fmt fmt-check cover web-install web-build web-dev web-check dev dev-stop dev-logs dev-status mock mock-run mock-run-500 clean smoke help docker-build docker-up docker-down docker-stop docker-restart docker-logs docker-status privacy-check tree-privacy-check dashboard-check alert-check
+.PHONY: all build run test test-race check vet fmt fmt-check cover web-install web-build web-dev web-check web-lock-check dev dev-stop dev-logs dev-status mock mock-run mock-run-500 clean smoke help docker-build docker-up docker-down docker-stop docker-restart docker-logs docker-status privacy-check tree-privacy-check dashboard-check alert-check install-hooks uninstall-hooks
 
 all: build
 
@@ -58,13 +58,14 @@ mock-run-500: mock
 run: build
 	./$(BINARY) -data ./data
 
-## check: 纯本地聚合门禁（gofmt + 单测 + vet + 两道隐私 + 面板结构），不依赖运行中的容器
+## check: 纯本地聚合门禁（gofmt + 单测 + vet + 两道隐私 + 面板结构 + 前端锁一致性），不依赖运行中的容器
 # privacy-check 守运行时配置（data/config.json*），tree-privacy-check 守即将提交的仓库内容。
 # 两面都要有：只查运行时配置挡不住把明文 key 写进源码（干净克隆里那份文件根本不存在）。
 # dashboard-check 只用标准库验结构/PromQL 形态，同样无需容器；它的 --live 版本需要
-# Prometheus 在跑，放在 alert-check 里。alert-check 还需 promtool/amtool 与 11 个容器，
-# cover 需完整 Go SDK 且耗时较长，两者都保持独立。CI 或提交前跑这一条即可覆盖静态检查。
-check: fmt-check test vet privacy-check tree-privacy-check dashboard-check
+# Prometheus 在跑，放在 alert-check 里。web-lock-check 验 pnpm 锁与 package.json 同步且
+# npm 回退产物未入库。alert-check 还需 promtool/amtool 与 11 个容器，cover 需完整 Go SDK
+# 且耗时较长，两者都保持独立。CI 或提交前跑这一条即可覆盖静态检查。
+check: fmt-check test vet privacy-check tree-privacy-check dashboard-check web-lock-check
 
 ## test: 跑单测与端到端冒烟（先过 gofmt 门禁）
 test: fmt-check
@@ -92,6 +93,21 @@ tree-privacy-check:
 ## dashboard-check: 两个面板的结构 + PromQL 形态（纯标准库，无需容器）
 dashboard-check:
 	@python3 -S deploy/check_dashboards.py
+
+## web-lock-check: pnpm 锁与 package.json 依赖一致，且 npm 回退产物未被跟踪
+web-lock-check:
+	@python3 -S scripts/check-web-lock.py
+
+## install-hooks: 启用版本化的 pre-commit 守卫（写入本机 core.hooksPath，不入库）
+install-hooks:
+	@chmod +x scripts/hooks/pre-commit
+	@git config core.hooksPath scripts/hooks
+	@echo "✓ pre-commit enabled: core.hooksPath=scripts/hooks"
+
+## uninstall-hooks: 关闭 pre-commit 守卫
+uninstall-hooks:
+	@git config --unset core.hooksPath || true
+	@echo "✓ pre-commit disabled"
 
 ## alert-check: 钉钉桥单测 + MCP 桥 /metrics 冒烟 + 面板结构/PromQL 静态与 live 校验 + AM/Prometheus 配置（需监控栈已 up）
 alert-check:

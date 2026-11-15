@@ -29,6 +29,12 @@ web/out-tsc/
 internal/web/dist/browser/*
 !internal/web/dist/browser/.gitkeep
 mcp/node_modules/
+# web 走 pnpm，唯一依赖真相源是 web/pnpm-lock.yaml。Makefile 的 PM 会在没装 pnpm
+# 时回退 npm 并生成 web/package-lock.json；那份不入库（同一个 package.json 挂两份
+# 锁文件，改依赖时极易只刷新一份而静默漂移）。本机 ~/.gitignore_global 也有全局
+# `package-lock.json` 规则，但那只在本机生效——这里写成仓库级规则，保证协作者
+# 克隆后行为一致；锁与 package.json 是否同步由 `make web-lock-check` 校验。
+web/package-lock.json
 # mcp/package-lock.json 已跟踪，是 MCP 桥依赖的确定性来源；若用户级
 # ~/.gitignore_global 里有 `package-lock.json` 规则，它会被判为「已忽略但已跟踪」，
 # 协作时容易出现 add -f / 误删后加不回来的坑。仓库级 .gitignore 优先级高于

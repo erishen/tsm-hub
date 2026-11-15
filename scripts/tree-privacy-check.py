@@ -21,6 +21,10 @@
   - 只打印文件名、行号与规则名，**绝不打印命中内容本身**（可能就是真密钥）；
   - 形如 ``/Users/<user>/...`` 的占位路径不会被匹配（尖括号不在字符集内）；
   - 短占位（``sk-xxx`` / ``ghp_xxx`` / ``change-me-*``）够不到长度阈值；
+  - ``Authorization: Bearer ...`` 只认「长且字母数字混合、不含 example/your/<token>
+    等占位词」的串；文档里的 ``Bearer <token>`` / ``Bearer YOUR_TOKEN_HERE`` 放行；
+  - JWT / 各类机器人 webhook 都要求固定前缀 + 真实长度密钥，不做宽松的
+    ``token=...`` 通配（那会把所有配置示例刷成红）；
   - RFC1918 私有地址才算「真实内网 IP」，文档示例请用 192.0.2.0/24 等保留网段。
 """
 from __future__ import annotations
@@ -41,17 +45,59 @@ _PRIVATE_MARKERS = [
     "work" + "/sale",
 ]
 
+_PLACEHOLDER_WORDS = (
+    "example", "your", "placeholder", "dummy", "fake", "sample", "change",
+    "redacted", "xxxx", "token", "secret", "insert", "here", "changeme",
+)
+
+
+def _is_real_bearer(m) -> bool:
+    """Bearer 后跟的必须像真 token：长、字母数字混合、不含占位词。"""
+    s = m.group(1)
+    low = s.lower()
+    return (
+        len(s) >= 24
+        and not any(w in low for w in _PLACEHOLDER_WORDS)
+        and re.search(r"\d", s) is not None
+        and re.search(r"[A-Za-z]", s) is not None
+    )
+
+
+# (规则名, 正则, 可选二次判定)：二次判定只用于压误报，绝不放宽长度/形态要求。
 RULES = [
-    ("private_key", re.compile(r"-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----")),
-    ("github_pat", re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{50,})\b")),
-    ("aws_access_key", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
-    ("api_key_literal", re.compile(r"\bsk-[A-Za-z0-9_-]{32,}\b")),
+    ("private_key", re.compile(r"-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----"), None),
+    ("github_pat", re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{50,})\b"), None),
+    ("aws_access_key", re.compile(r"\bAKIA[0-9A-Z]{16}\b"), None),
+    ("api_key_literal", re.compile(r"\bsk-[A-Za-z0-9_-]{32,}\b"), None),
+    ("jwt_literal", re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b"), None),
+    ("slack_token", re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b"), None),
+    (
+        "bearer_token",
+        re.compile(r"(?i)\bbearer\s+([A-Za-z0-9._~+/=-]{20,})"),
+        _is_real_bearer,
+    ),
     (
         "dingtalk_webhook",
         re.compile(r"oapi\.dingtalk\.com/robot/send\?access_token=[A-Za-z0-9]{16,}"),
+        None,
     ),
-    ("build_machine_path", re.compile(r"/(?:Users|home|root)/[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]*")),
-    ("private_identity", re.compile("|".join(re.escape(m) for m in _PRIVATE_MARKERS))),
+    (
+        "wecom_webhook",
+        re.compile(r"qyapi\.weixin\.qq\.com/cgi-bin/webhook/send\?key=[0-9a-fA-F-]{20,}"),
+        None,
+    ),
+    (
+        "feishu_webhook",
+        re.compile(r"open\.feishu\.cn/open-apis/bot/v2/hook/[0-9a-fA-F-]{20,}"),
+        None,
+    ),
+    (
+        "slack_webhook",
+        re.compile(r"hooks\.slack\.com/services/T[A-Za-z0-9]{8,}/B[A-Za-z0-9]{8,}/[A-Za-z0-9]{16,}"),
+        None,
+    ),
+    ("build_machine_path", re.compile(r"/(?:Users|home|root)/[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]*"), None),
+    ("private_identity", re.compile("|".join(re.escape(m) for m in _PRIVATE_MARKERS)), None),
     (
         "private_ip",
         re.compile(
@@ -59,6 +105,7 @@ RULES = [
             r"|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}"
             r"|192\.168\.\d{1,3}\.\d{1,3})\b"
         ),
+        None,
     ),
 ]
 
@@ -80,8 +127,9 @@ def read_bytes(path: str) -> bytes | None:
 
 def scan_lines(source: str, path: str, text: str, hits: list[str], lineno: int = 1) -> None:
     for i, line in enumerate(text.splitlines(), lineno):
-        for rule, pattern in RULES:
-            if pattern.search(line):
+        for rule, pattern, validator in RULES:
+            m = pattern.search(line)
+            if m and (validator is None or validator(m)):
                 hits.append("%s:%s:%d [%s]" % (source, path, i, rule))
                 break
 

@@ -515,6 +515,13 @@ make web-build     # Build frontend to internal/web/dist/browser (for embed)
 make web-check     # TS syntax self-check without node_modules
 ```
 
+> **Frontend lockfile**: `web/pnpm-lock.yaml` is the single source of truth;
+> `make web-lock-check` verifies every dependency specifier against `web/package.json`.
+> On machines without pnpm, `make web-install` falls back to npm and generates
+> `web/package-lock.json` — that file is ignored by the repo `.gitignore` and must not
+> be committed, otherwise two lockfiles for one `package.json` will silently drift.
+> For reproducible builds pin the package manager explicitly: `make PM=pnpm web-install`.
+
 ### Local dev (start frontend + backend together)
 
 ```bash
@@ -863,27 +870,29 @@ variable to the `tsm-hub` service in `docker-compose.yml`, then
 ## Testing
 
 ```bash
-make check         # Aggregate local gate: fmt-check + test + vet + privacy-check + tree-privacy-check + dashboard-check (no containers needed)
+make check         # Aggregate local gate: fmt-check + test + vet + privacy-check + tree-privacy-check + dashboard-check + web-lock-check (no containers needed)
 make test          # All Go packages (runs the fmt-check gate first)
 make fmt-check     # Fails on any gofmt -l output
 make cover         # Coverage (auto-falls back to a complete Go 1.25 SDK under ~/sdk; override with GO=...)
 make privacy-check # config.json* permissions + plaintext key gate
 make tree-privacy-check # Prospective commit content: credentials, build paths, private IDs, private IPs
 make dashboard-check # Dashboard structure + PromQL shape for both dashboards (stdlib only, no containers)
+make web-lock-check # pnpm lock matches package.json; npm fallback lock is not tracked
+make install-hooks # Enable the versioned pre-commit guard (disable with make uninstall-hooks)
 make alert-check   # DingTalk unit tests + MCP bridge /metrics smoke + dashboard static + live PromQL queries + AM/Prometheus config (needs the stack up)
 ```
 
 | Package | Coverage |
 |---------|----------|
-| `internal/api` | E2E: auth, failover, SSE, rate limiting, key lifecycle, /v1/models, config persistence, provider response header, 4xx no circuit break, upstream pricing, login rate limit, 413, panic fallback, healthz health, env key, /metrics gating and label whitelist, histogram format / route folding / flow split / first-byte family / nil safety / endpoint privacy, `withLogging` streaming Flush instrumentation, zero-value error-class matrix and no error-body leakage |
+| `internal/api` | E2E: auth, failover, SSE, rate limiting, key lifecycle, /v1/models, config persistence, provider response header, 4xx no circuit break, upstream pricing, login rate limit, 413, panic fallback, healthz health, env key, /metrics gating and label whitelist, histogram format / route folding / flow split / first-byte family / nil safety / endpoint privacy, `withLogging` streaming Flush instrumentation, zero-value error-class matrix and no error-body leakage; admin helper pure functions: token redaction, provider ID validation, upstream quota/suggestion JSON parsing, MCP server-name extraction |
 | `internal/proxy/adapter` | Registry / URL / auth / request-response conversion / stream-event contracts for all 13 protocol adapters, AWS SigV4 helpers, and the 25-platform catalog; coverage 8.9% -> **86.6%** |
-| `internal/proxy` | Request body rewrite, `stream_options` injection, SSE usage parsing, URL concatenation (forwarding main chain covered by `internal/api` e2e tests) |
+| `internal/proxy` | Request body rewrite, `stream_options` injection, SSE usage parsing, URL concatenation (forwarding main chain covered by `internal/api` e2e tests); agent message parsing, last user text, allowlist sets, calculator function bounds |
+| `cmd/server` | Config file permissions and plaintext-key warnings, env references / encrypted secrets excluded from the count, console URL normalization, log levels |
 | `internal/router` | Priority sorting, weight preference, latency penalty, health removal and half-open pass, **error-class enums / prefix parsing / same-site counting with errors / deep copy** |
 | `internal/store` | Atomic write, update rollback, route cleanup on provider deletion, Key CRUD |
 | `internal/quota` | Aggregation and replay, RPM window, four quota rejections, TopKeys, recent logs, lazy cleanup of stale key entries and rate-limit regression |
 | `internal/auth` | Key format, Bearer parsing, constant-time comparison, session expiry |
-| `deploy` | 16 DingTalk bridge unit tests: signing vectors, alert/resolved message layout, errcode handling, URL and secret redaction; `test_mcp_gateway_metrics.sh` compiles the C bridge locally and checks the 10 `/metrics` families, counters and privacy boundary (`make alert-check`) |
-| `deploy` | 16 DingTalk bridge cases: signing vector, firing/resolved rendering, errcode handling, URL/secret redaction; `test_mcp_gateway_metrics.sh` compiles the C bridge locally and checks all 10 `/metrics` families, counters and privacy (`make alert-check`) |
+| `deploy` | 16 DingTalk bridge unit tests: signing vectors, alert/resolved message layout, errcode handling, URL and secret redaction; `test_mcp_gateway_metrics.sh` compiles the C bridge locally and checks all 10 `/metrics` families, counters and the privacy boundary (`make alert-check`) |
 
 `make smoke` has an additional script-level e2e suite (real process startup + curl assertions).
 

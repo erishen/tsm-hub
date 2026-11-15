@@ -405,6 +405,12 @@ make web-build     # 构建前端到 internal/web/dist/browser（供 embed）
 make web-check     # 不依赖 node_modules 的 TS 语法自检
 ```
 
+> **前端依赖锁**：`web/` 以 `web/pnpm-lock.yaml` 为唯一真相源，`make web-lock-check`
+> 会校验它与 `web/package.json` 的依赖逐项一致。`make web-install` 在未装 pnpm 的机器上
+> 会回退 npm 并生成 `web/package-lock.json`——该文件被仓库 `.gitignore` 忽略、不入库，
+> 避免同一个 `package.json` 挂两份会漂移的锁。需要可复现构建时显式用
+> `make PM=pnpm web-install`。
+
 ### 本地联调（前后端一起起）
 
 ```bash
@@ -676,21 +682,24 @@ python3 -S scripts/config-privacy-check.py --redact   # 只脱敏 *.bak-*，绝�
 ## 测试
 
 ```bash
-make check        # 聚合门禁：fmt-check + test + vet + privacy-check + tree-privacy-check + dashboard-check（纯本地，不依赖容器）
+make check        # 聚合门禁：fmt-check + test + vet + privacy-check + tree-privacy-check + dashboard-check + web-lock-check（纯本地，不依赖容器）
 make test         # 全部 Go 包（先跑 fmt-check 门禁）
 make fmt-check    # gofmt -l 非空即失败
 make cover        # 覆盖率（自动回退到 ~/sdk 下完整 Go 1.25 SDK；可用 GO=... 指定）
 make privacy-check # config.json* 权限与明文 key 门禁
 make tree-privacy-check # 即将提交的内容（工作区优先）：凭据、构建机路径、私有标识、内网 IP
 make dashboard-check # 两个面板的结构 + PromQL 形态（仅标准库，无需容器）
+make web-lock-check # pnpm 锁与 package.json 同步、npm 回退产物未入库
+make install-hooks  # 启用版本化 pre-commit 守卫（make uninstall-hooks 关闭）
 make alert-check  # 钉钉桥单测 + MCP 桥 /metrics 冒烟 + 面板静态/live PromQL 校验 + AM/Prometheus 配置（需监控栈已 up）
 ```
 
 | 包 | 覆盖内容 |
 |----|----------|
-| `internal/api` | 端到端：鉴权、failover、SSE、限流、Key 生命周期、/v1/models、配置落盘、provider 响应头、4xx 不熔断、上游计价、登录限流、413、panic 兜底、healthz 健康、env Key、/metrics 指标门禁与标签白名单、HTTP 直方图格式/路由折叠/flow 分离/首字节 family/nil 安全/端点隐私、`withLogging` 流式 Flush 埋点、失败类别 0 值矩阵与错误正文不泄漏 |
+| `internal/api` | 端到端：鉴权、failover、SSE、限流、Key 生命周期、/v1/models、配置落盘、provider 响应头、4xx 不熔断、上游计价、登录限流、413、panic 兜底、healthz 健康、env Key、/metrics 指标门禁与标签白名单、HTTP 直方图格式/路由折叠/flow 分离/首字节 family/nil 安全/端点隐私、`withLogging` 流式 Flush 埋点、失败类别 0 值矩阵与错误正文不泄漏；管理台辅助纯函数：token 脱敏、provider ID 校验、上游额度/建议 JSON 解析、MCP server 名提取 |
 | `internal/proxy/adapter` | 13 个协议适配器的注册表/URL/认证/请求响应转换/流事件契约、AWS SigV4 签名助手、25 个平台清单；覆盖率 8.9% → **86.6%** |
-| `internal/proxy` | 请求体改写、`stream_options` 注入、SSE usage 解析、URL 拼接（转发主链路由 `internal/api` 的端到端用例覆盖）|
+| `internal/proxy` | 请求体改写、`stream_options` 注入、SSE usage 解析、URL 拼接（转发主链路由 `internal/api` 的端到端用例覆盖）；agent 消息解析、最后一条用户文本、白名单集合、计算函数边界 |
+| `cmd/server` | 配置文件权限与明文 Key 告警、env 引用/加密密文不计入明文、控制台 URL 归一化、日志级别 |
 | `internal/router` | 优先级排序、权重偏好、延迟降权、健康摘除与半开放行、**失败类别枚举/前缀解析/与 errors 同源计数/深拷贝** |
 | `internal/store` | 原子写、更新回滚、删除 provider 时清理路由、Key CRUD |
 | `internal/quota` | 聚合与回放、RPM 窗口、四类额度拒绝、TopKeys、最近流水、失效 Key 条目的惰性清理与限流语义回归 |

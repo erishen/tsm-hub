@@ -1,0 +1,23 @@
+#!/bin/sh
+# 版本化的 pre-commit 守卫。启用：make install-hooks（写入本机 core.hooksPath）
+#
+# 刻意只跑毫秒级、且只看「本次提交真正带出去的内容」的检查：
+# go test / vet / cover 需要完整 Go SDK 且耗时数十秒，放进 hook 只会被
+# --no-verify 绕过，留给 `make check` 与 CI。
+# 注意 --cached-only 的口径：未暂存的改动不进入本次提交，不应拦下提交。
+set -e
+
+repo=$(git rev-parse --show-toplevel) || exit 1
+cd "$repo" || exit 1
+
+# 1) 行尾空白 / 冲突标记
+git diff --cached --check
+
+# 2) 暂存区新增行：凭据、构建机路径、私有标识、内网 IP（绝不回显命中内容）
+python3 -S scripts/tree-privacy-check.py --cached-only
+
+# 3) 两个 Grafana 面板的结构与 PromQL 形态（静态部分，无需容器）
+python3 -S deploy/check_dashboards.py
+
+# 4) pnpm 锁与 package.json 同步、npm 回退产物未入库
+python3 -S scripts/check-web-lock.py

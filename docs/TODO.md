@@ -79,14 +79,19 @@
 - [x] Go 编译零警告、`go vet` 通过
 - [x] 前端编译零警告（Angular）
 - [x] 单元测试全部通过（`go test ./...` 覆盖 14 个包；`make test` 前置 `fmt-check` 门禁，
-      `make check` 聚合格式/单测/vet、两道隐私与面板结构共六道纯本地门禁（`privacy-check`
-      守运行时配置，`tree-privacy-check` 守即将提交的仓库内容，`dashboard-check` 守面板
-      结构与 PromQL 形态；`make alert-check` 额外用 `--live` 让 Prometheus 实解析表达式），
+      `make check` 聚合格式/单测/vet、两道隐私、面板结构与前端锁一致性共七道纯本地门禁
+      （`privacy-check` 守运行时配置，`tree-privacy-check` 守即将提交的仓库内容，
+      `dashboard-check` 守面板结构与 PromQL 形态，`web-lock-check` 守 pnpm 锁与
+      `package.json` 同步且 npm 回退产物未入库；`make install-hooks` 启用版本化
+      pre-commit 快速守卫，`make alert-check` 额外用 `--live` 让 Prometheus 实解析表达式），
       `make test-race` 竞态回归亦全绿）。
       `make cover` 已修好并自动回退到完整 Go 1.25 SDK；补齐适配器子包契约测试后
-      该包覆盖率 8.9% → 86.6%，全仓总覆盖率 51.4% → **59.2%**（2026-11-15 实测）
+      该包覆盖率 8.9% → 86.6%，全仓总覆盖率 51.4% → **61.1%**（2026-11-15 实测）
       （2026-11-15 再补 `internal/config` 86.0% / `internal/audit` 89.0% 单测，此前两包 0.0% 且
-      无间接覆盖，是安全敏感路径盲区；顺带揪出并修复 `audit.maskSensitive` 死循环，见近期修复）
+      无间接覆盖，是安全敏感路径盲区；顺带揪出并修复 `audit.maskSensitive` 死循环，见近期修复。
+      同日补 `internal/api` / `internal/proxy` / `cmd/server` 的管理台辅助函数契约测试：脱敏、
+      provider ID 校验、上游额度解析、MCP server 名提取、配置权限与明文 key 告警，
+      三包 51.1%/54.8%/15.5% → 55.8%/55.7%/35.1%，全仓 59.2% → 61.1%）
 - [x] 端到端冒烟脚本（`make smoke`）
 - [x] Dockerfile + docker-compose（多阶段构建，tsm-hub 镜像 37.8MB；监控栈已加内存/CPU 上限）
 - [x] 代码重构：admin.go 拆分（2656行→6文件）、前端模板抽取（内联→外部HTML/CSS）、app 目录按类型分子目录、适配器子包
