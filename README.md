@@ -435,6 +435,7 @@ All require `X-Admin-Token: <admin_token>` (or first `POST /api/admin/login` to 
 |--------|------|-------------|
 | POST | `/api/admin/login` | Exchange admin token for session token (5 wrong attempts from same IP locks for 10 minutes) |
 | GET | `/api/admin/overview` | Overview: provider/route/key counts, today and cumulative usage |
+| GET | `/api/admin/cost-warnings` | Cost quota warnings: enabled keys whose usage ratio ≥ 80% (max_tokens / max_cost_usd / daily_tokens), sorted by ratio desc; powers the admin console red badge (click → `/keys`) |
 | GET/POST | `/api/admin/providers` | Provider list / create or update |
 | POST | `/api/admin/providers/probe` | Probe upstream model list and balance |
 | GET | `/api/admin/providers/balances` | Batch query each provider's balance/quota (with cache) |

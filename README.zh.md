@@ -331,6 +331,7 @@ curl http://localhost:9070/v1/skills -H "Authorization: Bearer <你的Key>"
 |------|------|------|
 | POST | `/api/admin/login` | 用 admin token 换会话 token（同 IP 错 5 次锁 10 分钟）|
 | GET | `/api/admin/overview` | 概览：provider/路由/Key 数量、今日与累计用量 |
+| GET | `/api/admin/cost-warnings` | 成本额度告警：已启用 Key 中使用率 ≥ 80%（max_tokens / max_cost_usd / daily_tokens）的实时快照，按使用率降序；驱动管理台右上角红点（点击跳转 `/keys`） |
 | GET/POST | `/api/admin/providers` | Provider 列表 / 新增或更新 |
 | POST | `/api/admin/providers/probe` | 探测上游模型列表与额度 |
 | GET | `/api/admin/providers/balances` | 批量查询各 Provider 额度/余额（带缓存）|

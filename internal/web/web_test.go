@@ -97,6 +97,10 @@ func TestInjectWarnBadge(t *testing.T) {
 	if got := injectWarnBadge(noHead); got != noHead {
 		t.Fatalf("no </head> should return unchanged, got %q", got)
 	}
+	// 红点必须是可点击链接，跳转到 Key 配置页 /keys。
+	if !contains(out, `href="/keys"`) && !contains(out, `href=KEY_PAGE`) {
+		t.Fatalf("warn badge must link to /keys, got %q", out)
+	}
 }
 
 func indexOf(s, sub string) int {
