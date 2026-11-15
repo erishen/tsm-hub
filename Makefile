@@ -12,7 +12,7 @@ VERSION    ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo d
 export CGO_ENABLED := 1
 LDFLAGS := -X main.version=$(VERSION) -linkmode=external
 
-.PHONY: all build run test test-race vet fmt fmt-check cover web-install web-build web-dev web-check dev dev-stop dev-logs dev-status mock mock-run mock-run-500 clean smoke help docker-build docker-up docker-down docker-stop docker-restart docker-logs docker-status privacy-check alert-check
+.PHONY: all build run test test-race check vet fmt fmt-check cover web-install web-build web-dev web-check dev dev-stop dev-logs dev-status mock mock-run mock-run-500 clean smoke help docker-build docker-up docker-down docker-stop docker-restart docker-logs docker-status privacy-check alert-check
 
 all: build
 
@@ -55,6 +55,11 @@ mock-run-500: mock
 ## run: 用 ./data 启动（默认 :9070）
 run: build
 	./$(BINARY) -data ./data
+
+## check: 纯本地聚合门禁（gofmt + 单测 + vet + 隐私），不依赖运行中的容器
+# alert-check 需 promtool/amtool 与 11 个容器在跑，故刻意不并入；cover 需完整 Go SDK
+# 且耗时较长，同样保持独立。CI 或提交前跑这一条即可覆盖全部静态检查。
+check: fmt-check test vet privacy-check
 
 ## test: 跑单测与端到端冒烟（先过 gofmt 门禁）
 test: fmt-check

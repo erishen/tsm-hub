@@ -606,12 +606,25 @@ docker compose up -d prometheus alertmanager dingtalk-bridge grafana blackbox-ex
 
 | | URL | Notes |
 |---|-----|-------|
-| Prometheus | <http://127.0.0.1:19092> | `/-/healthy`, `/targets`, `/alerts`; 30d retention |
+| Prometheus | <http://127.0.0.1:19092> | `/-/healthy`, `/targets`, `/alerts`; dual retention cap 30d / 2GB (whichever hits first) |
 | Alertmanager | <http://127.0.0.1:19093> | grouping, silences, inhibition; unauthenticated UI, loopback only |
 | Grafana | <http://127.0.0.1:19091> | datasource + "tsm-hub 网关监控" dashboard auto-provisioned |
 | DingTalk bridge | no host port | reachable only as `dingtalk-bridge:8060` inside the compose network |
 | blackbox-exporter | no host port | only `blackbox-exporter:9115` inside compose; `/probe` is unauthenticated, never publish it to the host |
 | 5 MCP bridges | no host port | `mcp-{fs,memory,think,fetch,git}:8000`, container DNS only |
+
+**Image sizes and resource limits** (2026-11-15): the five monitoring images total
+about **1.01GB -> 0.92GB**. The DingTalk bridge moved from `python:3.11-slim` (150MB) to
+`python:3.11-alpine` (58.9MB): it only needs the Python stdlib, and Alpine's bundled CA
+certificates are sufficient for the signed HTTPS webhook. Grafana 11.4.0 has no Alpine
+tag (only the default 479MB and a larger `-ubuntu` 539MB), and Prometheus / Alertmanager /
+blackbox-exporter each ship a single official image, so those four stay as-is. All five
+services now have `mem_limit` / `cpus` set to 4-8x their measured RSS (512MiB + 0.5 CPU
+for Prometheus and Grafana, 128-192MiB + 0.25 CPU for the rest) to cap runaway growth
+without affecting normal scraping, and Prometheus also has
+`--storage.tsdb.retention.size=2GB` to bound TSDB disk usage. Note that `docker compose images`
+shows 136MB for four MCP bridges and 150MB for one, but they share the same image layers —
+only one copy is stored on disk.
 
 **Grafana login**: open <http://127.0.0.1:19091/>, user `admin`, password is
 `GRAFANA_ADMIN_PASSWORD` from `.env` (compose falls back to `admin` when unset).
@@ -840,6 +853,7 @@ variable to the `tsm-hub` service in `docker-compose.yml`, then
 ## Testing
 
 ```bash
+make check         # Aggregate local gate: fmt-check + test + vet + privacy-check (no containers needed)
 make test          # All Go packages (runs the fmt-check gate first)
 make fmt-check     # Fails on any gofmt -l output
 make cover         # Coverage (auto-falls back to a complete Go 1.25 SDK under ~/sdk; override with GO=...)
@@ -850,10 +864,11 @@ make alert-check   # DingTalk unit tests + MCP bridge /metrics smoke + dashboard
 | Package | Coverage |
 |---------|----------|
 | `internal/api` | E2E: auth, failover, SSE, rate limiting, key lifecycle, /v1/models, config persistence, provider response header, 4xx no circuit break, upstream pricing, login rate limit, 413, panic fallback, healthz health, env key, /metrics gating and label whitelist, histogram format / route folding / flow split / first-byte family / nil safety / endpoint privacy, `withLogging` streaming Flush instrumentation, zero-value error-class matrix and no error-body leakage |
+| `internal/proxy/adapter` | Registry / URL / auth / request-response conversion / stream-event contracts for all 13 protocol adapters, AWS SigV4 helpers, and the 25-platform catalog; coverage 8.9% -> **86.6%** |
 | `internal/proxy` | Request body rewrite, `stream_options` injection, SSE usage parsing, URL concatenation (forwarding main chain covered by `internal/api` e2e tests) |
 | `internal/router` | Priority sorting, weight preference, latency penalty, health removal and half-open pass, **error-class enums / prefix parsing / same-site counting with errors / deep copy** |
 | `internal/store` | Atomic write, update rollback, route cleanup on provider deletion, Key CRUD |
-| `internal/quota` | Aggregation and replay, RPM window, four quota rejections, TopKeys, recent logs |
+| `internal/quota` | Aggregation and replay, RPM window, four quota rejections, TopKeys, recent logs, lazy cleanup of stale key entries and rate-limit regression |
 | `internal/auth` | Key format, Bearer parsing, constant-time comparison, session expiry |
 | `deploy` | 16 DingTalk bridge unit tests: signing vectors, alert/resolved message layout, errcode handling, URL and secret redaction; `test_mcp_gateway_metrics.sh` compiles the C bridge locally and checks the 10 `/metrics` families, counters and privacy boundary (`make alert-check`) |
 | `deploy` | 16 DingTalk bridge cases: signing vector, firing/resolved rendering, errcode handling, URL/secret redaction; `test_mcp_gateway_metrics.sh` compiles the C bridge locally and checks all 10 `/metrics` families, counters and privacy (`make alert-check`) |

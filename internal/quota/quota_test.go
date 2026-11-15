@@ -284,3 +284,82 @@ func TestRecorderFailoverBy(t *testing.T) {
 		t.Fatalf("failoverBy = %+v, want agnes=2 kimi=2 sensenova=0", by)
 	}
 }
+
+// TestLimiterSweepRemovesStaleKeyEntries 验证 Key 长期不用 / 被删除后，
+// hits 与 warn 里的条目不会永久驻留（原实现只裁剪时间戳、从不 delete）。
+func TestLimiterSweepRemovesStaleKeyEntries(t *testing.T) {
+	l := NewLimiter(rec(t))
+	base := time.Date(2026, 11, 15, 9, 0, 0, 0, time.UTC)
+	now := base
+	l.clock = func() time.Time { return now }
+
+	mk := func(id string) store.APIKey {
+		return store.APIKey{ID: id, Enabled: true, Quota: store.Quota{RPM: 10}}
+	}
+	for _, id := range []string{"kA", "kB"} {
+		if ok, reason := l.Check(mk(id)); !ok {
+			t.Fatalf("%s should pass, got %+v", id, reason)
+		}
+	}
+	l.warn["kA"] = "max_tokens"
+	l.warn["kB"] = "daily_tokens"
+	if len(l.hits) != 2 || len(l.warn) != 2 {
+		t.Fatalf("before sweep: hits=%d warn=%d, want 2/2", len(l.hits), len(l.warn))
+	}
+
+	// 窗口滑过后，仅 kC 有一次请求；这一次请求应顺带清掉两个失效 key。
+	now = base.Add(2 * time.Minute)
+	if ok, reason := l.Check(mk("kC")); !ok {
+		t.Fatalf("kC should pass, got %+v", reason)
+	}
+	if len(l.hits) != 1 || len(l.warn) != 0 {
+		t.Fatalf("after sweep: hits=%d warn=%d, want 1/0 (%v / %v)", len(l.hits), len(l.warn), l.hits, l.warn)
+	}
+	if _, ok := l.hits["kC"]; !ok {
+		t.Fatal("active key kC was removed")
+	}
+
+	// Snapshot 只报活跃 key；管理台按 rpm[k.ID] 取值，缺失即 0。
+	snap := l.Snapshot()
+	for _, id := range []string{"kA", "kB"} {
+		if _, ok := snap[id]; ok {
+			t.Errorf("Snapshot still reports cleaned key %q", id)
+		}
+	}
+	if snap["kC"] != 1 {
+		t.Errorf("Snapshot[kC] = %d, want 1", snap["kC"])
+	}
+}
+
+// TestLimiterSweepKeepsActiveKeys 验证清理不会误删仍在窗口内的 key，
+// 且 RPM 限流在清理后仍按滑动窗口正确工作。
+func TestLimiterSweepKeepsActiveKeys(t *testing.T) {
+	l := NewLimiter(rec(t))
+	base := time.Date(2026, 11, 15, 9, 0, 0, 0, time.UTC)
+	now := base
+	l.clock = func() time.Time { return now }
+	key := store.APIKey{ID: "k", Enabled: true, Quota: store.Quota{RPM: 3}}
+
+	for i := 0; i < 3; i++ {
+		if ok, _ := l.Check(key); !ok {
+			t.Fatalf("request %d should pass", i)
+		}
+	}
+	if ok, _ := l.Check(key); ok {
+		t.Fatal("4th request should be rate limited")
+	}
+
+	// 窗口整体滑过：sweep 会执行，但本次请求即新窗口首条，条目必须保留。
+	now = base.Add(2 * time.Minute)
+	for i := 0; i < 3; i++ {
+		if ok, reason := l.Check(key); !ok {
+			t.Fatalf("after sweep request %d should pass, got %+v", i, reason)
+		}
+	}
+	if ok, reason := l.Check(key); ok || reason == nil || reason.Code != "rate_limited" {
+		t.Fatalf("after sweep 4th request = (%v, %+v), want rate_limited", ok, reason)
+	}
+	if got := len(l.hits["k"]); got != 3 {
+		t.Errorf("hits[k] length = %d, want 3 (expired timestamps compacted)", got)
+	}
+}

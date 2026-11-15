@@ -17,6 +17,10 @@ type Limiter struct {
 	hits  map[string][]time.Time // keyID -> 请求时间戳
 	warn  map[string]string      // keyID -> 已告警的额度类型（避免每个请求刷日志）
 	clock func() time.Time
+
+	// lastSweep 是上次全量清理时间。清理要扫所有 key，故最多每分钟做一次，
+	// 避免每个请求都 O(n)；调用方必须持有 mu。
+	lastSweep time.Time
 }
 
 // NewLimiter 创建限流器。
@@ -116,10 +120,41 @@ func (l *Limiter) Check(key store.APIKey) (bool, *DenyReason) {
 	return true, nil
 }
 
+// sweepInterval 是惰性清理的最小间隔，与 RPM 滑动窗口同量级。
+const sweepInterval = time.Minute
+
+// sweepLocked 删除窗口内已无请求的 key 条目（Key 被删除 / 长期不用后不再常驻），
+// 并压缩仍活跃 key 的时间戳切片，释放过期元素占用的底层数组空间。
+// warn 与 hits 同步清理，避免额度告警状态也无限累积。
+// 调用方必须持有 l.mu。
+func (l *Limiter) sweepLocked(now time.Time) {
+	if !l.lastSweep.IsZero() && now.Sub(l.lastSweep) < sweepInterval {
+		return
+	}
+	l.lastSweep = now
+	cutoff := now.Add(-time.Minute)
+	for k, ts := range l.hits {
+		kept := ts[:0]
+		for _, t := range ts {
+			if t.After(cutoff) {
+				kept = append(kept, t)
+			}
+		}
+		if len(kept) == 0 {
+			delete(l.hits, k)
+			delete(l.warn, k)
+			continue
+		}
+		l.hits[k] = kept
+	}
+}
+
 func (l *Limiter) allowRPM(keyID string, rpm int) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	now := l.clock()
+	// 任何一次请求都顺便清理其它已失效的 key（内部按分钟节流）。
+	l.sweepLocked(now)
 	cutoff := now.Add(-time.Minute)
 	kept := l.hits[keyID][:0]
 	for _, t := range l.hits[keyID] {
@@ -140,6 +175,7 @@ func (l *Limiter) Snapshot() map[string]int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	now := l.clock()
+	l.sweepLocked(now)
 	cutoff := now.Add(-time.Minute)
 	out := make(map[string]int, len(l.hits))
 	for k, ts := range l.hits {
@@ -149,6 +185,8 @@ func (l *Limiter) Snapshot() map[string]int {
 				n++
 			}
 		}
+		// 只报窗口内仍活跃的 key；管理台用 rpm[k.ID] 按当前 Key 列表取值，
+		// 缺失即 0，无需为已清理的 key 保留幽灵条目。
 		out[k] = n
 	}
 	return out

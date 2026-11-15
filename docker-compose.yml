@@ -198,8 +198,14 @@ services:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
       - --storage.tsdb.retention.time=30d
+      # 双上限：时间 30d、磁盘 2GB（先到者生效），避免高基数标签把宿主盘写满。
+      # 当前 15 target / 442 样本仅占约 12MB，2GB 有充足余量。
+      - --storage.tsdb.retention.size=2GB
       # 改完规则可 curl -X POST http://127.0.0.1:19092/-/reload 热加载
       - --web.enable-lifecycle
+    # 实测常驻约 94MiB / <1% CPU；上限留 5 倍余量，仅防失控增长，不限制正常抓取。
+    mem_limit: 512m
+    cpus: 0.50
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9090/-/healthy"]
       interval: 30s
@@ -224,6 +230,9 @@ services:
       # 本地单实例，关掉 cluster 端口（默认 9094）减少暴露面。
       # Alertmanager 的 /-/reload 默认开启，没有 Prometheus 的 --web.enable-lifecycle flag。
       - --cluster.listen-address=
+    # 实测常驻约 39MiB；上限留 5 倍余量。
+    mem_limit: 192m
+    cpus: 0.25
     depends_on:
       - dingtalk-bridge
     healthcheck:
@@ -233,9 +242,14 @@ services:
       retries: 3
 
   grafana:
+    # 11.4.0 官方只提供默认(479MB)与 -ubuntu(539MB) 两种 tag，无 alpine 变体，
+    # 因此镜像体积无法再降；改用 mem_limit/cpus 约束运行时资源。
     image: grafana/grafana:11.4.0
     container_name: tsm-hub-grafana
     restart: unless-stopped
+    # 实测常驻约 84MiB / 0.2% CPU；留 6 倍余量，不影响面板渲染。
+    mem_limit: 512m
+    cpus: 0.50
     ports:
       - "127.0.0.1:19091:3000"
     environment:
@@ -275,6 +289,9 @@ services:
       - ./deploy/blackbox.yml:/etc/blackbox_exporter/config.yml:ro
     command:
       - --config.file=/etc/blackbox_exporter/config.yml
+    # 实测常驻约 32MiB；上限留 4 倍余量。
+    mem_limit: 128m
+    cpus: 0.25
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9115/-/healthy"]
       interval: 30s
@@ -285,9 +302,14 @@ services:
   # HMAC-SHA256，故用这个仅标准库的小桥做协议转换 + 加签。不发布宿主端口，
   # 只有 compose 网络内 alertmanager 能访问；密钥由 .env 插值注入环境变量。
   dingtalk-bridge:
-    image: python:3.11-slim
+    # 桥只用 Python 标准库（hmac/hashlib/urllib/http.server），无需 slim 的 Debian
+    # 用户态；alpine 版 58.9MB vs slim 150MB。证书由 alpine 基础层提供。
+    image: python:3.11-alpine
     container_name: tsm-hub-dingtalk-bridge
     restart: unless-stopped
+    # 实测常驻约 16MiB；上限留 8 倍余量。
+    mem_limit: 128m
+    cpus: 0.25
     volumes:
       - ./deploy/dingtalk_bridge.py:/app/dingtalk_bridge.py:ro
     environment:

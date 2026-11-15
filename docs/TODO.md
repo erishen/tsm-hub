@@ -1,6 +1,6 @@
 # tsm-hub TODO
 
-> 最后更新：2026-11-14
+> 最后更新：2026-11-15
 > 项目状态：v1.0 稳定版，核心功能全部完成
 
 ## v1.0 已完成 ✅
@@ -74,10 +74,12 @@
 
 - [x] Go 编译零警告、`go vet` 通过
 - [x] 前端编译零警告（Angular）
-- [x] 单元测试全部通过（`go test ./...` 覆盖 14 个包；`make test` 现前置 `fmt-check` 门禁，
-      `make test-race` 竞态回归亦全绿）。`make cover` 能否运行取决于本机 Go 工具链，见下方技术债
+- [x] 单元测试全部通过（`go test ./...` 覆盖 14 个包；`make test` 前置 `fmt-check` 门禁，
+      `make check` 聚合格式/单测/vet/隐私四道纯本地门禁，`make test-race` 竞态回归亦全绿）。
+      `make cover` 已修好并自动回退到完整 Go 1.25 SDK；补齐适配器子包契约测试后
+      该包覆盖率 8.9% → 86.6%，全仓总覆盖率 51.4% → **56.9%**
 - [x] 端到端冒烟脚本（`make smoke`）
-- [x] Dockerfile + docker-compose（多阶段构建，镜像 ~20MB）
+- [x] Dockerfile + docker-compose（多阶段构建，tsm-hub 镜像 37.8MB；监控栈已加内存/CPU 上限）
 - [x] 代码重构：admin.go 拆分（2656行→6文件）、前端模板抽取（内联→外部HTML/CSS）、app 目录按类型分子目录、适配器子包
 - [x] 文档：README（中英）、ARCHITECTURE、SECURITY、TODO
 
@@ -87,6 +89,11 @@
 - [x] **DeepSeek 余额字符串解析**：`flexFloat` 类型未实现 `UnmarshalJSON`，无法解析 `"51.75"` 字符串格式，已补全
 - [x] **Provider 健康状态全 degraded**：Healthy 计算逻辑从 `不在冷却 && failures<failMax` 改为 `不在冷却`
 - [x] **前端 NG8107 警告**：批量修复可选链操作符冗余
+- [x] **监控栈瘦身与资源上限**（2026-11-15）：钉钉桥 `python:3.11-slim` → `3.11-alpine`
+      （150MB → 58.9MB，仅用标准库 + alpine CA 证书）；Prometheus / Grafana / Alertmanager /
+      blackbox / 桥按实测常驻内存的 4~8 倍加 `mem_limit` 与 `cpus`；Prometheus 加
+      `--storage.tsdb.retention.size=2GB` 双上限。Grafana 11.4.0 官方无 alpine tag
+      （`-ubuntu` 反而 539MB），镜像维持 479MB 不动
 - [x] **客户端能力探测 405 风暴**（2026-10-18）：GET `/v1/chat/completions/tools|mcps|skills` 归一到正式能力端点直接返回目录；非 POST 打纯 chat 路径本地 405（详见 error-rate-investigation-2026-10-18.md §7）
 - [x] **config 热加载原子替换失效**（2026-10-18）：watchConfig 改盯目录 + 文件名过滤，saveLocked/编辑器原子保存后仍生效（§8）
 - [x] **数据竞争修复**（2026-10-18）：`go test -race` 全绿；客户端断开（499）不计 provider 失败、不计错误率
@@ -130,15 +137,21 @@
 
 - `Router.Pick` 每次都 `ListRoutes()` / `ListProviders()`（会拷贝切片），高频场景应加读缓存
 - `quota.Recorder.Recent()` 从当天往前扫文件，流水量大时应改为倒序索引文件
-- `api.Settings()` 每次请求读配置要加 RLock，`quota.Limiter` 的 hits 无清理
+- ~~`api.Settings()` 需加 RLock / `quota.Limiter` hits 无清理~~ **（2026-11-15 已核/已修）**：
+  `internal/store/store.go` 的 `Settings()` 早已有 `s.mu.RLock()`，前半条技术债不成立、
+  已删除以免误导；`Limiter` 新增按分钟节流的惰性 sweep，删除窗口内已无请求的 key 的
+  `hits`/`warn` 条目并压缩时间戳切片，`Snapshot()` 只报活跃 key（管理台按 `rpm[k.ID]`
+  取值，缺失即 0，对外等价）
 - ~~无 gofmt/lint 门禁~~ **（2026-11-14 已修）**：新增 `make fmt-check`（`gofmt -l internal cmd`
   非空即失败）并挂到 `make test` 前置；本次又清掉 `internal/a2a/` 4 个文件的漂移
   （Go 1.25 把注释列表 `* ` 规范成 `- `、struct tag 对齐变化）。仓库仍无 CI，门禁落在 Makefile
-- ~~`make cover` 依赖完整 Go 1.25 工具链~~ **（2026-11-14 已修，非仓库缺陷）**：本机原只装
+- ~~`make cover` 依赖完整 Go 1.25 工具链~~ **（2026-11-15 已修，非仓库缺陷）**：本机原只装
   Go 1.22.2，`go.mod` / `go.work` 要求 1.25 ⇒ Go 自动下载的 `golang.org/toolchain` 缓存被裁剪，
   `go test -coverprofile` 报 `go: no such tool "covdata"`；`GOTOOLCHAIN=local` 会被版本要求挡回。
   现已装好官方 SDK `~/sdk/go1.25.0`（tarball SHA256 与官方一致），`make cover` 会按 GOROOT
   识别残缺缓存并自动回退到该 SDK，也可 `make cover GO=/path/to/go` 显式指定。
-  实测 14 包全绿、总覆盖率 **51.4%**，`make test` / `go vet` / 镜像构建都不受影响。
-  ⚠️ 早期按「`pkg/tool/.../covdata` 文件是否存在」自检是错的：官方完整 SDK 同样没有
-  独立 `covdata` 二进制（Go 1.25 由 go 命令内置），会误报，已改为路径识别 + 直接执行
+  实测 14 包全绿、总覆盖率 **56.9%**（11-15 补完适配器测试后），`make test` / `go vet` /
+  镜像构建都不受影响。
+  ⚠️ 11-14 版按「`pkg/tool/.../covdata` 文件是否存在」自检是错的：官方完整 SDK 同样没有
+  独立 `covdata` 二进制（Go 1.25 由 go 命令内置），会误报；11-15 改为按 GOROOT 路径识别
+  残缺的自动下载 toolchain + 前置 SDK 的 bin 到 PATH，并把失败明确区分为工具链问题/测试问题

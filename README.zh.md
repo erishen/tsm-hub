@@ -453,12 +453,22 @@ docker compose up -d prometheus alertmanager dingtalk-bridge grafana blackbox-ex
 
 | | 地址 | 说明 |
 |---|------|------|
-| Prometheus | <http://127.0.0.1:19092> | `/-/healthy`、`/targets`、`/alerts`；数据保留 30 天 |
+| Prometheus | <http://127.0.0.1:19092> | `/-/healthy`、`/targets`、`/alerts`；数据双上限 30 天 / 2GB（先到者生效） |
 | Alertmanager | <http://127.0.0.1:19093> | 告警分组、静默、抑制；UI 无鉴权，只绑回环 |
 | Grafana | <http://127.0.0.1:19091> | 数据源与「tsm-hub 网关监控」面板自动注册 |
 | 钉钉桥接器 | 无宿主端口 | 仅 compose 网络内 `dingtalk-bridge:8060`，外部不可达 |
 | blackbox-exporter | 无宿主端口 | 仅 compose 网络内 `blackbox-exporter:9115`；`/probe` 不鉴权，绝不发布到宿主 |
 | 5 个 MCP 桥 | 无宿主端口 | `mcp-{fs,memory,think,fetch,git}:8000`，仅容器 DNS 可达 |
+
+**容器体积与资源上限**（2026-11-15）：5 个监控服务镜像合计约 **1.01GB → 0.92GB**。
+钉钉桥从 `python:3.11-slim`（150MB）换成 `python:3.11-alpine`（58.9MB）——该桥只用
+Python 标准库，alpine 自带的 CA 证书足够做钉钉 HTTPS 加签与投递；Grafana 11.4.0
+官方只有默认（479MB）与 `-ubuntu`（539MB）两种 tag、无 alpine 变体，Prometheus /
+Alertmanager / blackbox 也都是官方唯一镜像，故这四者镜像维持原样。全部 5 个服务按实测
+常驻内存的 4~8 倍加了 `mem_limit` / `cpus`（Prometheus、Grafana 各 512MiB + 0.5 CPU，
+其余 128~192MiB + 0.25 CPU），只防失控增长、不影响正常抓取；Prometheus 另有
+`--storage.tsdb.retention.size=2GB` 限制 TSDB 磁盘占用。⚠️ `docker compose images` 里
+4 个 MCP 桥显示 136MB、1 个显示 150MB，但它们共享同一组镜像层，实际磁盘只占一份。
 
 **Grafana 登录**：打开 <http://127.0.0.1:19091/>，用户名 `admin`，密码取 `.env` 里的
 `GRAFANA_ADMIN_PASSWORD`；未设置时回落默认口令 `admin`。
@@ -664,6 +674,7 @@ python3 -S scripts/config-privacy-check.py --redact   # 只脱敏 *.bak-*，绝�
 ## 测试
 
 ```bash
+make check        # 聚合门禁：fmt-check + test + vet + privacy-check（纯本地，不依赖容器）
 make test         # 全部 Go 包（先跑 fmt-check 门禁）
 make fmt-check    # gofmt -l 非空即失败
 make cover        # 覆盖率（自动回退到 ~/sdk 下完整 Go 1.25 SDK；可用 GO=... 指定）
@@ -674,10 +685,11 @@ make alert-check  # 钉钉桥单测 + MCP 桥 /metrics 冒烟 + 面板结构 + A
 | 包 | 覆盖内容 |
 |----|----------|
 | `internal/api` | 端到端：鉴权、failover、SSE、限流、Key 生命周期、/v1/models、配置落盘、provider 响应头、4xx 不熔断、上游计价、登录限流、413、panic 兜底、healthz 健康、env Key、/metrics 指标门禁与标签白名单、HTTP 直方图格式/路由折叠/flow 分离/首字节 family/nil 安全/端点隐私、`withLogging` 流式 Flush 埋点、失败类别 0 值矩阵与错误正文不泄漏 |
+| `internal/proxy/adapter` | 13 个协议适配器的注册表/URL/认证/请求响应转换/流事件契约、AWS SigV4 签名助手、25 个平台清单；覆盖率 8.9% → **86.6%** |
 | `internal/proxy` | 请求体改写、`stream_options` 注入、SSE usage 解析、URL 拼接（转发主链路由 `internal/api` 的端到端用例覆盖）|
 | `internal/router` | 优先级排序、权重偏好、延迟降权、健康摘除与半开放行、**失败类别枚举/前缀解析/与 errors 同源计数/深拷贝** |
 | `internal/store` | 原子写、更新回滚、删除 provider 时清理路由、Key CRUD |
-| `internal/quota` | 聚合与回放、RPM 窗口、四类额度拒绝、TopKeys、最近流水 |
+| `internal/quota` | 聚合与回放、RPM 窗口、四类额度拒绝、TopKeys、最近流水、失效 Key 条目的惰性清理与限流语义回归 |
 | `internal/auth` | Key 格式、Bearer 解析、常量时间比较、会话过期 |
 | `deploy` | 钉钉桥接器 16 例：加签向量、告警/恢复消息排版、errcode 判定、URL 与 secret 脱敏；`test_mcp_gateway_metrics.sh` 本机编译 C 桥并实测 `/metrics` 的 10 个 family、计数与隐私边界（`make alert-check`）|
 
