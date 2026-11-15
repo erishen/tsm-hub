@@ -134,8 +134,11 @@
 - ~~无 gofmt/lint 门禁~~ **（2026-11-14 已修）**：新增 `make fmt-check`（`gofmt -l internal cmd`
   非空即失败）并挂到 `make test` 前置；本次又清掉 `internal/a2a/` 4 个文件的漂移
   （Go 1.25 把注释列表 `* ` 规范成 `- `、struct tag 对齐变化）。仓库仍无 CI，门禁落在 Makefile
-- **`make cover` 依赖完整 Go 1.25 工具链**（2026-11-14 记录，非仓库缺陷）：本机只装了
-  Go 1.22.2，因 `go.mod` / `go.work` 要求 1.25，Go 自动下载的 `golang.org/toolchain` 缓存
-  被裁剪、缺 `covdata`，任何覆盖率命令都会失败。`GOTOOLCHAIN=local` 会被版本要求挡回。
-  `make cover` 已加自检并打印修复指引；在宿主机装好完整 1.25 后即可用。
-  `make test` / `go vet` / 镜像构建都不受影响
+- ~~`make cover` 依赖完整 Go 1.25 工具链~~ **（2026-11-14 已修，非仓库缺陷）**：本机原只装
+  Go 1.22.2，`go.mod` / `go.work` 要求 1.25 ⇒ Go 自动下载的 `golang.org/toolchain` 缓存被裁剪，
+  `go test -coverprofile` 报 `go: no such tool "covdata"`；`GOTOOLCHAIN=local` 会被版本要求挡回。
+  现已装好官方 SDK `~/sdk/go1.25.0`（tarball SHA256 与官方一致），`make cover` 会按 GOROOT
+  识别残缺缓存并自动回退到该 SDK，也可 `make cover GO=/path/to/go` 显式指定。
+  实测 14 包全绿、总覆盖率 **51.4%**，`make test` / `go vet` / 镜像构建都不受影响。
+  ⚠️ 早期按「`pkg/tool/.../covdata` 文件是否存在」自检是错的：官方完整 SDK 同样没有
+  独立 `covdata` 二进制（Go 1.25 由 go 命令内置），会误报，已改为路径识别 + 直接执行

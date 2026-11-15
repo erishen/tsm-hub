@@ -666,7 +666,7 @@ python3 -S scripts/config-privacy-check.py --redact   # 只脱敏 *.bak-*，绝�
 ```bash
 make test         # 全部 Go 包（先跑 fmt-check 门禁）
 make fmt-check    # gofmt -l 非空即失败
-make cover        # 覆盖率（需完整 Go 1.25 工具链，缺 covdata 会打印修复指引）
+make cover        # 覆盖率（自动回退到 ~/sdk 下完整 Go 1.25 SDK；可用 GO=... 指定）
 make privacy-check # config.json* 权限与明文 key 门禁
 make alert-check  # 钉钉桥单测 + MCP 桥 /metrics 冒烟 + 面板结构 + AM/Prometheus 配置（配置校验需监控栈已 up）
 ```

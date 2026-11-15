@@ -1,5 +1,7 @@
 # 前端包管理器：优先 pnpm，没装则回退 npm（可用 make PM=pnpm ... 显式指定）
 PM         ?= $(shell command -v pnpm >/dev/null 2>&1 && echo pnpm || echo npm)
+# 覆盖率目标可显式指定 Go：make cover GO=$HOME/sdk/go1.25.0/bin/go
+GO         ?= go
 
 BINARY     := bin/tsm-hub
 MOCK       := bin/mockupstream
@@ -85,25 +87,48 @@ alert-check:
 test-race:
 	go test -race -ldflags '-linkmode=external' ./...
 
-## cover: 生成覆盖率报告（需要完整的 Go 1.25 工具链，见下方自检）
 # go.mod / go.work 要求 go >= 1.25。若本机只装了 1.22，Go 会自动下载
-# golang.org/toolchain 模块；该缓存若被裁剪（缺 covdata），连 go test -cover
-# 都会失败。与其让用户看到莫名其妙的 "go: no such tool covdata"，不如直接
-# 自检并给出修复方式。注意：这与仓库代码无关，make test / 镜像构建不受影响。
+# golang.org/toolchain 模块；该缓存被裁剪时 go test -cover 会报
+# "go: no such tool covdata"。官方完整 SDK 的 pkg/tool 同样没有独立 covdata
+# 二进制（Go 1.25 由 go 命令内置），所以不能用「文件是否存在」判断工具链，
+# 改为按 GOROOT 路径识别残缺缓存并回退到 ~/sdk/go1.25.*；GO= 可显式指定。
+# 这与仓库代码无关，make test / 镜像构建不受影响。
+## cover: 生成覆盖率（自动绕开不完整的自动下载 toolchain）
 cover:
-	@command -v go >/dev/null 2>&1 || { echo "✗ 未找到 go；请先安装 Go 1.25 并加入 PATH"; exit 1; }
-	@tool_dir=`go env GOROOT`/pkg/tool/`go env GOOS`_`go env GOARCH`; \
-	if [ ! -x "$$tool_dir/covdata" ]; then \
-		echo "✗ 当前 Go 工具链缺 covdata：GOROOT=$$(go env GOROOT)"; \
-		echo "  go.work 要求 go 1.25，自动下载的 toolchain 缓存不完整时会出现此问题。"; \
-		echo "  修复（任选其一，在宿主机执行）："; \
-		echo "    go install golang.org/dl/go1.25.0@latest && go1.25.0 download"; \
-		echo "    export GOROOT=~/sdk/go1.25.0; export PATH=~/sdk/go1.25.0/bin:\$$PATH"; \
-		echo "  或安装官方 Go 1.25 安装包后重跑 make cover。"; \
+	@go_bin="${GO}"; \
+	if ! command -v "$${go_bin}" >/dev/null 2>&1; then \
+		echo "✗ 找不到 Go 可执行文件： $${go_bin}"; \
+		echo "  请把 Go 1.25 的 bin 加入 PATH，或用 make cover GO=/path/to/go 指定"; \
+		exit 2; \
+	fi; \
+	go_path=$$(command -v "$${go_bin}"); \
+	go_dir=$$(dirname "$${go_path}"); \
+	export PATH="$${go_dir}:$${PATH}"; \
+	goroot=$$($${go_bin} env GOROOT); \
+	case "$${goroot}" in \
+		*"/pkg/mod/golang.org/toolchain@"*) \
+			sdk=""; sdkroot=""; \
+			for d in "$$HOME"/sdk/go1.25*; do \
+				if [ -x "$${d}/bin/go" ]; then sdk="$${d}/bin/go"; sdkroot="$${d}"; break; fi; \
+			done; \
+			if [ -n "$${sdk}" ]; then \
+				echo "ℹ 当前 go 走的是不完整的自动下载 toolchain，自动改用官方 SDK： $${sdk}"; \
+				go_bin="$${sdk}"; export GOROOT="$${sdkroot}"; export PATH="$${sdkroot}/bin:$${PATH}"; \
+			else \
+				echo "✗ 当前 go 走的是不完整的自动下载 toolchain（缺 covdata），且 ~/sdk 下没有官方 Go 1.25 SDK"; \
+				echo "  GOROOT= $${goroot}"; \
+				echo "  安装完整 SDK 后重跑："; \
+				echo "    curl -fLO https://mirrors.aliyun.com/golang/go1.25.0.darwin-arm64.tar.gz"; \
+				echo "    mkdir -p ~/sdk && tar -C ~/sdk -xzf go1.25.0.darwin-arm64.tar.gz && mv ~/sdk/go ~/sdk/go1.25.0"; \
+				echo "  或用 make cover GO=/path/to/complete/go 指定"; \
+				exit 2; \
+			fi ;; \
+	esac; \
+	"$${go_bin}" test -ldflags '-linkmode=external' -coverprofile=coverage.out ./... || { \
+		echo "✗ 覆盖率运行失败（原因见上方 go test 输出）；若报 no such tool covdata，可用 make cover GO=/path/to/complete/go 指定完整 SDK"; \
 		exit 1; \
-	fi
-	go test -ldflags '-linkmode=external' -coverprofile=coverage.out ./...
-	go tool cover -func=coverage.out | tail -1
+	}; \
+	"$${go_bin}" tool cover -func=coverage.out | tail -1
 
 vet:
 	go vet ./...

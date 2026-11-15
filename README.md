@@ -842,7 +842,7 @@ variable to the `tsm-hub` service in `docker-compose.yml`, then
 ```bash
 make test          # All Go packages (runs the fmt-check gate first)
 make fmt-check     # Fails on any gofmt -l output
-make cover         # Coverage (needs a complete Go 1.25 toolchain; prints a fix hint if covdata is missing)
+make cover         # Coverage (auto-falls back to a complete Go 1.25 SDK under ~/sdk; override with GO=...)
 make privacy-check # config.json* permissions + plaintext key gate
 make alert-check   # DingTalk unit tests + MCP bridge /metrics smoke + dashboard structure + AM/Prometheus config (config checks need the stack up)
 ```
