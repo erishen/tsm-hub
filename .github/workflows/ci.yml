@@ -32,7 +32,7 @@ jobs:
           persist-credentials: false
 
       # go.mod 声明 go 1.26.11；用 go-version-file 而非硬编码，避免工具链漂移。
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -76,7 +76,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -99,7 +99,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
