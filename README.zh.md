@@ -688,7 +688,7 @@ make fmt-check    # gofmt -l 非空即失败
 make cover        # 覆盖率（自动回退到 ~/sdk 下完整 Go 1.26.11 SDK；可用 GO=... 指定）
 make cover-check  # 跑 cover 后按 COVER_MIN 卡下限（先自测解析器，空/坏 profile 一律失败）
 make vulncheck    # 固定版本 govulncheck 原始报告（需联网访问 Go 漏洞库）
-make vulncheck-gate # CI 分级门禁：所有可达漏洞硬失败（默认 VULN_STRICT=1）
+make vulncheck-gate # CI 门禁：所有可达漏洞（含标准库）硬失败，默认 VULN_STRICT=1
 make privacy-check # config.json* 权限与明文 key 门禁
 make tree-privacy-check # 即将提交的内容（工作区优先）：凭据、构建机路径、私有标识、内网 IP
 make dashboard-check # 两个面板的结构 + PromQL 形态（仅标准库，无需容器）

@@ -144,6 +144,18 @@
 
 ---
 
+## 仓库设置（需在 GitHub 端手动开启，本地门禁无法覆盖）
+
+- [ ] **Private vulnerability reporting**：`SECURITY.md` 把 Security Advisory 写成首选报告
+      渠道，但仓库该开关当前为 `false`，「Report a vulnerability」按钮实际不显示；
+      未开启期间依赖文档里的备用联系方式
+- [ ] **`main` 分支保护**：当前返回 `Branch not protected`；建议至少要求 PR + CI 四个
+      job（gates / image / coverage / vuln）全绿，避免直接 push 绕过门禁
+- [ ] **Dependabot security updates**：`security_and_analysis` 里为 `disabled`；开启后
+      安全公告可直接提修复 PR（与 `dependabot.yml` 的常规周更升级 PR 是两回事）
+
+---
+
 ## v1.1 待办（可选增强）
 
 ### P1 — 推荐做
