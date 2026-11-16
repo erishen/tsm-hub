@@ -179,6 +179,16 @@
       「全清」误判为审计失败。现按「至少一个 JSON 数组 = 合法响应」解析，
       零告警时 `--json` 输出 `total: 0`、普通模式打印 `all clear`，均 rc=0；
       只有空输入/纯空白才判上游异常。自测补齐单空页、多空页、零告警 JSON 载荷
+- [x] **备用漏洞报告渠道 + 文档错指**（2026-11-16）：原 `SECURITY.md` 写「GitHub
+      个人资料页列出的联系方式」，但 `api.github.com/users/erishen` 的 `email` 为
+      `null`，备用渠道实际不可达；改为「回上游仓 PVR / 站点
+      <https://erishen.cn/about/> 上公布的联系渠道」，且不把邮箱写进仓库。
+      `docs/PRIVACY.md` 的安全问题指针从 `docs/SECURITY.md`（部署加固）纠正为
+      根目录 `../SECURITY.md`
+- [x] **锁文件源统一 + 防回归**（2026-11-16）：`mcp/package-lock.json` 的
+      27/182 条 `resolved` 曾写死 `registry.npmmirror.com`（本机镜像安装残留），
+      统一换回 `registry.npmjs.org`（仅换 host，版本/integrity 未变）；
+      `web-lock-check` 新增「被跟踪锁文件的 tarball host 必须是官方源」规则
 - [ ] ⚠️ 刷锁文件必须在**用户本机 Terminal** 执行：沙箱里 pnpm/npm 全量安装会 OOM
       + ECONNRESET；`web/pnpm-lock.yaml` 是前端唯一真相源，`web/package-lock.json`
       绝不入库

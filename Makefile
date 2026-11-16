@@ -71,8 +71,9 @@ run: build
 # privacy-check 守运行时配置（data/config.json*），tree-privacy-check 守即将提交的仓库内容。
 # 两面都要有：只查运行时配置挡不住把明文 key 写进源码（干净克隆里那份文件根本不存在）。
 # dashboard-check 只用标准库验结构/PromQL 形态，同样无需容器；它的 --live 版本需要
-# Prometheus 在跑，放在 alert-check 里。web-lock-check 验 pnpm 锁与 package.json 同步且
-# npm 回退产物未入库。alert-check 还需 promtool/amtool 与 11 个容器；cover-check
+# Prometheus 在跑，放在 alert-check 里。web-lock-check 验 pnpm 锁与 package.json 同步、
+# npm 回退产物未入库，以及被跟踪锁文件的 tarball host 均为官方源。alert-check 还需
+# promtool/amtool 与 11 个容器；cover-check
 # 需完整 Go SDK、vulncheck-gate 需联网访问漏洞库，三者都保持独立（CI 里由
 # coverage / vuln 两个 job 分别承担）。dep-alerts 是纯报告型依赖告警体检，需
 # gh CLI 与仓库权限、告警数随上游公告变化，做成硬门禁只会永久红，故不纳入。
@@ -106,7 +107,7 @@ tree-privacy-check:
 dashboard-check:
 	@python3 -S deploy/check_dashboards.py
 
-## web-lock-check: pnpm 锁与 package.json 依赖一致，且 npm 回退产物未被跟踪
+## web-lock-check: pnpm 锁与 package.json 一致、npm 回退产物未入库、锁文件源为官方 host
 web-lock-check:
 	@python3 -S scripts/check-web-lock.py
 

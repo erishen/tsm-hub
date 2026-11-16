@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""前端依赖锁一致性门禁。
+"""依赖锁一致性门禁（web / mcp）。
 
     python3 -S scripts/check-web-lock.py
 
@@ -14,9 +14,14 @@
      （改了 package.json 却忘了刷新锁会被挡下）；
   2. web/pnpm-lock.yaml 必须被 git 跟踪（锁文件本身不能被误删/漏提交）；
   3. web/package-lock.json 必须 **不** 被 git 跟踪（防止协作者绕过本机
-     ~/.gitignore_global 规则，把 npm 回退产物带进公开仓）。
+     ~/.gitignore_global 规则，把 npm 回退产物带进公开仓）；
+  4. 所有被跟踪锁文件里的 tarball 下载地址必须指向官方
+     ``registry.npmjs.org``。本机为绕过网络问题用 ``--registry`` 走镜像后，
+     npm 会把实际下载地址写进锁文件；提交前必须换回，公开仓与海外克隆者
+     不应被写死到某个镜像站。
 
-只依赖 Python 标准库，不需要 node_modules，也不联网。
+门禁名沿用历史命名 ``web-lock-check``，但规则 4 覆盖 web 与 mcp 下所有
+被跟踪的锁文件。只依赖 Python 标准库，不需要 node_modules，也不联网。
 """
 from __future__ import annotations
 
@@ -30,6 +35,19 @@ ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "web"
 PNPM_LOCK = "web/pnpm-lock.yaml"
 NPM_LOCK = "web/package-lock.json"
+
+LOCK_NAMES = {
+    "package-lock.json",
+    "npm-shrinkwrap.json",
+    "pnpm-lock.yaml",
+    "yarn.lock",
+}
+ALLOWED_HOSTS = {"registry.npmjs.org"}
+MIRROR_URL_RE = re.compile(r"https?://([A-Za-z0-9.-]*npmmirror[A-Za-z0-9.-]*)", re.I)
+RESOLVED_PATTERNS = (
+    r'"resolved"\s*:\s*"https?://([^/"\s]+)',  # npm: "resolved": "https://..."
+    r'\bresolved\s+"https?://([^/"\s]+)',      # yarn: resolved "https://..."
+)
 
 
 def tracked(path: str) -> bool:
@@ -86,6 +104,44 @@ def check_specifiers(errors: list[str]) -> int:
     return len(want)
 
 
+def tracked_locks() -> list[str]:
+    out = subprocess.run(
+        ["git", "ls-files", "-z"], cwd=ROOT, capture_output=True, check=False
+    )
+    paths = [
+        p.decode("utf-8", "surrogateescape") for p in out.stdout.split(b"\0") if p
+    ]
+    return [p for p in paths if Path(p).name in LOCK_NAMES]
+
+
+def check_registry_hosts(errors: list[str]) -> tuple[int, int]:
+    """被跟踪锁文件的 tarball 地址必须指向官方源，不能写死本机镜像。"""
+    locks = tracked_locks()
+    n_urls = 0
+    for rel in locks:
+        try:
+            text = (ROOT / rel).read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as e:
+            errors.append("cannot read %s: %s" % (rel, e))
+            continue
+        bad = set()
+        for pattern in RESOLVED_PATTERNS:
+            for m in re.finditer(pattern, text):
+                n_urls += 1
+                host = m.group(1).lower()
+                if host not in ALLOWED_HOSTS:
+                    bad.add(host)
+        # 兜底：镜像 host 出现在非 resolved 字段（注释 / 元数据）同样算污染
+        bad.update(m.group(1).lower() for m in MIRROR_URL_RE.finditer(text))
+        for host in sorted(bad):
+            errors.append(
+                "%s pins tarballs to non-official host %s -- restore "
+                "registry.npmjs.org before committing (use --registry for local "
+                "installs only)" % (rel, host)
+            )
+    return len(locks), n_urls
+
+
 def main() -> int:
     errors: list[str] = []
     count = check_specifiers(errors)
@@ -96,14 +152,19 @@ def main() -> int:
             "%s is tracked -- web uses pnpm; two lockfiles will drift. "
             "Remove it from the index (git rm --cached) and keep .gitignore's rule" % NPM_LOCK
         )
+    n_locks, n_urls = check_registry_hosts(errors)
     if errors:
         for e in errors:
             print("FAIL " + e)
-        print("--- web dependency lock check FAILED")
+        print("--- dependency lock check FAILED")
         return 1
     print(
         "OK   %s matches web/package.json (%d deps); npm fallback lock is not tracked"
         % (PNPM_LOCK, count)
+    )
+    print(
+        "OK   %d tracked lockfile(s): %d tarball URLs all on registry.npmjs.org"
+        % (n_locks, n_urls)
     )
     return 0
 

@@ -216,7 +216,8 @@ tsm-hub 是自托管软件，数据存储位置由您决定。如果您的服务
 
 - **项目地址**：https://github.com/erishen/tsm-hub
 - **Issue 追踪**：在项目仓库提交 Issue
-- **安全问题**：请参考 `docs/SECURITY.md` 中的安全联系方式
+- **安全问题**：请勿在公开 Issue 中披露；请按根目录
+  [SECURITY.md](../SECURITY.md) 的私密漏洞报告流程提交
 
 ---
 

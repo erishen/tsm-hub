@@ -93,6 +93,11 @@ make dep-alerts            # 告警数应下降
 - `web/pnpm-lock.yaml` 是前端**唯一**真相源；`web/package-lock.json` 是
   `PM ?= pnpm || npm` 回退产物，被 `.gitignore` 忽略、绝不入库，`make web-lock-check`
   会把误提交挡下。
+- **`mcp/package-lock.json` 的 `resolved` host 必须统一为官方
+  `registry.npmjs.org`**：`--registry` 只影响本机当次下载，但 npm 会把实际 tarball
+  URL 写进锁文件，直接提交会把海外克隆者也指向国内镜像。2026-11-16 已把历史遗留的
+  27 条 `registry.npmmirror.com` 换回（路径结构与官方一致，版本/integrity 未变）；
+  `make web-lock-check` 现在会拦截任何非官方 host，防止再次带入。
 - pnpm 9 的 lockfile v9 不内嵌 tarball URL，不需要旧版那种把
   `registry.npmjs.org` 全量 `sed` 成镜像 host 的临时招数。
 - 改了 `web/package.json` 就必须同步刷新 `pnpm-lock.yaml`（importer specifier

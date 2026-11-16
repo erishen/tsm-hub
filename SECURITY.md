@@ -25,10 +25,11 @@
 优先使用 GitHub 的私密漏洞报告：仓库 → **Security** → **Report a vulnerability**
 （即 `https://github.com/erishen/tsm-hub/security/advisories/new`；仓库已开启
 *Private vulnerability reporting*，该按钮当前可见）。
-若入口不可用（例如设置被关闭或你在 fork 中报告），请通过 GitHub 个人资料页列出的
-联系方式私下联系维护者，
-主题注明 `tsm-hub security`，待确认私密通道后再发送细节——**切勿改用公开
-Issue / Discussion / PR**。
+若入口不可用（例如设置被关闭或你在 fork 中报告），请先回到**上游公开仓**使用
+上述 PVR 入口提交；若 PVR 整体不可用，请通过维护者站点
+<https://erishen.cn/about/> 上公布的联系渠道发起
+**不含任何漏洞细节**的私下联络，主题注明 `tsm-hub security`，待确认私密通道后
+再发送细节——**切勿改用公开 Issue / Discussion / PR**。
 
 报告请尽量包含：
 
