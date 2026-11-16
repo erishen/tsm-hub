@@ -110,8 +110,13 @@ make dep-alerts                                        # 全量表格
 python3 -S scripts/dep-alerts.py --min-severity high   # 只看 high/critical
 python3 -S scripts/dep-alerts.py --json                # 结构化输出
 python3 -S scripts/dep-alerts.py --report .data/alerts-all.json   # 离线复现快照
-python3 -S scripts/dep-alerts.py --self-test           # 8 例离线断言
+python3 -S scripts/dep-alerts.py --self-test           # 离线断言（无需 gh / 网络）
 ```
+
+「告警清零」是这份体检最理想的结果，脚本按成功处理：API 返回 `[]`（或多个空页
+拼接）时 `--json` 输出 `total: 0` 的合法 JSON、普通模式打印 `all clear`，退出码 0；
+只有连一个 JSON 数组都没解析到（空响应）才判为上游异常（rc=2）。这样消费方不会
+把「全清」误读成审计失败。
 
 ⚠️ 该 REST 端点**不支持 `page` 参数**（返回 400 `Pagination using the page
 parameter is not supported`），分页必须靠 `gh api --paginate` 走 Link 游标；输出是

@@ -20,6 +20,11 @@ parameter is not supported"），必须靠 ``--paginate`` 走 Link 游标；输�
 多个 JSON 数组直接拼接的流，不能 ``json.loads`` 整份文本。``--report``
 接受同样格式的文件或 ``-``（stdin），便于离线复现与自测。
 
+「零 open 告警」是本工具最理想的结果，必须按成功处理：``[]``（或多个空页
+拼接）是合法响应，返回空列表并正常退出；只有连一个 JSON 数组都没解析到
+（空输入 / 纯空白）才算上游异常。``--json`` 在零告警时同样输出合法 JSON，
+否则消费方会把「全清」误判成解析失败。
+
 只依赖 Python 标准库；在线模式额外需要已登录且有仓库读权限的 ``gh`` CLI。
 """
 from __future__ import annotations
@@ -37,9 +42,13 @@ API_PATH = "repos/{repo}/dependabot/alerts?state=open&per_page=100"
 
 
 def parse_stream(text: str) -> list[dict]:
-    """解析 ``gh api --paginate`` 产生的拼接 JSON 数组流。"""
+    """解析 ``gh api --paginate`` 产生的拼接 JSON 数组流。
+
+    ``[]`` / 多个空页拼接 = 零告警（合法，返回空列表）；只有连一个数组都没
+    解析到（空输入 / 纯空白）才是上游异常，抛 ValueError。
+    """
     decoder = json.JSONDecoder()
-    pos, alerts = 0, []
+    pos, alerts, pages = 0, [], 0
     while pos < len(text):
         while pos < len(text) and text[pos].isspace():
             pos += 1
@@ -50,9 +59,10 @@ def parse_stream(text: str) -> list[dict]:
             raise ValueError("API returned an error object: %s" % obj.get("message", "?"))
         if not isinstance(obj, list):
             raise ValueError("unexpected JSON value in stream: %s" % type(obj).__name__)
+        pages += 1
         alerts.extend(o for o in obj if isinstance(o, dict))
-    if not alerts:
-        raise ValueError("no alerts found in report (empty stream)")
+    if pages == 0:
+        raise ValueError("no JSON array in report (empty stream)")
     return alerts
 
 
@@ -187,13 +197,21 @@ def self_test() -> int:
         "worst-severity ordering"
     filtered = summarize([r for r in rows if SEVERITY_ORDER.index(r["severity"]) >= 2])
     assert filtered["total"] == 2 and len(filtered["runtime_focus"]) == 1
-    for bad in ("", "[]", '{"message":"nope"}'):
+    # 合法的「零告警」不是错误：单个/多个空页都返回空列表。
+    assert parse_stream("[]") == [], "empty array = zero open alerts"
+    assert parse_stream("[]\n[]  []") == [], "multiple empty pages = zero open alerts"
+    empty = summarize([])
+    assert empty["total"] == 0 and empty["packages"] == [] and empty["runtime_focus"] == []
+    assert json.loads(json.dumps({"repo": "o/r", **empty}))["total"] == 0, \
+        "zero-alert --json payload must stay parseable"
+    # 只有「一个数组都没有」才算上游异常。
+    for bad in ("", "   \n ", '{"message":"nope"}'):
         try:
             parse_stream(bad)
         except ValueError:
             continue
         raise AssertionError("malformed stream must be rejected: %r" % bad)
-    print("OK   self-test passed (8 cases)")
+    print("OK   self-test passed")
     return 0
 
 
@@ -236,15 +254,20 @@ def main() -> int:
         if r["severity"] not in SEVERITY_ORDER
         or SEVERITY_ORDER.index(r["severity"]) >= floor
     ]
-    if not rows:
-        print("No open alerts at or above '%s'." % args.min_severity)
-        return 0
     result = summarize(rows)
+    # --json 必须始终输出可解析的 JSON：零告警时消费方拿到 total=0 才算
+    # 「全清」，若退化成一行文本会让下游脚本解析失败、误判成审计失败。
     if args.json:
         print(json.dumps({"repo": args.repo, "source": "report" if offline else "api", **result},
                          ensure_ascii=False, indent=2))
-    else:
-        render(result, args.repo, offline)
+        return 0
+    if not rows:
+        scope = ""
+        if args.min_severity != "low":
+            scope = " (filtered by --min-severity %s)" % args.min_severity
+        print("No open alerts%s — all clear." % scope)
+        return 0
+    render(result, args.repo, offline)
     return 0
 
 

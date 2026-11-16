@@ -1,6 +1,6 @@
 # tsm-hub TODO
 
-> 最后更新：2026-11-15
+> 最后更新：2026-11-16
 > 项目状态：v1.0 稳定版，核心功能全部完成
 
 ## v1.0 已完成 ✅
@@ -174,6 +174,11 @@
       与 MCP SDK major 升级（`zod` 4 / `@modelcontextprotocol/sdk` 1.32）分开评估
 - [x] **审计工具**（2026-11-16）：`scripts/dep-alerts.py` + `make dep-alerts`，
       报告型、不进 `make check`（需 gh CLI/网络，告警数随上游公告波动，硬门禁会永久红）
+- [x] **零告警边界修复**（2026-11-16）：原实现把合法空响应 `[]`（告警清零）当成
+      「no alerts found」报 rc=2，且 `--json` 在该场景退化成纯文本，消费方会把
+      「全清」误判为审计失败。现按「至少一个 JSON 数组 = 合法响应」解析，
+      零告警时 `--json` 输出 `total: 0`、普通模式打印 `all clear`，均 rc=0；
+      只有空输入/纯空白才判上游异常。自测补齐单空页、多空页、零告警 JSON 载荷
 - [ ] ⚠️ 刷锁文件必须在**用户本机 Terminal** 执行：沙箱里 pnpm/npm 全量安装会 OOM
       + ECONNRESET；`web/pnpm-lock.yaml` 是前端唯一真相源，`web/package-lock.json`
       绝不入库
