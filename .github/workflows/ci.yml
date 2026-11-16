@@ -38,7 +38,7 @@ jobs:
           cache: true
 
       # 三个门禁脚本用了 list[...] / re.Match[str] 注解，需要 Python >= 3.9。
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -81,7 +81,7 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -104,7 +104,7 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
