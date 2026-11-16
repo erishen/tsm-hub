@@ -883,6 +883,7 @@ make dashboard-check # Dashboard structure + PromQL shape for both dashboards (s
 make web-lock-check # pnpm lock matches package.json; npm fallback lock is not tracked
 make install-hooks # Enable the versioned pre-commit guard (disable with make uninstall-hooks)
 make alert-check   # DingTalk unit tests + MCP bridge /metrics smoke + dashboard static + live PromQL queries + AM/Prometheus config (needs the stack up)
+make dep-alerts    # Report-only: summarize open Dependabot alerts (needs gh CLI; never gates the build)
 ```
 
 ### CI vs local guards
@@ -961,6 +962,7 @@ in `.github/dependabot.yml` now has a workflow to keep up to date.
 | [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) | System architecture, request pipeline, component design |
 | [SECURITY.md](./SECURITY.md) | Vulnerability reporting policy, response SLA, scope, safe harbor |
 | [docs/SECURITY.md](./docs/SECURITY.md) | Security deployment guide: TLS, CORS, key management, hardening checklist |
+| [docs/DEPENDENCY-SECURITY.md](./docs/DEPENDENCY-SECURITY.md) | Dependency alert baseline and fix plan (web/pnpm + mcp/npm), regenerating lockfiles locally |
 | [docs/PRIVACY.md](./docs/PRIVACY.md) | Privacy policy: data collection, usage, storage, data subject rights |
 | [docs/DPA.md](./docs/DPA.md) | Data Processing Agreement template (for B2B deployments) |
 | [docs/PRIVACY_AUDIT.md](./docs/PRIVACY_AUDIT.md) | Privacy compliance audit report with findings and remediation |

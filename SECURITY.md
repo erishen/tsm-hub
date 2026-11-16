@@ -2,8 +2,8 @@
 
 > 本文件是**漏洞报告与披露流程**；部署加固（TLS、密钥、沙箱、审计等）见
 > [docs/SECURITY.md](./docs/SECURITY.md)。GitHub 会自动识别仓库根目录的
-> `SECURITY.md` 并在 Security 页展示；「Report a vulnerability」按钮还需仓库开启
-> *Private vulnerability reporting*，未开启时请用下方备用联系方式。
+> `SECURITY.md` 并在 Security 页展示；仓库已开启 *Private vulnerability reporting*，
+> 「Report a vulnerability」按钮可用。若入口因设置变更或 fork 而不可用，请用下方备用联系方式。
 
 ## Supported versions / 支持版本
 
@@ -23,9 +23,10 @@
 **请不要用公开 Issue、Discussion 或 Pull Request 披露漏洞细节。**
 
 优先使用 GitHub 的私密漏洞报告：仓库 → **Security** → **Report a vulnerability**
-（即 `https://github.com/erishen/tsm-hub/security/advisories/new`；该按钮依赖仓库设置
-里的 *Private vulnerability reporting*，未开启时不会显示）。
-若入口不可用，请通过 GitHub 个人资料页列出的联系方式私下联系维护者，
+（即 `https://github.com/erishen/tsm-hub/security/advisories/new`；仓库已开启
+*Private vulnerability reporting*，该按钮当前可见）。
+若入口不可用（例如设置被关闭或你在 fork 中报告），请通过 GitHub 个人资料页列出的
+联系方式私下联系维护者，
 主题注明 `tsm-hub security`，待确认私密通道后再发送细节——**切勿改用公开
 Issue / Discussion / PR**。
 

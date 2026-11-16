@@ -162,6 +162,24 @@
 
 ---
 
+## 依赖安全告警（2026-11-16 开启 vulnerability alerts 后的基线）
+
+- [ ] **89 条 open 告警 / 33 个包**（3 critical / 35 high，20 条 runtime）：
+      `web/pnpm-lock.yaml` 82 条（Angular 19 构建链为主）、`mcp/package-lock.json` 7 条。
+      分布、runtime 重点与三档修复路线见
+      [docs/DEPENDENCY-SECURITY.md](./DEPENDENCY-SECURITY.md)；`make dep-alerts` 可复跑盘点
+- [ ] 低风险先做：合并 #16（node-forge 1.4.0→1.4.3 安全补丁，CI 四 job 全绿）
+      与 `mcp/` 的 `npm audit fix`；Actions 升 v7 的 #9/#10/#11/#14 属 CI 维护
+- [ ] Angular 19 → 22 全套（runtime 的 10 条 high **无补丁版本**，PR #15 只升 CLI 不够）
+      与 MCP SDK major 升级（`zod` 4 / `@modelcontextprotocol/sdk` 1.32）分开评估
+- [x] **审计工具**（2026-11-16）：`scripts/dep-alerts.py` + `make dep-alerts`，
+      报告型、不进 `make check`（需 gh CLI/网络，告警数随上游公告波动，硬门禁会永久红）
+- [ ] ⚠️ 刷锁文件必须在**用户本机 Terminal** 执行：沙箱里 pnpm/npm 全量安装会 OOM
+      + ECONNRESET；`web/pnpm-lock.yaml` 是前端唯一真相源，`web/package-lock.json`
+      绝不入库
+
+---
+
 ## v1.1 待办（可选增强）
 
 ### P1 — 推荐做

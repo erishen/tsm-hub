@@ -23,7 +23,7 @@ VERSION    ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo d
 export CGO_ENABLED := 1
 LDFLAGS := -X main.version=$(VERSION) -linkmode=external
 
-.PHONY: all build run test test-race check vet fmt fmt-check cover cover-check vulncheck vulncheck-gate web-install web-build web-dev web-check web-lock-check dev dev-stop dev-logs dev-status mock mock-run mock-run-500 clean smoke help docker-build docker-up docker-down docker-stop docker-restart docker-logs docker-status privacy-check tree-privacy-check dashboard-check alert-check install-hooks uninstall-hooks
+.PHONY: all build run test test-race check vet fmt fmt-check cover cover-check vulncheck vulncheck-gate web-install web-build web-dev web-check web-lock-check dev dev-stop dev-logs dev-status mock mock-run mock-run-500 clean smoke help docker-build docker-up docker-down docker-stop docker-restart docker-logs docker-status privacy-check tree-privacy-check dashboard-check alert-check install-hooks uninstall-hooks dep-alerts
 
 all: build
 
@@ -74,7 +74,9 @@ run: build
 # Prometheus 在跑，放在 alert-check 里。web-lock-check 验 pnpm 锁与 package.json 同步且
 # npm 回退产物未入库。alert-check 还需 promtool/amtool 与 11 个容器；cover-check
 # 需完整 Go SDK、vulncheck-gate 需联网访问漏洞库，三者都保持独立（CI 里由
-# coverage / vuln 两个 job 分别承担）。CI 或提交前跑这一条即可覆盖静态检查。
+# coverage / vuln 两个 job 分别承担）。dep-alerts 是纯报告型依赖告警体检，需
+# gh CLI 与仓库权限、告警数随上游公告变化，做成硬门禁只会永久红，故不纳入。
+# CI 或提交前跑这一条即可覆盖静态检查。
 check: fmt-check test vet privacy-check tree-privacy-check dashboard-check web-lock-check
 
 ## test: 跑单测与端到端冒烟（先过 gofmt 门禁）
@@ -107,6 +109,10 @@ dashboard-check:
 ## web-lock-check: pnpm 锁与 package.json 依赖一致，且 npm 回退产物未被跟踪
 web-lock-check:
 	@python3 -S scripts/check-web-lock.py
+
+## dep-alerts: 报告型——汇总 GitHub Dependabot open 告警（需 gh CLI + 网络，不进 make check）
+dep-alerts:
+	@python3 -S scripts/dep-alerts.py
 
 ## install-hooks: 启用版本化的 pre-commit 守卫（写入本机 core.hooksPath，不入库）
 install-hooks:

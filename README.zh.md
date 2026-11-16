@@ -695,6 +695,7 @@ make dashboard-check # 两个面板的结构 + PromQL 形态（仅标准库，�
 make web-lock-check # pnpm 锁与 package.json 同步、npm 回退产物未入库
 make install-hooks  # 启用版本化 pre-commit 守卫（make uninstall-hooks 关闭）
 make alert-check  # 钉钉桥单测 + MCP 桥 /metrics 冒烟 + 面板静态/live PromQL 校验 + AM/Prometheus 配置（需监控栈已 up）
+make dep-alerts   # 报告型：汇总 Dependabot open 告警（需 gh CLI，不拦截构建）
 ```
 
 ### 自动触发与本机守卫的分工
@@ -764,6 +765,14 @@ CI 刻意不跑 `make alert-check`（需 11 个监控容器与运行中的 Prome
 Advisory）、响应时限、范围与安全港。**请勿用公开 Issue 披露漏洞细节**，报告前先把
 上游 Key、签发 Token、配置原文与含鉴权头的日志脱敏。部署加固另见
 [安全部署指南](./docs/SECURITY.md)。
+
+## 依赖安全
+
+开启 Dependabot 漏洞告警后，前端锁文件（`web/pnpm-lock.yaml`）与 MCP 依赖
+（`mcp/package-lock.json`）的传递依赖公告由 `make dep-alerts` 汇总，报告型、不拦截构建。
+当前的告警基线、runtime 高危项与三档修复路线见
+[依赖安全基线与修复路线](./docs/DEPENDENCY-SECURITY.md)。⚠️ 刷锁文件必须在**本机 Terminal**
+执行（沙箱里 pnpm/npm 全量安装会 OOM），且 `web/pnpm-lock.yaml` 是前端唯一依赖真相源。
 
 ## 相关文章
 - [tsm-hub：把 LLM、Tools、MCP、Skills 收进一个统一网关](https://erishen.cn/tsm_hub/)
