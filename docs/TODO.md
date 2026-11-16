@@ -146,13 +146,19 @@
 
 ## 仓库设置（需在 GitHub 端手动开启，本地门禁无法覆盖）
 
-- [ ] **Private vulnerability reporting**：`SECURITY.md` 把 Security Advisory 写成首选报告
-      渠道，但仓库该开关当前为 `false`，「Report a vulnerability」按钮实际不显示；
-      未开启期间依赖文档里的备用联系方式
+- [x] **Private vulnerability reporting**（2026-11-16 已开启）：正确调用是
+      `PUT /repos/{owner}/{repo}/private-vulnerability-reporting`（无 body，返回 204），
+      `PATCH` / `POST` 都返 404；`GET` 查状态、`DELETE` 关闭。开启后
+      「Report a vulnerability」按钮可用，与 `SECURITY.md` 的首选渠道一致
+- [x] **Dependabot security updates**（2026-11-16 已开启）：先
+      `PUT /repos/{owner}/{repo}/vulnerability-alerts` 开漏洞告警（否则 422
+      "Vulnerability alerts must be enabled"），再
+      `PUT /repos/{owner}/{repo}/automated-security-fixes`（无 body，带 `enabled`
+      键反而 422）
 - [ ] **`main` 分支保护**：当前返回 `Branch not protected`；建议至少要求 PR + CI 四个
-      job（gates / image / coverage / vuln）全绿，避免直接 push 绕过门禁
-- [ ] **Dependabot security updates**：`security_and_analysis` 里为 `disabled`；开启后
-      安全公告可直接提修复 PR（与 `dependabot.yml` 的常规周更升级 PR 是两回事）
+      job（gates / image / coverage / vuln）全绿，避免直接 push 绕过门禁。
+      ⚠️ 2026-11-16 用户明确选择「只开 PVR + 安全更新」，暂不加分支保护以保持
+      直接 push `main` 的习惯
 
 ---
 
