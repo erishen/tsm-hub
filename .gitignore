@@ -44,6 +44,11 @@ web/package-lock.json
 # npm config (may contain registry auth tokens; keep local only)
 .npmrc
 web/.fakehome/
+# 在仓库根误跑 pnpm/npm install 会生成空项目（pnpm init 模板 + 空 importer lock）。
+# 前端依赖真相源是 web/pnpm-lock.yaml、MCP 是 mcp/package-lock.json；根目录这两个
+# 永远是副产物。前导 / 只匹配仓库根，不影响 web/ 与 mcp/ 下的同名文件。
+/package.json
+/pnpm-lock.yaml
 
 # 个人供应商运维清单（含个人路由策略/优先级细节，2026-11-15 用户决定 local only；
 # 文件已 git rm --cached 移出跟踪——勿删此规则，否则下次 git add -A 会把真实清单带回公开仓）

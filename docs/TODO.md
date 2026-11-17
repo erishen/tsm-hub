@@ -195,11 +195,15 @@
 - [~] **minimatch 跨 major 根治**（2026-11-17，进行中）：三条 open 告警（#99 web
       development / #55 brace-expansion / #5 mcp runtime）同源于 GHSA-g3hv-75wg-m249
       （medium，修复版 11.0.1），Dependabot 因跨 major 无法自动修。**配置已改**：
-      `web/package.json` 的 `pnpm.overrides.minimatch`、`mcp/package.json` 顶层
-      `overrides.minimatch` 均设为 11.0.1；**锁未刷**（本沙箱做不了，仍报 3 条属预期）。
-      待用户本机跑 `pnpm install && pnpm run build` 与 `npm install`、`make check`、
+      pnpm 11 不再读 `web/package.json` 的 `pnpm.*`（仅 WARN 后忽略），overrides
+      已迁到 `web/pnpm-workspace.yaml` 的 `overrides.minimatch: 11.0.1` 并补
+      `allowBuilds` 审批（否则 ERR_PNPM_IGNORED_BUILDS）；`mcp/package.json` 顶层
+      `overrides.minimatch` 保持 npm 语法。**锁未刷**（本沙箱做不了，仍报 3 条属预期）。
+      待用户本机重跑 `pnpm install && pnpm run build` 与 `npm install`、`make check`、
       `make dep-alerts` 确认 89→86；跨 major 须实测构建，失败则撤销 override 重刷锁
-      回退。精确步骤见 docs/DEPENDENCY-SECURITY.md「本机操作」
+      回退。`web-lock-check` 已把「override 落在 workspace.yaml、无占位值、
+      package.json 无 pnpm 字段」做成硬门禁。精确步骤见 docs/DEPENDENCY-SECURITY.md
+      「本机操作」
 
 ---
 

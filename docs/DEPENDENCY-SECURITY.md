@@ -65,10 +65,17 @@ medium，修复版 11.0.1）：
 
 **已落地的配置改动**（本仓已提交，锁文件尚未刷新）：
 
-- `web/package.json` → `pnpm.overrides.minimatch = 11.0.1`：强制覆盖三条 `^9` 链；
+- `web/pnpm-workspace.yaml` → `overrides.minimatch: 11.0.1`：强制覆盖三条 `^9` 链；
   minimatch 11 只依赖 `brace-expansion@^5.0.12` 与 `@isaacs/nonrecursive-glob-match`，
   升级后 #55 的 brace-expansion 2.1.4 随之消失。
-- `mcp/package.json` → npm 顶层 `overrides.minimatch = 11.0.1`。
+  ⚠️ **必须在 `pnpm-workspace.yaml`，不能写 `web/package.json` 的 `pnpm.overrides`**：
+  pnpm 10+/11 已不再读取 `package.json` 里的 `pnpm.*`，只打印 WARN 后全部忽略
+  （2026-11-17 实证：写了 WARN、锁仍停在 9.0.9）。同文件还须保留
+  `allowBuilds` 审批结果，否则 `strictDepBuilds=true` 下 install 以
+  `ERR_PNPM_IGNORED_BUILDS` 失败；占位值 `set this to true or false` 必须替换成布尔值。
+  `web-lock-check` 已把这两点做成硬门禁。
+- `mcp/package.json` → npm 顶层 `overrides.minimatch = 11.0.1`（npm 仍读这里，
+  与 pnpm 不同，勿混淆）。
 
 ⚠️ **这不是刷锁**：`package.json` 声明了 override，但 `pnpm-lock.yaml` /
 `package-lock.json` 仍停在旧版本——中间态下 `dep-alerts` 仍会报这 3 条，属预期。
@@ -101,7 +108,7 @@ medium，修复版 11.0.1）：
 ```bash
 # web/：pnpm 是唯一依赖真相源
 cd web
-pnpm install --registry https://registry.npmmirror.com   # 会应用 pnpm.overrides.minimatch
+pnpm install --registry https://registry.npmmirror.com   # 读取 pnpm-workspace.yaml 的 overrides/allowBuilds
 pnpm run build                                            # 跨 major 必做：验证前端仍能构建
 pnpm audit                                                # 看剩余告警
 
@@ -120,7 +127,16 @@ make dep-alerts            # 89 → 应至少少 3 条（#99/#55/#5）
 > 问题），但 npm 会把实际下载 URL 写进 `mcp/package-lock.json`——提交前必须把
 > `registry.npmmirror.com` 换回 `registry.npmjs.org`（只换 host，不动版本/integrity），
 > 否则 `web-lock-check` 会拦下。若 `pnpm run build` 因跨 major 失败，撤销
-> `web/package.json` 的 `pnpm.overrides` 后重新 `pnpm install` 即可回到稳定态。
+> `web/pnpm-workspace.yaml` 的 `overrides` 后重新 `pnpm install` 即可回到稳定态。
+>
+> **pnpm 11 的 `ERR_PNPM_IGNORED_BUILDS`**（2026-11-17 实测）：`strictDepBuilds`
+> 默认 `true`，凡有安装脚本的 native 包未获显式审批就以非零码退出。`pnpm install`
+> 失败时会**自动**在 `pnpm-workspace.yaml` 写入 `allowBuilds` 占位值
+> `set this to true or false`——它不是有效配置，必须逐个改成 `true`/`false`。
+> 本仓策略与原 `onlyBuiltDependencies: [esbuild]` 等价：只放行 `esbuild`，
+> `@parcel/watcher`/`lmdb`/`msgpackr-extract` 保持 `false`（有 JS fallback）。
+> 注意 pnpm 11 还会在仓库根生成空的 `package.json` + `pnpm-lock.yaml`，那是误产物，
+> 已在 `.gitignore` 用 `/package.json`、`/pnpm-lock.yaml` 根级规则排除。
 
 约束：
 

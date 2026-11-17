@@ -35,6 +35,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "web"
 PNPM_LOCK = "web/pnpm-lock.yaml"
 NPM_LOCK = "web/package-lock.json"
+PNPM_WS = "web/pnpm-workspace.yaml"
 
 LOCK_NAMES = {
     "package-lock.json",
@@ -114,6 +115,50 @@ def tracked_locks() -> list[str]:
     return [p for p in paths if Path(p).name in LOCK_NAMES]
 
 
+def check_pnpm_settings(errors: list[str]) -> None:
+    """pnpm 10+/11 只读 pnpm-workspace.yaml，package.json 的 pnpm.* 会被静默忽略。
+
+    2026-11-17 实证：把 overrides.onlyBuiltDependencies 写在 package.json 后，
+    pnpm 11 打印 WARN 并全部忽略，锁仍停在 minimatch 9.0.9；同时 approve-builds
+    自动生成的占位值 "set this to true or false" 会让 install 以
+    ERR_PNPM_IGNORED_BUILDS 失败。这里把「声明生效」变成可校验规则：
+      1. web/pnpm-workspace.yaml 必须被跟踪（override 的真实落点）；
+      2. 其中必须声明 minimatch=11.0.1 的 override；
+      3. 不得残留 approve-builds 占位值；
+      4. package.json 不得再有 pnpm.* 字段（写了也是误导）。
+    """
+    if not tracked(PNPM_WS):
+        errors.append(
+            "%s is not tracked -- pnpm 10+ ignores pnpm.* in package.json; "
+            "overrides and allowBuilds must live in pnpm-workspace.yaml" % PNPM_WS
+        )
+    else:
+        ws_text = (ROOT / PNPM_WS).read_text(encoding="utf-8")
+        if not re.search(r"^\s*overrides:\s*$", ws_text, re.M) or not re.search(
+            r"^\s+minimatch:\s*['\"]?11\.", ws_text, re.M
+        ):
+            errors.append(
+                "%s missing overrides.minimatch=11.x -- pnpm 11 ignores "
+                "package.json pnpm.overrides; lock will keep minimatch 9/10" % PNPM_WS
+            )
+        if "set this to true or false" in ws_text:
+            errors.append(
+                "%s has placeholder allowBuilds values -- replace each with "
+                "true/false or pnpm install fails with ERR_PNPM_IGNORED_BUILDS" % PNPM_WS
+            )
+
+    try:
+        pkg = json.loads((WEB / "package.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        errors.append("cannot read web/package.json: %s" % e)
+    else:
+        if "pnpm" in pkg:
+            errors.append(
+                "web/package.json still has a 'pnpm' field -- pnpm 10+ ignores "
+                "it silently; move overrides/allowBuilds to %s" % PNPM_WS
+            )
+
+
 def check_registry_hosts(errors: list[str]) -> tuple[int, int]:
     """被跟踪锁文件的 tarball 地址必须指向官方源，不能写死本机镜像。"""
     locks = tracked_locks()
@@ -145,6 +190,7 @@ def check_registry_hosts(errors: list[str]) -> tuple[int, int]:
 def main() -> int:
     errors: list[str] = []
     count = check_specifiers(errors)
+    check_pnpm_settings(errors)
     if not tracked(PNPM_LOCK):
         errors.append("%s is not tracked -- the dependency lock must be committed" % PNPM_LOCK)
     if tracked(NPM_LOCK):

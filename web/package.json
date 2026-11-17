@@ -13,14 +13,6 @@
   "engines": {
     "node": ">=18.19.1"
   },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "esbuild"
-    ],
-    "overrides": {
-      "minimatch": "11.0.1"
-    }
-  },
   "dependencies": {
     "@angular/common": "^19.0.0",
     "@angular/compiler": "^19.0.0",

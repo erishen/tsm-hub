@@ -1,0 +1,12 @@
+# pnpm 11+ 配置（package.json 的 pnpm.* 字段已不被读取）
+overrides:
+  minimatch: 11.0.1
+
+# pnpm approve-builds 审批结果：未列出的构建脚本按 strictDepBuilds=true 全部拒绝。
+# 与迁移前的 onlyBuiltDependencies: [esbuild] 等价——只放行 Angular 构建硬依赖，
+# 其余 native 加速包保持不运行安装脚本（有 JS fallback）。
+allowBuilds:
+  '@parcel/watcher': false
+  esbuild: true
+  lmdb: false
+  msgpackr-extract: false
