@@ -41,16 +41,16 @@ importers:
     devDependencies:
       '@angular-devkit/build-angular':
         specifier: ^19.0.0
-        version: 19.2.27(@angular/compiler-cli@19.2.25(@angular/compiler@19.2.25)(supports-color@8.1.1)(typescript@5.6.3))(@angular/compiler@19.2.25)(@types/node@26.4.1)(chokidar@4.0.3)(debug@4.4.3(supports-color@8.1.1))(jiti@1.21.7)(supports-color@8.1.1)(typescript@5.6.3)(vite@6.4.2(@types/node@26.4.1)(jiti@1.21.7)(less@4.2.2)(sass@1.85.0)(terser@5.39.0))
+        version: 19.2.27(@angular/compiler-cli@19.2.25(@angular/compiler@19.2.25)(supports-color@8.1.1)(typescript@5.8.3))(@angular/compiler@19.2.25)(@types/node@26.4.1)(chokidar@4.0.3)(debug@4.4.3(supports-color@8.1.1))(jiti@1.21.7)(supports-color@8.1.1)(typescript@5.8.3)(vite@6.4.2(@types/node@26.4.1)(jiti@1.21.7)(less@4.2.2)(sass@1.85.0)(terser@5.39.0))
       '@angular/cli':
         specifier: ^19.0.0
         version: 19.2.27(@types/node@26.4.1)(chokidar@4.0.3)(supports-color@8.1.1)
       '@angular/compiler-cli':
         specifier: ^19.0.0
-        version: 19.2.25(@angular/compiler@19.2.25)(supports-color@8.1.1)(typescript@5.6.3)
+        version: 19.2.25(@angular/compiler@19.2.25)(supports-color@8.1.1)(typescript@5.8.3)
       typescript:
-        specifier: ~5.6.3
-        version: 5.6.3
+        specifier: ~5.8.3
+        version: 5.8.3
 
 packages:
 
@@ -3989,8 +3989,8 @@ packages:
   typed-assert@1.0.9:
     resolution: {integrity: sha512-KNNZtayBCtmnNmbo5mG47p1XsCyrx6iVqomjcZnec/1Y5GGARaxPs6r49RnSPeUP3YjNYiU9sQHAtY4BBvnZwg==}
 
-  typescript@5.6.3:
-    resolution: {integrity: sha512-hjcS1mhfuyi4WW8IWtjP7brDrG2cuDZukyrYrSauoXGNgx0S7zceP07adYkJycEr56BOUTNPzbInooiN3fn1qw==}
+  typescript@5.8.3:
+    resolution: {integrity: sha512-p1diW6TqL9L07nNxvRMM7hMMw4c5XOo/1ibL4aAIGmSAt9slTE1Xgw5KWuof2uTOvCg9BY7ZRi+GaF+7sfgPeQ==}
     engines: {node: '>=14.17'}
     hasBin: true
 
@@ -4264,14 +4264,14 @@ snapshots:
     transitivePeerDependencies:
       - chokidar
 
-  '@angular-devkit/build-angular@19.2.27(@angular/compiler-cli@19.2.25(@angular/compiler@19.2.25)(supports-color@8.1.1)(typescript@5.6.3))(@angular/compiler@19.2.25)(@types/node@26.4.1)(chokidar@4.0.3)(debug@4.4.3(supports-color@8.1.1))(jiti@1.21.7)(supports-color@8.1.1)(typescript@5.6.3)(vite@6.4.2(@types/node@26.4.1)(jiti@1.21.7)(less@4.2.2)(sass@1.85.0)(terser@5.39.0))':
+  '@angular-devkit/build-angular@19.2.27(@angular/compiler-cli@19.2.25(@angular/compiler@19.2.25)(supports-color@8.1.1)(typescript@5.8.3))(@angular/compiler@19.2.25)(@types/node@26.4.1)(chokidar@4.0.3)(debug@4.4.3(supports-color@8.1.1))(jiti@1.21.7)(supports-color@8.1.1)(typescript@5.8.3)(vite@6.4.2(@types/node@26.4.1)(jiti@1.21.7)(less@4.2.2)(sass@1.85.0)(terser@5.39.0))':
     dependencies:
       '@ampproject/remapping': 2.3.0
       '@angular-devkit/architect': 0.1902.27(chokidar@4.0.3)
       '@angular-devkit/build-webpack': 0.1902.27(chokidar@4.0.3)(webpack-dev-server@5.2.2(debug@4.4.3(supports-color@8.1.1))(supports-color@8.1.1)(webpack@5.105.0(esbuild@0.28.0)(postcss@8.5.12)))(webpack@5.105.0(esbuild@0.28.0)(postcss@8.5.12))
       '@angular-devkit/core': 19.2.27(chokidar@4.0.3)
-      '@angular/build': 19.2.27(@angular/compiler-cli@19.2.25(@angular/compiler@19.2.25)(supports-color@8.1.1)(typescript@5.6.3))(@angular/compiler@19.2.25)(@types/node@26.4.1)(chokidar@4.0.3)(jiti@1.21.7)(less@4.2.2)(postcss@8.5.12)(supports-color@8.1.1)(terser@5.39.0)(typescript@5.6.3)
-      '@angular/compiler-cli': 19.2.25(@angular/compiler@19.2.25)(supports-color@8.1.1)(typescript@5.6.3)
+      '@angular/build': 19.2.27(@angular/compiler-cli@19.2.25(@angular/compiler@19.2.25)(supports-color@8.1.1)(typescript@5.8.3))(@angular/compiler@19.2.25)(@types/node@26.4.1)(chokidar@4.0.3)(jiti@1.21.7)(less@4.2.2)(postcss@8.5.12)(supports-color@8.1.1)(terser@5.39.0)(typescript@5.8.3)
+      '@angular/compiler-cli': 19.2.25(@angular/compiler@19.2.25)(supports-color@8.1.1)(typescript@5.8.3)
       '@babel/core': 7.26.10(supports-color@8.1.1)
       '@babel/generator': 7.26.10
       '@babel/helper-annotate-as-pure': 7.25.9
@@ -4282,7 +4282,7 @@ snapshots:
       '@babel/preset-env': 7.26.9(@babel/core@7.26.10(supports-color@8.1.1))(supports-color@8.1.1)
       '@babel/runtime': 7.26.10
       '@discoveryjs/json-ext': 0.6.3
-      '@ngtools/webpack': 19.2.27(@angular/compiler-cli@19.2.25(@angular/compiler@19.2.25)(supports-color@8.1.1)(typescript@5.6.3))(typescript@5.6.3)(webpack@5.105.0(esbuild@0.28.0)(postcss@8.5.12))
+      '@ngtools/webpack': 19.2.27(@angular/compiler-cli@19.2.25(@angular/compiler@19.2.25)(supports-color@8.1.1)(typescript@5.8.3))(typescript@5.8.3)(webpack@5.105.0(esbuild@0.28.0)(postcss@8.5.12))
       '@vitejs/plugin-basic-ssl': 1.2.0(vite@6.4.2(@types/node@26.4.1)(jiti@1.21.7)(less@4.2.2)(sass@1.85.0)(terser@5.39.0))
       ansi-colors: 4.1.3
       autoprefixer: 10.4.20(postcss@8.5.12)
@@ -4306,7 +4306,7 @@ snapshots:
       picomatch: 4.0.4
       piscina: 4.8.0
       postcss: 8.5.12
-      postcss-loader: 8.1.1(postcss@8.5.12)(typescript@5.6.3)(webpack@5.105.0(esbuild@0.28.0)(postcss@8.5.12))
+      postcss-loader: 8.1.1(postcss@8.5.12)(typescript@5.8.3)(webpack@5.105.0(esbuild@0.28.0)(postcss@8.5.12))
       resolve-url-loader: 5.0.0
       rxjs: 7.8.1
       sass: 1.85.0
@@ -4317,7 +4317,7 @@ snapshots:
       terser: 5.39.0
       tree-kill: 1.2.2
       tslib: 2.8.1
-      typescript: 5.6.3
+      typescript: 5.8.3
       webpack: 5.105.0(esbuild@0.28.0)(postcss@8.5.12)
       webpack-dev-middleware: 7.4.2(webpack@5.105.0(esbuild@0.28.0)(postcss@8.5.12))
       webpack-dev-server: 5.2.2(debug@4.4.3(supports-color@8.1.1))(supports-color@8.1.1)(webpack@5.105.0(esbuild@0.28.0)(postcss@8.5.12))
@@ -4385,12 +4385,12 @@ snapshots:
     transitivePeerDependencies:
       - chokidar
 
-  '@angular/build@19.2.27(@angular/compiler-cli@19.2.25(@angular/compiler@19.2.25)(supports-color@8.1.1)(typescript@5.6.3))(@angular/compiler@19.2.25)(@types/node@26.4.1)(chokidar@4.0.3)(jiti@1.21.7)(less@4.2.2)(postcss@8.5.12)(supports-color@8.1.1)(terser@5.39.0)(typescript@5.6.3)':
+  '@angular/build@19.2.27(@angular/compiler-cli@19.2.25(@angular/compiler@19.2.25)(supports-color@8.1.1)(typescript@5.8.3))(@angular/compiler@19.2.25)(@types/node@26.4.1)(chokidar@4.0.3)(jiti@1.21.7)(less@4.2.2)(postcss@8.5.12)(supports-color@8.1.1)(terser@5.39.0)(typescript@5.8.3)':
     dependencies:
       '@ampproject/remapping': 2.3.0
       '@angular-devkit/architect': 0.1902.27(chokidar@4.0.3)
       '@angular/compiler': 19.2.25
-      '@angular/compiler-cli': 19.2.25(@angular/compiler@19.2.25)(supports-color@8.1.1)(typescript@5.6.3)
+      '@angular/compiler-cli': 19.2.25(@angular/compiler@19.2.25)(supports-color@8.1.1)(typescript@5.8.3)
       '@babel/core': 7.26.10(supports-color@8.1.1)
       '@babel/helper-annotate-as-pure': 7.25.9
       '@babel/helper-split-export-declaration': 7.24.7
@@ -4414,7 +4414,7 @@ snapshots:
       semver: 7.7.1
       source-map-support: 0.5.21
       tslib: 2.8.1
-      typescript: 5.6.3
+      typescript: 5.8.3
       vite: 6.4.2(@types/node@26.4.1)(jiti@1.21.7)(less@4.2.2)(sass@1.85.0)(terser@5.39.0)
       watchpack: 2.4.2
     optionalDependencies:
@@ -4464,7 +4464,7 @@ snapshots:
       rxjs: 7.8.2
       tslib: 2.8.1
 
-  '@angular/compiler-cli@19.2.25(@angular/compiler@19.2.25)(supports-color@8.1.1)(typescript@5.6.3)':
+  '@angular/compiler-cli@19.2.25(@angular/compiler@19.2.25)(supports-color@8.1.1)(typescript@5.8.3)':
     dependencies:
       '@angular/compiler': 19.2.25
       '@babel/core': 7.26.9(supports-color@8.1.1)
@@ -4474,7 +4474,7 @@ snapshots:
       reflect-metadata: 0.2.2
       semver: 7.8.5
       tslib: 2.8.1
-      typescript: 5.6.3
+      typescript: 5.8.3
       yargs: 17.7.3
     transitivePeerDependencies:
       - supports-color
@@ -5793,10 +5793,10 @@ snapshots:
       '@napi-rs/nice-win32-x64-msvc': 1.1.1
     optional: true
 
-  '@ngtools/webpack@19.2.27(@angular/compiler-cli@19.2.25(@angular/compiler@19.2.25)(supports-color@8.1.1)(typescript@5.6.3))(typescript@5.6.3)(webpack@5.105.0(esbuild@0.28.0)(postcss@8.5.12))':
+  '@ngtools/webpack@19.2.27(@angular/compiler-cli@19.2.25(@angular/compiler@19.2.25)(supports-color@8.1.1)(typescript@5.8.3))(typescript@5.8.3)(webpack@5.105.0(esbuild@0.28.0)(postcss@8.5.12))':
     dependencies:
-      '@angular/compiler-cli': 19.2.25(@angular/compiler@19.2.25)(supports-color@8.1.1)(typescript@5.6.3)
-      typescript: 5.6.3
+      '@angular/compiler-cli': 19.2.25(@angular/compiler@19.2.25)(supports-color@8.1.1)(typescript@5.8.3)
+      typescript: 5.8.3
       webpack: 5.105.0(esbuild@0.28.0)(postcss@8.5.12)
 
   '@nodelib/fs.scandir@2.1.5':
@@ -6589,14 +6589,14 @@ snapshots:
 
   core-util-is@1.0.3: {}
 
-  cosmiconfig@9.0.2(typescript@5.6.3):
+  cosmiconfig@9.0.2(typescript@5.8.3):
     dependencies:
       env-paths: 2.2.1
       import-fresh: 3.3.1
       js-yaml: 4.3.2
       parse-json: 5.2.0
     optionalDependencies:
-      typescript: 5.6.3
+      typescript: 5.8.3
 
   cross-spawn@7.0.6:
     dependencies:
@@ -7767,9 +7767,9 @@ snapshots:
     dependencies:
       find-up: 6.3.0
 
-  postcss-loader@8.1.1(postcss@8.5.12)(typescript@5.6.3)(webpack@5.105.0(esbuild@0.28.0)(postcss@8.5.12)):
+  postcss-loader@8.1.1(postcss@8.5.12)(typescript@5.8.3)(webpack@5.105.0(esbuild@0.28.0)(postcss@8.5.12)):
     dependencies:
-      cosmiconfig: 9.0.2(typescript@5.6.3)
+      cosmiconfig: 9.0.2(typescript@5.8.3)
       jiti: 1.21.7
       postcss: 8.5.12
       semver: 7.7.1
@@ -8357,7 +8357,7 @@ snapshots:
 
   typed-assert@1.0.9: {}
 
-  typescript@5.6.3: {}
+  typescript@5.8.3: {}
 
   undici-types@8.3.0: {}
 
