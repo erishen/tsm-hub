@@ -46,11 +46,38 @@ Angular 19 的构建工具链，随 Angular 整体升级会一并消掉大半。
 - ✅ `node-forge` 1.4.0 → 1.4.3：自动开 **PR #16**，只改 `web/pnpm-lock.yaml`，
   CI 四个 job 全绿、可合并（**合并需单独授权**）。
 - ✅ `setup-go` / `sqlite` 等：自动 rebase，其中 sqlite PR #13 因 main 已升级被关闭。
-- ❌ `minimatch` in `/web`：run `43862960981` 报 `security_update_not_possible`
-  —— `latest-resolvable-version: 9.0.9`，`lowest-non-vulnerable-version: 11.0.1`。
-  隔了一个 major 且被 Angular 19 构建链约束，自动更新直接放弃。
+- ❌ `minimatch`：run `43862960981` / `43880562902` 报 `security_update_not_possible`
+  —— web 侧 `latest-resolvable-version: 9.0.9`，`lowest-non-vulnerable-version: 11.0.1`。
+  隔了一个 major 且被上游构建链约束，自动更新直接放弃。
 
-也就是说，剩下这些告警需要人工决策版本跃迁，GitHub 不会替你做。
+剩下这些告警需要人工决策版本跃迁，GitHub 不会替你做。
+
+### minimatch 专项（2026-11-17 起，配置已改、lock 待本机刷新）
+
+三条 open 告警同源于 `GHSA-g3hv-75wg-m249`（CVE-2026-118764，minimatch ReDoS，
+medium，修复版 11.0.1）：
+
+| alert | manifest | scope | 锁中版本 | 锁定链 |
+|-------|----------|-------|----------|--------|
+| #99 | `web/pnpm-lock.yaml` | development | 9.0.9 | `@tufjs/models` / `glob@10.4.5` / `ignore-walk@7.0.0`（均 `^9`） |
+| #55 | `web/pnpm-lock.yaml` | development | 2.1.4 | `brace-expansion`（minimatch 9 的下游，修复版 2.1.7） |
+| #5 | `mcp/package-lock.json` | runtime | 10.2.6 | MCP server 传递依赖 |
+
+**已落地的配置改动**（本仓已提交，锁文件尚未刷新）：
+
+- `web/package.json` → `pnpm.overrides.minimatch = 11.0.1`：强制覆盖三条 `^9` 链；
+  minimatch 11 只依赖 `brace-expansion@^5.0.12` 与 `@isaacs/nonrecursive-glob-match`，
+  升级后 #55 的 brace-expansion 2.1.4 随之消失。
+- `mcp/package.json` → npm 顶层 `overrides.minimatch = 11.0.1`。
+
+⚠️ **这不是刷锁**：`package.json` 声明了 override，但 `pnpm-lock.yaml` /
+`package-lock.json` 仍停在旧版本——中间态下 `dep-alerts` 仍会报这 3 条，属预期。
+必须按下方「本机操作」刷新锁后告警才会消除。**CI 不装前端/MCP 依赖**，故中间态
+不会让 CI 变红，但也不能代替本机验证。
+
+跨 major 注意：minimatch 11 的 `engines` 为 `18 || 20 || >=22`，其依赖
+`brace-expansion@5` 要求 Node 20+（本机 Node 22 满足）。上游锁的是 API 兼容的
+`^9`/`^10` 范围，强制到 11 后须以 `pnpm run build` 实测构建，不能只看告警数。
 
 ## 修复路线（按风险递增）
 
@@ -74,19 +101,26 @@ Angular 19 的构建工具链，随 Angular 整体升级会一并消掉大半。
 ```bash
 # web/：pnpm 是唯一依赖真相源
 cd web
-pnpm install --registry https://registry.npmmirror.com
-pnpm audit                 # 看剩余告警
-# 按第 2 档改完 package.json 后，再 pnpm install 刷新锁
+pnpm install --registry https://registry.npmmirror.com   # 会应用 pnpm.overrides.minimatch
+pnpm run build                                            # 跨 major 必做：验证前端仍能构建
+pnpm audit                                                # 看剩余告警
 
 # mcp/：npm 锁已跟踪（mcp/package-lock.json）
 cd ../mcp
-npm install --registry=https://registry.npmmirror.com
+npm install --registry=https://registry.npmmirror.com    # 会应用顶层 overrides.minimatch
 npm audit fix
 
 # 回仓根复核
-make check                 # 含 web-lock-check
-make dep-alerts            # 告警数应下降
+make check                 # 含 web-lock-check（会校验 tarball host）
+make dep-alerts            # 89 → 应至少少 3 条（#99/#55/#5）
 ```
+
+> **minimatch 专项提示**：`pnpm install` / `npm install` 会把 override 解析出的
+> 11.0.1 写进锁文件。若走镜像下载，`pnpm` 9 的 lockfile v9 不内嵌 tarball URL（无 host
+> 问题），但 npm 会把实际下载 URL 写进 `mcp/package-lock.json`——提交前必须把
+> `registry.npmmirror.com` 换回 `registry.npmjs.org`（只换 host，不动版本/integrity），
+> 否则 `web-lock-check` 会拦下。若 `pnpm run build` 因跨 major 失败，撤销
+> `web/package.json` 的 `pnpm.overrides` 后重新 `pnpm install` 即可回到稳定态。
 
 约束：
 

@@ -3,6 +3,9 @@
   "private": true,
   "version": "1.0.0",
   "description": "tsm-hub 网关预装的 MCP server 依赖（npm 系）",
+  "overrides": {
+    "minimatch": "11.0.1"
+  },
   "dependencies": {
     "@cyanheads/git-mcp-server": "^2.15.3",
     "@modelcontextprotocol/server-brave-search": "^0.6.2",

@@ -16,7 +16,10 @@
   "pnpm": {
     "onlyBuiltDependencies": [
       "esbuild"
-    ]
+    ],
+    "overrides": {
+      "minimatch": "11.0.1"
+    }
   },
   "dependencies": {
     "@angular/common": "^19.0.0",
