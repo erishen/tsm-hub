@@ -138,9 +138,13 @@ func (r *Router) Pick(model string, hasTools bool) ([]Candidate, error) {
 	// 全部在冷却、且没有健康/半开候选：挑最快恢复的那个做一次探测，
 	// 否则单 provider 场景会一直 502，永远等不到它恢复。
 	if len(healthy) == 0 && len(halfOpen) == 0 && len(cooling) > 0 {
-		sort.Slice(cooling, func(i, j int) bool {
-			return r.health.DownUntil(cooling[i].ProviderID).
-				Before(r.health.DownUntil(cooling[j].ProviderID))
+		sort.SliceStable(cooling, func(i, j int) bool {
+			di, dj := r.health.DownUntil(cooling[i].ProviderID),
+				r.health.DownUntil(cooling[j].ProviderID)
+			if !di.Equal(dj) {
+				return di.Before(dj)
+			}
+			return cooling[i].ProviderID < cooling[j].ProviderID
 		})
 		return r.order(cooling[:1], strategy), nil
 	}

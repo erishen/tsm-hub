@@ -53,7 +53,12 @@ func topTools(m map[string]int, n int) []string {
 	for k, v := range m {
 		all = append(all, kv{k, v})
 	}
-	sort.Slice(all, func(i, j int) bool { return all[i].v > all[j].v })
+	sort.SliceStable(all, func(i, j int) bool {
+		if all[i].v != all[j].v {
+			return all[i].v > all[j].v
+		}
+		return all[i].k < all[j].k
+	})
 	out := make([]string, 0, min(n, len(all)))
 	for i, it := range all {
 		if i >= n {

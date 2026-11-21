@@ -573,7 +573,12 @@ func (s *Store) ListKeys() []APIKey {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	out := append([]APIKey(nil), s.cfg.Keys...)
-	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
+	sort.SliceStable(out, func(i, j int) bool {
+		if !out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].CreatedAt.After(out[j].CreatedAt)
+		}
+		return out[i].ID < out[j].ID
+	})
 	return out
 }
 

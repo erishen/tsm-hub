@@ -178,7 +178,13 @@ func (s *Server) handleObservability(w http.ResponseWriter, r *http.Request) {
 	for sv, calls := range mcpCalls {
 		mcpStats = append(mcpStats, map[string]any{"server": sv, "calls": calls, "key_count": mcpKeys[sv]})
 	}
-	sort.Slice(mcpStats, func(i, j int) bool { return mcpStats[i]["calls"].(int) > mcpStats[j]["calls"].(int) })
+	sort.SliceStable(mcpStats, func(i, j int) bool {
+		ci, cj := mcpStats[i]["calls"].(int), mcpStats[j]["calls"].(int)
+		if ci != cj {
+			return ci > cj
+		}
+		return mcpStats[i]["server"].(string) < mcpStats[j]["server"].(string)
+	})
 	// 外部自创工具发现：客户端声明但不在网关目录里的工具（含录用状态）。
 	known := map[string]bool{}
 	for _, t := range s.proxy.ToolCatalog() {
@@ -220,16 +226,24 @@ func (s *Server) handleObservability(w http.ResponseWriter, r *http.Request) {
 			"skipped": failoverBy[id],
 		})
 	}
-	sort.Slice(provs, func(i, j int) bool {
-		return provs[i]["usage"].(aggView).Requests > provs[j]["usage"].(aggView).Requests
+	sort.SliceStable(provs, func(i, j int) bool {
+		ri, rj := provs[i]["usage"].(aggView).Requests, provs[j]["usage"].(aggView).Requests
+		if ri != rj {
+			return ri > rj
+		}
+		return provs[i]["id"].(string) < provs[j]["id"].(string)
 	})
 
 	scenes := make([]map[string]any, 0)
 	for sc, a := range s.rec.Scenes() {
 		scenes = append(scenes, map[string]any{"scene": sc, "usage": toAggView(a)})
 	}
-	sort.Slice(scenes, func(i, j int) bool {
-		return scenes[i]["usage"].(aggView).Requests > scenes[j]["usage"].(aggView).Requests
+	sort.SliceStable(scenes, func(i, j int) bool {
+		ri, rj := scenes[i]["usage"].(aggView).Requests, scenes[j]["usage"].(aggView).Requests
+		if ri != rj {
+			return ri > rj
+		}
+		return scenes[i]["scene"].(string) < scenes[j]["scene"].(string)
 	})
 
 	writeJSON(w, http.StatusOK, map[string]any{

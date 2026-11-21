@@ -598,8 +598,12 @@ func (s *Server) handleListExternalMcpCandidates(w http.ResponseWriter, r *http.
 		for name, calls := range tools {
 			toolList = append(toolList, map[string]any{"name": name, "calls": calls})
 		}
-		sort.Slice(toolList, func(i, j int) bool {
-			return toolList[i]["calls"].(int) > toolList[j]["calls"].(int)
+		sort.SliceStable(toolList, func(i, j int) bool {
+			ci, cj := toolList[i]["calls"].(int), toolList[j]["calls"].(int)
+			if ci != cj {
+				return ci > cj
+			}
+			return toolList[i]["name"].(string) < toolList[j]["name"].(string)
 		})
 		out = append(out, map[string]any{
 			"server": sv, "calls": serverCalls[sv], "key_count": serverKeys[sv],
@@ -607,8 +611,12 @@ func (s *Server) handleListExternalMcpCandidates(w http.ResponseWriter, r *http.
 			"suggested_command": knownMcpCommands[sv],
 		})
 	}
-	sort.Slice(out, func(i, j int) bool {
-		return out[i]["calls"].(int) > out[j]["calls"].(int)
+	sort.SliceStable(out, func(i, j int) bool {
+		ci, cj := out[i]["calls"].(int), out[j]["calls"].(int)
+		if ci != cj {
+			return ci > cj
+		}
+		return out[i]["server"].(string) < out[j]["server"].(string)
 	})
 	writeJSON(w, http.StatusOK, map[string]any{"candidates": out})
 }

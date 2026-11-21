@@ -253,7 +253,12 @@ func (l *Limiter) TopKeys(n int) []KeyUsage {
 	for k, v := range per {
 		out = append(out, KeyUsage{KeyID: k, Agg: v})
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].TotalTokens > out[j].TotalTokens })
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].TotalTokens != out[j].TotalTokens {
+			return out[i].TotalTokens > out[j].TotalTokens
+		}
+		return out[i].KeyID < out[j].KeyID
+	})
 	if n > 0 && len(out) > n {
 		out = out[:n]
 	}

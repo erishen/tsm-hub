@@ -256,7 +256,12 @@ func newID() string {
 // 实时计算（与请求路径的 CheckWarn 解耦），按使用率降序。
 func (s *Server) handleCostWarnings(w http.ResponseWriter, r *http.Request) {
 	warns := s.limiter.SnapshotWarnings(s.store.ListKeys())
-	sort.Slice(warns, func(i, j int) bool { return warns[i].Ratio > warns[j].Ratio })
+	sort.SliceStable(warns, func(i, j int) bool {
+		if warns[i].Ratio != warns[j].Ratio {
+			return warns[i].Ratio > warns[j].Ratio
+		}
+		return warns[i].KeyID < warns[j].KeyID
+	})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"warnings": warns,
 		"count":    len(warns),

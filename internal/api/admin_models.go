@@ -395,7 +395,10 @@ func (s *Server) handleModelRecommendations(w http.ResponseWriter, r *http.Reque
 			if matched[j].Free {
 				scoreJ += 100
 			}
-			return scoreI > scoreJ
+			if scoreI != scoreJ {
+				return scoreI > scoreJ
+			}
+			return matched[i].ID < matched[j].ID
 		})
 		// 取 top 3
 		if len(matched) > 3 {
