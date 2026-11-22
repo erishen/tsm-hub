@@ -190,6 +190,28 @@ groups:
           summary: "cicdkit-lume /metrics 抓取失败"
           description: "Prometheus 连续 3 分钟无法从 cicdkit-lume:18107/metrics/cicdkit 取到指标。检查容器是否存活、是否在 cicd-monitor 网络里（docker network inspect cicd-monitor）。"
 
+      # 控制面活着但执行面掉了：此时页面能开、任务能提交，全卡在 queued，
+      # 只靠上面的抓取告警发现不了（/metrics 由控制面自己吐）。
+      - alert: CicdkitLumeRunnerDown
+        expr: cicdkit_runner_up{job="cicdkit-lume"} == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "cicdkit-lume 的 runner 无响应"
+          description: "控制面 /api/health 里的 runner_ok=0 且持续 5 分钟：检查 cicdkit-runner 容器、RUNNER_AUTH 是否与控制面注入的一致、runner 8899 是否可达。"
+
+      # 有排队但 15 分钟没消化：要么 runner 并发被占满后卡死，要么 worker 没在
+      # 派发。正常情况下 queued 会在秒级被拉走，持续 15 分钟就值得看一眼。
+      - alert: CicdkitLumeQueueStuck
+        expr: cicdkit_queued_runs{job="cicdkit-lume"} > 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "cicdkit-lume 队列积压 {{ $value }} 个任务"
+          description: "queued 持续 15 分钟不为 0。核对 cicdkit_max_concurrent、正在跑的 run 是否卡在超时、runner 日志是否有拉取失败。"
+
       - alert: CicdkitBuildsSlow
         # p95 构建耗时 15 分钟持续 > 10 分钟。用直方图（而非窗口级 gauge）才能安全告警。
         expr: histogram_quantile(0.95, sum by (le) (rate(cicdkit_build_seconds_bucket[15m]))) > 600
