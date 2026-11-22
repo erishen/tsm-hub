@@ -9,7 +9,7 @@
 | 端口 | `127.0.0.1:10081` → 8080 | `127.0.0.1:18107` |
 | 指标 | `/metrics` | `/metrics/cicdkit`（`/metrics` 被 agent-httpd 占用） |
 | Prometheus job | `cicdkit` (`cicdkit:8080`) | `cicdkit-lume` (`cicdkit-lume:18107`) |
-| 告警 | `CicdkitDown` critical | `CicdkitLumeDown` warning（并行期不提级） |
+| 告警 | `CicdkitDown` critical | `CicdkitLumeDown` warning（并行期不提级）；另有 `CicdkitLumeRunnerDown`（runner 失联）与 `CicdkitLumeQueueStuck`（队列积压 15m） |
 | 数据库 | `data-docker/store.json` | `.data/store.db`（已导入 6 项目 / 200 运行 / 169 部署） |
 
 ## 下线前的依赖检查（已完成）
@@ -51,3 +51,5 @@
 
 - 旧入口 `10081` 是否需要给 lume 做端口映射保住老书签。
 - `CicdkitLumeDown` 何时从 warning 提级 critical（建议并行观察满两周后）。
+- `CicdkitLumeRunnerDown` / `CicdkitLumeQueueStuck` 目前都是 warning；切流后可考虑把 runner 失联提到 critical（控制面活着但执行面挂了，用户看到的是「任务全不动」）。
+- 归档保留 `CICD_ARCHIVE_KEEP`（默认 1000）与备份份数 `BACKUP_KEEP`（默认 14）按实际磁盘再调。
