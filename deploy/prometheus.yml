@@ -162,7 +162,7 @@ scrape_configs:
     # 口令由 cicdkit-lume 的 `make auth` 生成在 ~/.config/cicdkit-lume，
     # 这里只读挂进 /etc/prometheus/cicdkit-lume.pass，仓库里不落明文。
     basic_auth:
-      username: cicd
+      username_file: /etc/prometheus/cicdkit-lume.user
       password_file: /etc/prometheus/cicdkit-lume.pass
     static_configs:
       - targets: ["cicdkit-lume:18107"]

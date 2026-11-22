@@ -41,12 +41,13 @@
 
 ```yaml
     basic_auth:
-      username: cicd
+      username_file: /etc/prometheus/cicdkit-lume.user
       password_file: /etc/prometheus/cicdkit-lume.pass
 ```
 
-口令文件由 cicdkit-lume 的 `make auth` 生成，`docker-compose.yml` 只读挂载。
-换口令：`FORCE=1 make auth`，然后重建 cicdkit-lume 与 prometheus 两个栈。
+用户名/口令写在 cicdkit-lume 仓库的 `.env`（`CICDKIT_BASIC_USER` / `CICDKIT_BASIC_PASS`），
+`make auth` 生成 `username` / `prometheus.pass` 派生文件，`docker-compose.yml` 只读挂载。
+换凭据：改 `.env` 后重跑 `make docker`，再重建 prometheus。
 回滚认证：去掉 lume 的 `HTPASSWD_FILE`（Prometheus 多发的 Basic 头会被忽略，不用改）。
 
 ## 待定
