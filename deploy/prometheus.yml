@@ -151,6 +151,10 @@ scrape_configs:
   # 正式切换时把上面 job `cicdkit` 的 targets 改成 ["cicdkit-lume:18107"]、
   # metrics_path 改成 /metrics/cicdkit，即可删掉这个并行 job —— 面板与告警
   # 都按 job 名区分，改的时候记得同步 Grafana 面板的 job 过滤。
+  # 并行期：lume 自己一个 job，指标路径是 /metrics/cicdkit。
+  # 注意：如果给 cicdkit-lume 配上 HTPASSWD_FILE（Basic Auth 会连同 /metrics
+  # 一起保护），这个 job 必须加 basic_auth（password_file 指向 htpasswd 里的
+  # 明文口令或单独的密码文件），否则抓取会 401、up 变 0。
   - job_name: cicdkit-lume
     metrics_path: /metrics/cicdkit
     scheme: http

@@ -33,6 +33,20 @@
 
 `docker start cicdkit`，把第 1 步的 target 改回去再 reload。数据与挂载均未动。
 
+## 认证与指标
+
+`cicdkit-lume` 一旦配置 `HTPASSWD_FILE`，Basic Auth 会同时保护 `/metrics/cicdkit`
+（已用临时实例实测：不带认证 401，带认证 200）。那时必须给 Prometheus job 加：
+
+```yaml
+    basic_auth:
+      username: prometheus
+      password_file: /etc/prometheus/cicdkit-lume.pass
+```
+
+或者把 metrics 路径放到一个不做 Basic Auth 的反代后面。否则切流当天
+`up{job="cicdkit"}` 会直接掉到 0。
+
 ## 待定
 
 - 旧入口 `10081` 是否需要给 lume 做端口映射保住老书签。
