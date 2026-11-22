@@ -35,17 +35,19 @@
 
 ## 认证与指标
 
-`cicdkit-lume` 一旦配置 `HTPASSWD_FILE`，Basic Auth 会同时保护 `/metrics/cicdkit`
-（已用临时实例实测：不带认证 401，带认证 200）。那时必须给 Prometheus job 加：
+`cicdkit-lume` 现在**已启用** Basic Auth：`cicdkit-lume` 的 compose 把
+`~/.config/cicdkit-lume/htpasswd` 只读挂到 `/auth/htpasswd`，健康检查带同一份
+`health-header`。本仓 Prometheus 已配：
 
 ```yaml
     basic_auth:
-      username: prometheus
+      username: cicd
       password_file: /etc/prometheus/cicdkit-lume.pass
 ```
 
-或者把 metrics 路径放到一个不做 Basic Auth 的反代后面。否则切流当天
-`up{job="cicdkit"}` 会直接掉到 0。
+口令文件由 cicdkit-lume 的 `make auth` 生成，`docker-compose.yml` 只读挂载。
+换口令：`FORCE=1 make auth`，然后重建 cicdkit-lume 与 prometheus 两个栈。
+回滚认证：去掉 lume 的 `HTPASSWD_FILE`（Prometheus 多发的 Basic 头会被忽略，不用改）。
 
 ## 待定
 

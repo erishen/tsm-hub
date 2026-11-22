@@ -158,6 +158,12 @@ scrape_configs:
   - job_name: cicdkit-lume
     metrics_path: /metrics/cicdkit
     scheme: http
+    # lume 开了 Basic Auth（HTPASSWD_FILE）后 /metrics/cicdkit 也要认证。
+    # 口令由 cicdkit-lume 的 `make auth` 生成在 ~/.config/cicdkit-lume，
+    # 这里只读挂进 /etc/prometheus/cicdkit-lume.pass，仓库里不落明文。
+    basic_auth:
+      username: cicd
+      password_file: /etc/prometheus/cicdkit-lume.pass
     static_configs:
       - targets: ["cicdkit-lume:18107"]
         labels:

@@ -198,6 +198,8 @@ services:
     volumes:
       - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./deploy/prometheus.rules.yml:/etc/prometheus/prometheus.rules.yml:ro
+      # cicdkit-lume 的 Basic Auth 口令（由另一仓库的 `make auth` 生成）。
+      - ${HOME}/.config/cicdkit-lume/prometheus.pass:/etc/prometheus/cicdkit-lume.pass:ro
       - prometheus-data:/prometheus
     command:
       - --config.file=/etc/prometheus/prometheus.yml
