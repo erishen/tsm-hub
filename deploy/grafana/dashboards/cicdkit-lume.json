@@ -8,7 +8,7 @@
   ],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "editable": true,
   "refresh": "30s",
   "time": {
@@ -556,6 +556,188 @@
           "refId": "A",
           "expr": "cicdkit_probe_total{job=\"cicdkit-lume\"}",
           "legendFormat": "{{result}}"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "排队中 (queued)",
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 0,
+        "y": 20
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "cicdkit_queued_runs{job=\"cicdkit-lume\"}",
+          "legendFormat": "queued"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "Runner 在线",
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 8,
+        "y": 20
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "min": 0,
+          "max": 1,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "DOWN",
+                  "color": "red",
+                  "index": 0
+                },
+                "1": {
+                  "text": "UP",
+                  "color": "green",
+                  "index": 1
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "cicdkit_runner_up{job=\"cicdkit-lume\"}",
+          "legendFormat": "runner"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "type": "stat",
+      "title": "归档运行数",
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 16,
+        "y": 20
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "cicdkit_archive_runs{job=\"cicdkit-lume\"}",
+          "legendFormat": "archive"
         }
       ]
     }

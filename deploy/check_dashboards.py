@@ -99,9 +99,29 @@ def check_cicdkit(doc: dict) -> None:
         assert "rate(" in expr, "panel %s misses rate() over buckets" % pid
 
 
+def check_cicdkit_lume(doc: dict) -> None:
+    """并行期的 lume 面板：job 必须锁死，新增的队列/runner/归档指标必须在场。"""
+    panels = doc.get("panels", [])
+    ids = [p["id"] for p in panels]
+    assert doc.get("uid") == "cicdkit-lume", "uid must be cicdkit-lume"
+    assert len(ids) == len(set(ids)), "duplicate panel ids"
+    assert len(ids) >= 13, "queue/runner/archive panels missing"
+    for pid, expr in expressions(doc):
+        assert 'job="cicdkit-lume"' in expr, "panel %s misses job filter" % pid
+        assert "tsm_hub_" not in expr, "panel %s queries tsm_hub_*" % pid
+        for gauge in WINDOW_GAUGES:
+            assert not re.search(
+                r"rate\(\s*cicdkit_" + gauge, expr
+            ), "panel %s applies rate() to window-level gauge %s" % (pid, gauge)
+    exprs = " ".join(e for _, e in expressions(doc))
+    for metric in ("cicdkit_queued_runs", "cicdkit_runner_up", "cicdkit_archive_runs"):
+        assert metric in exprs, "metric not wired into panels: " + metric
+
+
 CHECKS = {
     "tsm-hub.json": check_tsm_hub,
     "cicdkit.json": check_cicdkit,
+    "cicdkit-lume.json": check_cicdkit_lume,
 }
 
 
