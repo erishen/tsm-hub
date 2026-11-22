@@ -180,6 +180,16 @@ groups:
           summary: "cicdkit /metrics 抓取失败"
           description: "Prometheus 连续 3 分钟无法从 cicdkit:8080/metrics 取到指标（经共享网络 cicd-monitor）。检查 cicdkit 容器是否存活、是否已加入 cicd-monitor 网络（docker network inspect cicd-monitor）。"
 
+      # 并行期：lume 侧独立告警（先 warning，正式切换后再提级）。
+      - alert: CicdkitLumeDown
+        expr: up{job="cicdkit-lume"} == 0 or absent(up{job="cicdkit-lume"})
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "cicdkit-lume /metrics 抓取失败"
+          description: "Prometheus 连续 3 分钟无法从 cicdkit-lume:18107/metrics/cicdkit 取到指标。检查容器是否存活、是否在 cicd-monitor 网络里（docker network inspect cicd-monitor）。"
+
       - alert: CicdkitBuildsSlow
         # p95 构建耗时 15 分钟持续 > 10 分钟。用直方图（而非窗口级 gauge）才能安全告警。
         expr: histogram_quantile(0.95, sum by (le) (rate(cicdkit_build_seconds_bucket[15m]))) > 600

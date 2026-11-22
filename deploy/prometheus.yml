@@ -145,3 +145,17 @@ scrape_configs:
         labels:
           service: cicdkit
           env: local
+  # ===== cicdkit-lume（并行期：Lume 控制面 + 薄 runner）=====
+  # 指标名/标签枚举/桶边界与上游完全一致，唯一差别是路径：
+  # lume 的 agent-httpd 硬编码占用 /metrics，控制面指标在 /metrics/cicdkit。
+  # 正式切换时把上面 job `cicdkit` 的 targets 改成 ["cicdkit-lume:18107"]、
+  # metrics_path 改成 /metrics/cicdkit，即可删掉这个并行 job —— 面板与告警
+  # 都按 job 名区分，改的时候记得同步 Grafana 面板的 job 过滤。
+  - job_name: cicdkit-lume
+    metrics_path: /metrics/cicdkit
+    scheme: http
+    static_configs:
+      - targets: ["cicdkit-lume:18107"]
+        labels:
+          service: cicdkit-lume
+          env: local
